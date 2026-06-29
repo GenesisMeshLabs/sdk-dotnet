@@ -33,26 +33,32 @@ jobs:
       - name: Pack
         run: dotnet pack src/GenesisMesh.Sdk/GenesisMesh.Sdk.csproj --no-build --configuration Release --output ./artifacts
 
-      - name: Get NuGet API key from Trusted Publisher (OIDC)
-        id: nuget-auth
-        run: |
-          # Step 1 — get GitHub OIDC token scoped to api.nuget.org
-          OIDC_TOKEN=$(curl -sS \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api.nuget.org" \
-            | jq -r .value)
+      - name: Obtain GitHub OIDC token (audience api.nuget.org)
+        id: oidc
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('api.nuget.org');
+            core.setSecret(token);
+            core.setOutput('token', token);
 
-          # Step 2 — exchange with NuGet for a scoped temporary API key
+      - name: Exchange OIDC token for NuGet scoped API key
+        id: nuget-auth
+        env:
+          OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
+        run: |
           RESPONSE=$(curl -sS -X POST \
             -H "Authorization: Bearer $OIDC_TOKEN" \
             -H "Content-Type: application/json" \
             "https://api.nuget.org/v1/authentication/authenticate")
 
-          API_KEY=$(echo "$RESPONSE" | jq -r '.token // .key // empty')
+          echo "NuGet auth HTTP response (masked key): $(echo "$RESPONSE" | jq -r 'to_entries | map(if .key == "token" or .key == "key" then .key + ": [MASKED]" else .key + ": " + (.value | tostring) end) | .[]' 2>/dev/null || echo "$RESPONSE")"
 
-          if [ -z "$API_KEY" ]; then
-            echo "NuGet auth response: $RESPONSE" >&2
-            echo "Failed to obtain NuGet API key from OIDC exchange" >&2
+          API_KEY=$(echo "$RESPONSE" | jq -r '.token // .key // empty' 2>/dev/null)
+
+          if [ -z "$API_KEY" ] || [ "$API_KEY" = "null" ]; then
+            echo "Failed to obtain NuGet API key. Full response:" >&2
+            echo "$RESPONSE" >&2
             exit 1
           fi
 
