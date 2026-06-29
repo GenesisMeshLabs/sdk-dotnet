@@ -33,19 +33,35 @@ jobs:
       - name: Pack
         run: dotnet pack src/GenesisMesh.Sdk/GenesisMesh.Sdk.csproj --no-build --configuration Release --output ./artifacts
 
-      - name: Get NuGet OIDC token
-        id: oidc
+      - name: Get NuGet API key from Trusted Publisher (OIDC)
+        id: nuget-auth
         run: |
-          TOKEN=$(curl -sS \
+          # Step 1 — get GitHub OIDC token scoped to api.nuget.org
+          OIDC_TOKEN=$(curl -sS \
             -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api.nuget.org" \
-            | jq .value -r)
-          echo "::add-mask::$TOKEN"
-          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+            | jq -r .value)
+
+          # Step 2 — exchange with NuGet for a scoped temporary API key
+          RESPONSE=$(curl -sS -X POST \
+            -H "Authorization: Bearer $OIDC_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.nuget.org/v1/authentication/authenticate")
+
+          API_KEY=$(echo "$RESPONSE" | jq -r '.token // .key // empty')
+
+          if [ -z "$API_KEY" ]; then
+            echo "NuGet auth response: $RESPONSE" >&2
+            echo "Failed to obtain NuGet API key from OIDC exchange" >&2
+            exit 1
+          fi
+
+          echo "::add-mask::$API_KEY"
+          echo "apikey=$API_KEY" >> "$GITHUB_OUTPUT"
 
       - name: Push to NuGet
         run: >
           dotnet nuget push ./artifacts/*.nupkg
           --source https://api.nuget.org/v3/index.json
-          --api-key ${{ steps.oidc.outputs.token }}
+          --api-key ${{ steps.nuget-auth.outputs.apikey }}
           --skip-duplicate
