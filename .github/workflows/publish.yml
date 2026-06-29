@@ -42,33 +42,14 @@ jobs:
             core.setSecret(token);
             core.setOutput('token', token);
 
-      - name: Exchange OIDC token for NuGet scoped API key
-        id: nuget-auth
-        env:
-          OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
-        run: |
-          RESPONSE=$(curl -sS -X POST \
-            -H "Authorization: Bearer $OIDC_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{}' \
-            "https://api.nuget.org/v1/authentication/authenticate")
-
-          echo "NuGet auth HTTP response (masked key): $(echo "$RESPONSE" | jq -r 'to_entries | map(if .key == "token" or .key == "key" then .key + ": [MASKED]" else .key + ": " + (.value | tostring) end) | .[]' 2>/dev/null || echo "$RESPONSE")"
-
-          API_KEY=$(echo "$RESPONSE" | jq -r '.token // .key // empty' 2>/dev/null)
-
-          if [ -z "$API_KEY" ] || [ "$API_KEY" = "null" ]; then
-            echo "Failed to obtain NuGet API key. Full response:" >&2
-            echo "$RESPONSE" >&2
-            exit 1
-          fi
-
-          echo "::add-mask::$API_KEY"
-          echo "apikey=$API_KEY" >> "$GITHUB_OUTPUT"
-
+      # NuGet Trusted Publishing: the OIDC JWT is used directly as the API key.
+      # NuGet.org validates the JWT against the trusted publisher policy configured
+      # at https://www.nuget.org/account/profile under "Trusted Publishers".
       - name: Push to NuGet
+        env:
+          NUGET_TOKEN: ${{ steps.oidc.outputs.token }}
         run: >
           dotnet nuget push ./artifacts/*.nupkg
           --source https://api.nuget.org/v3/index.json
-          --api-key ${{ steps.nuget-auth.outputs.apikey }}
+          --api-key "$NUGET_TOKEN"
           --skip-duplicate
