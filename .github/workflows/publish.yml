@@ -50,6 +50,7 @@ jobs:
           RESPONSE=$(curl -sS -X POST \
             -H "Authorization: Bearer $OIDC_TOKEN" \
             -H "Content-Type: application/json" \
+            -d '{}' \
             "https://api.nuget.org/v1/authentication/authenticate")
 
           echo "NuGet auth HTTP response (masked key): $(echo "$RESPONSE" | jq -r 'to_entries | map(if .key == "token" or .key == "key" then .key + ": [MASKED]" else .key + ": " + (.value | tostring) end) | .[]' 2>/dev/null || echo "$RESPONSE")"
