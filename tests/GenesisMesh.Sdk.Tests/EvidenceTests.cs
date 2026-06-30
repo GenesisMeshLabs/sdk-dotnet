@@ -54,9 +54,9 @@ public class EvidenceTests
     public async Task Build_WrapsDecisionInDecisionKey()
     {
         string? bodyJson = null;
-        using var handler = new FuncHandler(async req =>
+        using var handler = new FuncHandler(req =>
         {
-            bodyJson = await req.Content!.ReadAsStringAsync();
+            bodyJson = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             var json = JsonSerializer.Serialize(
                 new TrustEvidence { EvidenceId = "ev-2", Verdict = "block" },
                 Auth.SerializerOptions);

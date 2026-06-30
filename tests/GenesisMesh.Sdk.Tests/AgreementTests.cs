@@ -98,9 +98,9 @@ public class AgreementTests
     public async Task Accept_WrapsOfferAndReturnsAgreementRecord()
     {
         string? bodyJson = null;
-        using var handler = new FuncHandler(async req =>
+        using var handler = new FuncHandler(req =>
         {
-            bodyJson = await req.Content!.ReadAsStringAsync();
+            bodyJson = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             var json = JsonSerializer.Serialize(
                 new AgreementRecord { AgreementId = "agr-1", Status = "active" },
                 Auth.SerializerOptions);
