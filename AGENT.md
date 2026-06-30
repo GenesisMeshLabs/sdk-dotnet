@@ -201,3 +201,10 @@ When acting as an AI coding agent in this repository:
    field, prerequisite call), add it to the "Known constraints" table in this
    file AND cover it with a negative test.
 8. Confirm before destructive operations. Approval once does not generalize.
+9. Identify which Phase 2 goal the change supports (external operator onboarding,
+   Atlas integration, RFC ratification, conformance validation).
+10. To validate .NET SDK output against the protocol reference, run the
+    conformance test harness at `genesismesh/conformance/` in the main repo:
+    `python conformance/runner.py --sdk dotnet` after generating vectors with
+    `python conformance/generate_vectors.py`. The vectors define the canonical
+    wire format that all SDK implementations must match.
