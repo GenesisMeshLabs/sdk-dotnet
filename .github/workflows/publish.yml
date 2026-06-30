@@ -33,11 +33,6 @@ jobs:
       - name: Pack
         run: dotnet pack src/GenesisMesh.Sdk/GenesisMesh.Sdk.csproj --no-build --configuration Release --output ./artifacts
 
-      # Upload the .nupkg so it can be downloaded if the push step fails.
-      # First-time NuGet push via trusted publishing requires the package to
-      # already exist on nuget.org. Download the artifact and upload manually
-      # at https://www.nuget.org/packages/manage/upload — after that, all
-      # future pushes will go through trusted publishing automatically.
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -54,11 +49,16 @@ jobs:
             core.setSecret(token);
             core.setOutput('token', token);
 
-      - name: Push to NuGet (Trusted Publishing)
+      # NUGET_API_KEY is only needed for the very first push that creates the
+      # package on NuGet.org. Once the package exists, remove the secret and
+      # trusted publishing (OIDC) handles all future versions automatically.
+      - name: Push to NuGet
         env:
-          NUGET_TOKEN: ${{ steps.oidc.outputs.token }}
+          NUGET_OIDC: ${{ steps.oidc.outputs.token }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
+          KEY="${NUGET_API_KEY:-$NUGET_OIDC}"
           dotnet nuget push ./artifacts/*.nupkg \
             --source https://api.nuget.org/v3/index.json \
-            --api-key "$NUGET_TOKEN" \
+            --api-key "$KEY" \
             --skip-duplicate
