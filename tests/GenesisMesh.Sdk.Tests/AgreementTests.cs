@@ -143,7 +143,7 @@ public class AgreementTests
                     "{\"error\":{\"message\":\"not found\",\"code\":\"NOT_FOUND\"}}",
                     Encoding.UTF8, "application/json"),
             });
-        await Assert.ThrowsAsync<GenesisMeshException>(() =>
+        await Assert.ThrowsAsync<NotFoundException>(() =>
             AdminClient(handler).Agreement.Offer(new CapabilityOffer
             {
                 ResponderSovereignId = "NA-B",
