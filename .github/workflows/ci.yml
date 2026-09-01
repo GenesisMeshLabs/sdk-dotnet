@@ -21,6 +21,10 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      - name: Verify release version
+        shell: pwsh
+        run: ./scripts/check-version.ps1
+
       - name: Build
         run: dotnet build --no-restore --configuration Release
 

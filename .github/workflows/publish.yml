@@ -24,6 +24,10 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      - name: Verify release tag matches package version
+        shell: pwsh
+        run: ./scripts/check-version.ps1 -ReleaseTag "${{ github.ref_name }}"
+
       - name: Build
         run: dotnet build --no-restore --configuration Release
 

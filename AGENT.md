@@ -175,8 +175,12 @@ Every public method must have:
 
 ## Release process
 
-This SDK follows the same release process as the main Python repo. Every
-version shipped must:
+This SDK follows the same release process as the main Python repo. Starting
+with v0.56.0, the core and all official SDKs use one coordinated version. The
+`VERSION` file, project package version, and release tag must match. Run
+`./scripts/check-version.ps1` before building or publishing.
+
+Every version shipped must:
 
 1. Pass `dotnet build` and `dotnet test`.
 2. Have a CHANGELOG entry.
