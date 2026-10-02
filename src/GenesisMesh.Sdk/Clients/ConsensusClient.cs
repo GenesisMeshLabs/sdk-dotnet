@@ -24,6 +24,6 @@ public sealed class ConsensusClient
     /// Verifies a consensus proof and threshold (public route).
     /// POST /consensus/verify
     /// </summary>
-    public Task<VerifyResult> Verify(IDictionary<string, object?> body, CancellationToken ct = default) =>
-        _t.PublicPostAsync<VerifyResult>("/consensus/verify", body, ct);
+    public Task<ConsensusVerification> Verify(IDictionary<string, object?> body, CancellationToken ct = default) =>
+        _t.PublicPostAsync<ConsensusVerification>("/consensus/verify", body, ct);
 }

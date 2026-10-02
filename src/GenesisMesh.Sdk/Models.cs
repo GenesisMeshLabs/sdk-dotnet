@@ -246,48 +246,95 @@ public sealed class CapabilityMembershipProof
 
 // ── Consensus ─────────────────────────────────────────────────────────────────
 
-/// <summary>Returned by POST /admin/consensus/vote.</summary>
+/// <summary>
+/// A validator's signed vote on a JustificationProof (Python <c>ValidatorVote</c>), returned by
+/// POST /admin/consensus/vote. Pass it back unchanged when assembling a proof: every field is signed.
+/// </summary>
 public sealed class ConsensusVote
 {
     [JsonPropertyName("vote_id")]
-    public string      VoteId      { get; set; } = "";
+    public string      VoteId               { get; set; } = "";
 
-    [JsonPropertyName("proposal_id")]
-    public string      ProposalId  { get; set; } = "";
+    [JsonPropertyName("proof_id")]
+    public string      ProofId              { get; set; } = "";
 
-    [JsonPropertyName("validator_id")]
-    public string      ValidatorId { get; set; } = "";
+    [JsonPropertyName("decision_id")]
+    public string      DecisionId           { get; set; } = "";
 
-    [JsonPropertyName("decision")]
-    public string      Decision    { get; set; } = "";
+    [JsonPropertyName("validator_sovereign_id")]
+    public string      ValidatorSovereignId { get; set; } = "";
+
+    /// <summary>True approves, false rejects.</summary>
+    [JsonPropertyName("vote")]
+    public bool        Vote                 { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string?     Reason               { get; set; }
+
+    [JsonPropertyName("voted_at")]
+    public string      VotedAt              { get; set; } = "";
+
+    /// <summary>Binds the vote to the validator's view of the proof (v0.38); required on approve votes.</summary>
+    [JsonPropertyName("context_digest")]
+    public string?     ContextDigest        { get; set; }
 
     [JsonPropertyName("signature")]  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement Signature    { get; set; }
-
-    [JsonPropertyName("cast_at")]
-    public string      CastAt      { get; set; } = "";
+    public JsonElement Signature            { get; set; }
 }
 
-/// <summary>Returned by POST /admin/consensus/proof.</summary>
+/// <summary>
+/// K-of-N approval over a JustificationProof, signed by the assembler (Python <c>ConsensusProof</c>).
+/// Returned by POST /admin/consensus/proof.
+/// </summary>
 public sealed class ConsensusProof
 {
+    [JsonPropertyName("consensus_id")]
+    public string               ConsensusId             { get; set; } = "";
+
     [JsonPropertyName("proof_id")]
-    public string             ProofId      { get; set; } = "";
+    public string               ProofId                 { get; set; } = "";
 
-    [JsonPropertyName("proposal_id")]
-    public string             ProposalId   { get; set; } = "";
+    [JsonPropertyName("decision_id")]
+    public string               DecisionId              { get; set; } = "";
 
-    [JsonPropertyName("threshold")]
-    public int                Threshold    { get; set; }
+    /// <summary>K: distinct named validators that must approve.</summary>
+    [JsonPropertyName("required_threshold")]
+    public int                  RequiredThreshold       { get; set; }
+
+    [JsonPropertyName("validator_sovereign_ids")]
+    public IList<string>        ValidatorSovereignIds   { get; set; } = [];
 
     [JsonPropertyName("votes")]
-    public IList<ConsensusVote> Votes      { get; set; } = [];
+    public IList<ConsensusVote> Votes                   { get; set; } = [];
 
-    [JsonPropertyName("signature")]         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement          Signature  { get; set; }
+    [JsonPropertyName("reached_at")]
+    public string               ReachedAt               { get; set; } = "";
 
-    [JsonPropertyName("assembled_at")]
-    public string               AssembledAt { get; set; } = "";
+    [JsonPropertyName("expires_at")]
+    public string               ExpiresAt               { get; set; } = "";
+
+    [JsonPropertyName("cascade_assessment_digest")]
+    public string?              CascadeAssessmentDigest { get; set; }
+
+    [JsonPropertyName("signature")]  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement          Signature               { get; set; }
+}
+
+/// <summary>
+/// Returned by POST /consensus/verify. Reason is one of valid, missing_signature,
+/// invalid_assembler_signature, threshold_not_met, invalid_vote_signature, unknown_validator_key,
+/// vote_not_in_validator_set, expired, proof_id_mismatch, cascade_detected, missing_context_digest.
+/// </summary>
+public sealed class ConsensusVerification
+{
+    [JsonPropertyName("valid")]
+    public bool    Valid       { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string  Reason      { get; set; } = "";
+
+    [JsonPropertyName("consensus_id")]
+    public string? ConsensusId { get; set; }
 }
 
 // ── Data Usage ────────────────────────────────────────────────────────────────
