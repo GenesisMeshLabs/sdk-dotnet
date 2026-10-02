@@ -177,6 +177,36 @@ var dv2 = await client.DataUsage.Verify(new Dictionary<string, object?>
 });
 ```
 
+## Offline verification
+
+From 0.61.0 the SDK verifies Network Authority records locally, using
+canonical JSON and Ed25519 only, without calling the NA. The reason codes are
+the Python reference's. Pass the JSON text as received.
+
+```csharp
+var a = OfflineVerifier.VerifyAgreement(agreementJson, new[] { offererKey }, new[] { responderKey });
+// a.Accepted, a.Reason: "accepted", "invalid_offerer_signature", "graph_digest_mismatch", ...
+
+var d = OfflineVerifier.VerifyBoundaryDecision(decisionJson, new DecisionVerifyOptions
+{
+    OperatorPublicKeys = new[] { naPublicKey },
+    ExpectedPolicies = new[] { policyJson },   // the decision must bind exactly these versions
+    ExpectedAttestation = attestationJson,     // optional
+});
+// d.Accepted (verified), d.Authorized (ALLOW or DENY), d.Reason
+
+bool ok = OfflineVerifier.VerifyDataLicensePolicySignature(policyJson, new[] { licensorKey });
+var v = OfflineVerifier.VerifyDataAccessIntent(intentJson, policyJson, new[] { agentKey });
+// v.Valid, v.ViolationReason, v.Violations
+```
+
+An accepted DENY has `Accepted` true and `Authorized` false: the decision
+verified, and it denies. Revocation is not checked offline. `Canonical.FromJson`
+and the `OfflineVerifier` digest helpers reproduce the reference forms. The
+verifiers pass the shared `interop` conformance vectors
+(`tests/GenesisMesh.Sdk.Tests/testdata/conformance/interop.json`), and the
+core's cross-language scenario runs them against a live NA.
+
 ## Raw admin calls
 
 For NA routes not yet covered by a sub-client (e.g. `/admin/recognition-treaties`), use `Auth.BuildAdminHeaders` directly:
