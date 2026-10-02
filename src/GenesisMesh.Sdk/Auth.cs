@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using NSec.Cryptography;
@@ -17,46 +16,16 @@ public static class Auth
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    private static readonly JsonSerializerOptions _noEscapeOptions = new()
-    {
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
-
     /// <summary>
-    /// Produces deterministic JSON matching Python's
-    /// json.dumps(value, sort_keys=True, separators=(",",":")).
-    /// Object keys are sorted; strings are not HTML-escaped (&lt; &gt; &amp; kept as-is).
+    /// Canonical JSON of a .NET value, byte-identical to Python's
+    /// json.dumps(value, sort_keys=True, separators=(",",":")) of what the NA parses
+    /// (see <see cref="Canonical"/>). Used for admin request signatures.
     /// </summary>
     public static byte[] CanonicalJson(object? value)
     {
         var json = JsonSerializer.Serialize(value, SerializerOptions);
         using var doc = JsonDocument.Parse(json);
-        return Encoding.UTF8.GetBytes(WriteCanonical(doc.RootElement));
-    }
-
-    private static string WriteCanonical(JsonElement e) => e.ValueKind switch
-    {
-        JsonValueKind.Object => WriteObject(e),
-        JsonValueKind.Array  => WriteArray(e),
-        JsonValueKind.String => JsonSerializer.Serialize(e.GetString()!, _noEscapeOptions),
-        JsonValueKind.Number => e.GetRawText(),
-        JsonValueKind.True   => "true",
-        JsonValueKind.False  => "false",
-        _                    => "null",
-    };
-
-    private static string WriteObject(JsonElement e)
-    {
-        var parts = e.EnumerateObject()
-            .OrderBy(p => p.Name, StringComparer.Ordinal)
-            .Select(p => $"{JsonSerializer.Serialize(p.Name, _noEscapeOptions)}:{WriteCanonical(p.Value)}");
-        return "{" + string.Join(",", parts) + "}";
-    }
-
-    private static string WriteArray(JsonElement e)
-    {
-        var parts = e.EnumerateArray().Select(WriteCanonical);
-        return "[" + string.Join(",", parts) + "]";
+        return Encoding.UTF8.GetBytes(Canonical.Of(doc.RootElement));
     }
 
     /// <summary>

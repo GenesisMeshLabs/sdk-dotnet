@@ -7,6 +7,29 @@ Versions align with the [Genesis Mesh release sequence](https://github.com/Genes
 
 ---
 
+## [0.61.0] - 2026-10-02
+
+Coordinated Genesis Mesh v0.61.0 release: the cross-language interoperability
+proof. The core's interop scenario uses this SDK to verify data access intents
+signed by the TypeScript SDK.
+
+### Added
+
+- `OfflineVerifier`: `VerifyAgreement`, `VerifyBoundaryDecision` (signature,
+  expiry, freshness proof, policy and attestation bindings),
+  `VerifyDataLicensePolicySignature` and `VerifyDataAccessIntent`, with the
+  reason codes of the Python reference, plus `PolicyDigest`,
+  `AttestationDigest` and `PolicySetDigest`.
+- `Canonical`: Python-compatible canonical JSON.
+- The shared `interop` conformance vectors (25), all passing.
+
+### Fixed
+
+- Canonical JSON for admin requests now matches Python's: non-ASCII text and
+  DEL escaped as `ensure_ascii` does, keys ordered by code point, floats in
+  Python's repr (`90.0` kept), integers kept exactly. Bodies with such values
+  were rejected by the NA.
+
 ## [0.60.0] - 2026-10-01
 
 Coordinated Genesis Mesh v0.60.0 release. No functional changes; the core adds

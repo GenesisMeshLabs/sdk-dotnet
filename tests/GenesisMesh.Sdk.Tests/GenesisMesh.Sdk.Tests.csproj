@@ -16,6 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="testdata/**/*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\GenesisMesh.Sdk\GenesisMesh.Sdk.csproj" />
   </ItemGroup>
 </Project>
