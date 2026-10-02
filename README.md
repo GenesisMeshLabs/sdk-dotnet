@@ -122,24 +122,35 @@ var dv = await client.Disclosure.Verify(new Dictionary<string, object?> { ["proo
 
 ### Consensus
 
+Validators vote on a justification proof: the `justification_proof` returned
+with a decision by `POST /admin/boundary/evaluate` (see Raw admin calls). Pass
+votes and proofs back unchanged; every field is covered by a signature.
+
 ```csharp
-// Cast a validator vote (admin)
+// Cast a validator vote, signed by the NA as validator (admin)
 var vote = await client.Consensus.Vote(new Dictionary<string, object?>
 {
-    ["proposal_id"] = "prop-1",
-    ["decision"]    = "approve",
-    ["reason"]      = "evidence satisfactory",
+    ["justification_proof"] = justificationProof,
+    ["vote"]                = true,
+    ["reason"]              = "evidence satisfactory",
 });
 
-// Assemble a consensus proof (admin)
+// Assemble a K-of-N consensus proof (admin)
 var cp = await client.Consensus.Proof(new Dictionary<string, object?>
 {
-    ["proposal_id"] = "prop-1",
-    ["threshold"]   = 1,
+    ["justification_proof"]     = justificationProof,
+    ["votes"]                   = new[] { vote },
+    ["required_threshold"]      = 1,
+    ["validator_sovereign_ids"] = new[] { vote.ValidatorSovereignId },
 });
 
-// Verify the consensus proof (no auth required)
-var cv = await client.Consensus.Verify(new Dictionary<string, object?> { ["proof"] = cp });
+// Verify against the validators' keys (no auth required)
+var cv = await client.Consensus.Verify(new Dictionary<string, object?>
+{
+    ["proof"]                 = cp,
+    ["validator_public_keys"] = new Dictionary<string, string> { [vote.ValidatorSovereignId] = validatorPublicKey },
+});
+// cv.Valid, cv.Reason ("valid", "threshold_not_met", "invalid_vote_signature", ...)
 ```
 
 ### DataUsage

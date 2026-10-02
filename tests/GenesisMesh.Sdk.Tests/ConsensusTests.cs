@@ -34,10 +34,11 @@ public class ConsensusTests
             var json = JsonSerializer.Serialize(
                 new ConsensusVote
                 {
-                    VoteId     = "vote-1",
-                    ProposalId = "prop-42",
-                    Decision   = "approve",
-                    CastAt     = "2026-06-30T00:00:00.000Z",
+                    VoteId               = "vote-1",
+                    ProofId              = "jp-42",
+                    ValidatorSovereignId = "ALPHA",
+                    Vote                 = true,
+                    VotedAt              = "2026-06-30T00:00:00Z",
                 },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.Created)
@@ -46,10 +47,10 @@ public class ConsensusTests
             };
         });
         var vote = await AdminClient(handler).Consensus.Vote(
-            new Dictionary<string, object?> { ["proposal_id"] = "prop-42", ["decision"] = "approve" });
+            new Dictionary<string, object?> { ["justification_proof"] = new { proof_id = "jp-42" }, ["vote"] = true });
         Assert.Equal("vote-1", vote.VoteId);
-        Assert.Equal("prop-42", vote.ProposalId);
-        Assert.Equal("approve", vote.Decision);
+        Assert.Equal("jp-42", vote.ProofId);
+        Assert.True(vote.Vote);
     }
 
     [Fact]
@@ -60,7 +61,7 @@ public class ConsensusTests
         {
             capturedKeyId = req.Headers.GetValues("X-Admin-Key-Id").FirstOrDefault();
             var json = JsonSerializer.Serialize(
-                new ConsensusVote { VoteId = "vote-1", ProposalId = "prop-1", Decision = "approve" },
+                new ConsensusVote { VoteId = "vote-1", ProofId = "jp-1", Vote = true },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.Created)
             {
@@ -68,7 +69,7 @@ public class ConsensusTests
             };
         });
         await AdminClient(handler).Consensus.Vote(
-            new Dictionary<string, object?> { ["proposal_id"] = "prop-1", ["decision"] = "approve" });
+            new Dictionary<string, object?> { ["justification_proof"] = new { proof_id = "jp-1" }, ["vote"] = true });
         Assert.Equal("test-key", capturedKeyId);
     }
 
@@ -77,14 +78,14 @@ public class ConsensusTests
     {
         var votes = new[]
         {
-            new ConsensusVote { VoteId = "v1", ProposalId = "prop-1", Decision = "approve" },
-            new ConsensusVote { VoteId = "v2", ProposalId = "prop-1", Decision = "approve" },
+            new ConsensusVote { VoteId = "v1", ProofId = "proof-1", Vote = true },
+            new ConsensusVote { VoteId = "v2", ProofId = "proof-1", Vote = true },
         };
         using var handler = new FuncHandler(req =>
         {
             Assert.Equal("/admin/consensus/proof", req.RequestUri!.PathAndQuery);
             var json = JsonSerializer.Serialize(
-                new ConsensusProof { ProofId = "proof-1", ProposalId = "prop-1", Threshold = 2, Votes = votes },
+                new ConsensusProof { ConsensusId = "con-1", ProofId = "proof-1", RequiredThreshold = 2, Votes = votes },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.Created)
             {
@@ -94,12 +95,13 @@ public class ConsensusTests
         var proof = await AdminClient(handler).Consensus.Proof(
             new Dictionary<string, object?>
             {
-                ["proposal_id"] = "prop-1",
-                ["votes"]       = votes,
-                ["threshold"]   = 2,
+                ["justification_proof"]     = new { proof_id = "proof-1" },
+                ["votes"]                   = votes,
+                ["required_threshold"]      = 2,
+                ["validator_sovereign_ids"] = new[] { "A", "B" },
             });
         Assert.Equal("proof-1", proof.ProofId);
-        Assert.Equal(2, proof.Threshold);
+        Assert.Equal(2, proof.RequiredThreshold);
         Assert.Equal(2, proof.Votes.Count);
     }
 
@@ -109,7 +111,7 @@ public class ConsensusTests
         using var handler = new FuncHandler(req =>
         {
             Assert.Equal("/consensus/verify", req.RequestUri!.PathAndQuery);
-            var json = JsonSerializer.Serialize(new VerifyResult { Valid = true }, Auth.SerializerOptions);
+            var json = "{\"valid\":true,\"reason\":\"valid\",\"consensus_id\":\"con-1\"}";
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, new MediaTypeHeaderValue("application/json")),
@@ -118,6 +120,29 @@ public class ConsensusTests
         var result = await PublicClient(handler).Consensus.Verify(
             new Dictionary<string, object?> { ["proof"] = new { } });
         Assert.True(result.Valid);
+        Assert.Equal("valid", result.Reason);
+        Assert.Equal("con-1", result.ConsensusId);
+    }
+
+    /// <summary>
+    /// A real Python-signed ConsensusProof deserializes into the typed models and serializes
+    /// back to the same canonical JSON: no field is lost or renamed, so votes and proofs can be
+    /// passed back to the NA and their signatures still verify.
+    /// </summary>
+    [Fact]
+    public void Types_RoundTrip_A_Python_Signed_Proof()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "consensus.json");
+        using var suite = JsonDocument.Parse(File.ReadAllText(path));
+        var original = suite.RootElement.GetProperty("vectors")[0].GetProperty("input").GetProperty("proof");
+        var proof = original.Deserialize<ConsensusProof>()!;
+        Assert.NotEmpty(proof.Votes);
+        Assert.All(proof.Votes, v =>
+        {
+            Assert.NotNull(v.ContextDigest);
+            Assert.Equal(JsonValueKind.Object, v.Signature.ValueKind);
+        });
+        Assert.Equal(Canonical.Of(original), Canonical.FromJson(JsonSerializer.Serialize(proof)));
     }
 
     [Fact]
@@ -132,7 +157,7 @@ public class ConsensusTests
             });
         var ex = await Assert.ThrowsAsync<ValidationException>(() =>
             AdminClient(handler).Consensus.Vote(
-                new Dictionary<string, object?> { ["proposal_id"] = "p", ["decision"] = "invalid" }));
+                new Dictionary<string, object?> { ["vote"] = "invalid" }));
         Assert.Equal(422, ex.Status);
     }
 }
