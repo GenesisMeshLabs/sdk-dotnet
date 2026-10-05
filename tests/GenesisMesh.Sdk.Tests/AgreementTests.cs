@@ -14,6 +14,7 @@ public class AgreementTests
         {
             BaseUrl     = "http://localhost",
             SigningKey   = TestHelpers.ZeroSeedB64,
+            Audience = "TEST",
             KeyId        = "test-key",
             HttpHandler  = h,
         });
@@ -102,7 +103,12 @@ public class AgreementTests
         {
             bodyJson = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             var json = JsonSerializer.Serialize(
-                new AgreementRecord { AgreementId = "agr-1", Status = "active" },
+                new
+                {
+                    agreement_id   = "agr-1",
+                    agreed_terms   = new { capabilities = new[] { "read" } },
+                    established_at = "2026-07-01T12:00:00+00:00",
+                },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.Created)
             {
@@ -112,7 +118,11 @@ public class AgreementTests
         var offer = new OfferRecord { OfferId = "off-1" };
         var agr   = await AdminClient(handler).Agreement.Accept(offer);
         Assert.Equal("agr-1", agr.AgreementId);
-        Assert.Equal("active", agr.Status);
+        Assert.Equal("2026-07-01T12:00:00+00:00", agr.EstablishedAt);
+#pragma warning disable CS0618 // the obsolete names are filled from the NA's fields
+        Assert.Equal(new[] { "read" }, agr.Capabilities);
+        Assert.Equal(agr.EstablishedAt, agr.CreatedAt);
+#pragma warning restore CS0618
         Assert.Contains("\"offer\"", bodyJson);
     }
 

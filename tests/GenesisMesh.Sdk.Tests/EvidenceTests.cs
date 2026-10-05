@@ -14,6 +14,7 @@ public class EvidenceTests
         {
             BaseUrl     = "http://localhost",
             SigningKey   = TestHelpers.ZeroSeedB64,
+            Audience = "TEST",
             KeyId        = "test-key",
             HttpHandler  = h,
         });

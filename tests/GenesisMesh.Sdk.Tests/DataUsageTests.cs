@@ -14,6 +14,7 @@ public class DataUsageTests
         {
             BaseUrl     = "http://localhost",
             SigningKey   = TestHelpers.ZeroSeedB64,
+            Audience = "TEST",
             KeyId        = "test-key",
             HttpHandler  = h,
         });
@@ -32,11 +33,13 @@ public class DataUsageTests
         {
             Assert.Equal("/admin/data-usage/policy", req.RequestUri!.PathAndQuery);
             var json = JsonSerializer.Serialize(
-                new DataLicensePolicy
+                new
                 {
-                    PolicyId        = "pol-1",
-                    AllowedPurposes = ["analytics", "training"],
-                    IssuedAt        = "2026-06-30T00:00:00.000Z",
+                    policy_id             = "pol-1",
+                    licensor_sovereign_id = "NA-LOCAL",
+                    licensee_sovereign_id = "NA-PARTNER",
+                    allowed_access_types  = new[] { "read", "aggregate" },
+                    valid_from            = "2026-06-30T00:00:00.000Z",
                 },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.Created)
@@ -47,10 +50,19 @@ public class DataUsageTests
         var pol = await AdminClient(handler).DataUsage.CreatePolicy(
             new Dictionary<string, object?>
             {
-                ["allowed_purposes"] = new[] { "analytics", "training" },
+                ["licensee_sovereign_id"] = "NA-PARTNER",
+                ["allowed_source_ids"]    = new[] { "src-1" },
+                ["allowed_access_types"]  = new[] { "read", "aggregate" },
+                ["valid_from"]            = "2026-06-30T00:00:00.000Z",
+                ["valid_until"]           = "2026-07-30T00:00:00.000Z",
             });
         Assert.Equal("pol-1", pol.PolicyId);
-        Assert.Contains("analytics", pol.AllowedPurposes!);
+        Assert.Contains("aggregate", pol.AllowedAccessTypes);
+        Assert.Equal("NA-LOCAL", pol.LicensorSovereignId);
+#pragma warning disable CS0618 // the obsolete names are filled from the NA's fields
+        Assert.Equal("NA-LOCAL", pol.LocalSovereignId);
+        Assert.Equal(pol.ValidFrom, pol.IssuedAt);
+#pragma warning restore CS0618
     }
 
     [Fact]
@@ -114,7 +126,7 @@ public class DataUsageTests
             Assert.Equal(HttpMethod.Get, req.Method);
             Assert.Equal("/data-usage/policy", req.RequestUri!.PathAndQuery);
             var json = JsonSerializer.Serialize(
-                new DataLicensePolicy { PolicyId = "pol-active", AllowedPurposes = ["analytics"] },
+                new { policy_id = "pol-active", allowed_access_types = new[] { "read" } },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -123,7 +135,7 @@ public class DataUsageTests
         });
         var pol = await PublicClient(handler).DataUsage.GetPolicy();
         Assert.Equal("pol-active", pol.PolicyId);
-        Assert.Contains("analytics", pol.AllowedPurposes!);
+        Assert.Contains("read", pol.AllowedAccessTypes);
     }
 
     [Fact]

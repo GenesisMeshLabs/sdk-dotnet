@@ -86,13 +86,17 @@ string LoadNaPublicKey(string path)
     return root.GetProperty("public_key").GetString()!;
 }
 
+// The NA's public key: the audience every admin signature names. Set below,
+// once the genesis block is read.
+var audience = "";
+
 // Raw admin helper — returns deserialized JSON as Dictionary
 var _http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
 
 async Task<Dictionary<string, JsonElement>> AdminPostRaw(
     string path, object body, byte[] seed)
 {
-    var headers = Auth.BuildAdminHeaders(body, KeyId, seed);
+    var headers = Auth.BuildAdminHeaders(new AdminRequest("POST", path, audience, body), KeyId, seed);
     var json    = JsonSerializer.Serialize(body, Auth.SerializerOptions);
     using var req = new HttpRequestMessage(HttpMethod.Post, NaUrl + path)
     {
@@ -112,7 +116,7 @@ async Task<Dictionary<string, JsonElement>> AdminPostRaw(
 
 async Task AdminPost(string path, object body, byte[] seed)
 {
-    var headers = Auth.BuildAdminHeaders(body, KeyId, seed);
+    var headers = Auth.BuildAdminHeaders(new AdminRequest("POST", path, audience, body), KeyId, seed);
     var json    = JsonSerializer.Serialize(body, Auth.SerializerOptions);
     using var req = new HttpRequestMessage(HttpMethod.Post, NaUrl + path)
     {
@@ -141,6 +145,7 @@ Console.WriteLine($"NA: {NaUrl}  network: {Network}");
 
 var seed      = Auth.LoadSeed(LoadSeed(keyFile));
 var naPubKey  = LoadNaPublicKey(genesisFile);
+audience      = naPubKey;
 var now       = DateTime.UtcNow;
 var oneYear   = now.AddDays(365);
 string Ts(DateTime d) => d.ToString("yyyy-MM-ddTHH:mm:ss.fff") + "Z";

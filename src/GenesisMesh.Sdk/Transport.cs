@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace GenesisMesh;
 
@@ -11,6 +12,8 @@ internal sealed class Transport : IDisposable
     private readonly string     _baseUrl;
     private readonly byte[]?    _seed;
     private readonly string     _keyId;
+    private readonly SemaphoreSlim _audienceLock = new(1, 1);
+    private string?             _audience;
 
     internal Transport(ClientOptions opts)
     {
@@ -22,6 +25,42 @@ internal sealed class Transport : IDisposable
 
         if (!string.IsNullOrEmpty(opts.SigningKey))
             _seed = Auth.LoadSeed(opts.SigningKey);
+        _audience = string.IsNullOrEmpty(opts.Audience) ? null : opts.Audience;
+    }
+
+    /// <summary>The NA's public key for admin signatures, read once from /sovereign.json.</summary>
+    private async Task<string> AudienceAsync(CancellationToken ct)
+    {
+        if (_audience is not null) return _audience;
+        await _audienceLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_audience is null)
+            {
+                var meta = await DoAsync<SovereignMetadata>(HttpMethod.Get, "/sovereign.json", null, null, ct).ConfigureAwait(false);
+                var key = meta?.NetworkAuthority?.PublicKey;
+                if (string.IsNullOrEmpty(key))
+                    throw new InvalidOperationException("genesismesh: /sovereign.json has no network_authority.public_key");
+                _audience = key;
+            }
+            return _audience;
+        }
+        finally
+        {
+            _audienceLock.Release();
+        }
+    }
+
+    private sealed class SovereignMetadata
+    {
+        [JsonPropertyName("network_authority")]
+        public AuthorityMetadata? NetworkAuthority { get; set; }
+    }
+
+    private sealed class AuthorityMetadata
+    {
+        [JsonPropertyName("public_key")]
+        public string? PublicKey { get; set; }
     }
 
     internal async Task<T> AdminPostAsync<T>(string path, object? body, CancellationToken ct = default)
@@ -29,7 +68,8 @@ internal sealed class Transport : IDisposable
         if (_seed is null)
             throw new InvalidOperationException($"genesismesh: signing key required for admin route {path}");
 
-        var headers = Auth.BuildAdminHeaders(body, _keyId, _seed);
+        var request = new AdminRequest("POST", path, await AudienceAsync(ct).ConfigureAwait(false), body);
+        var headers = Auth.BuildAdminHeaders(request, _keyId, _seed);
         return await DoAsync<T>(HttpMethod.Post, path, body, headers, ct).ConfigureAwait(false);
     }
 
@@ -38,7 +78,8 @@ internal sealed class Transport : IDisposable
         if (_seed is null)
             throw new InvalidOperationException($"genesismesh: signing key required for admin route {path}");
 
-        var headers = Auth.BuildAdminHeaders(body, _keyId, _seed);
+        var request = new AdminRequest("POST", path, await AudienceAsync(ct).ConfigureAwait(false), body);
+        var headers = Auth.BuildAdminHeaders(request, _keyId, _seed);
         await DoAsync<object?>(HttpMethod.Post, path, body, headers, ct).ConfigureAwait(false);
     }
 
@@ -95,5 +136,9 @@ internal sealed class Transport : IDisposable
         }
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        _http.Dispose();
+        _audienceLock.Dispose();
+    }
 }

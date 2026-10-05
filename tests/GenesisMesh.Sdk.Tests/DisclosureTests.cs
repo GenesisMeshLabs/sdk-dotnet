@@ -14,6 +14,7 @@ public class DisclosureTests
         {
             BaseUrl     = "http://localhost",
             SigningKey   = TestHelpers.ZeroSeedB64,
+            Audience = "TEST",
             KeyId        = "test-key",
             HttpHandler  = h,
         });
@@ -32,11 +33,11 @@ public class DisclosureTests
         {
             Assert.Equal("/admin/disclosure/commit", req.RequestUri!.PathAndQuery);
             var json = JsonSerializer.Serialize(
-                new CapabilityCommitment
+                new
                 {
-                    CommitmentId = "cmt-1",
-                    MerkleRoot   = "abc123",
-                    IssuedAt     = "2026-06-30T00:00:00.000Z",
+                    commitment_id = "cmt-1",
+                    merkle_root   = "abc123",
+                    committed_at  = "2026-06-30T00:00:00.000Z",
                 },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.Created)
@@ -96,11 +97,11 @@ public class DisclosureTests
         {
             Assert.Equal("/disclosure/prove", req.RequestUri!.PathAndQuery);
             var json = JsonSerializer.Serialize(
-                new CapabilityMembershipProof
+                new
                 {
-                    CommitmentId = "cmt-1",
-                    Capability   = "read:data",
-                    LeafHash     = "hash-abc",
+                    commitment_id       = "cmt-1",
+                    revealed_capability = "read:data",
+                    leaf_hash           = "hash-abc",
                 },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.OK)
@@ -111,7 +112,10 @@ public class DisclosureTests
         var proof = await PublicClient(handler).Disclosure.Prove(
             new Dictionary<string, object?> { ["commitment_id"] = "cmt-1", ["capability"] = "read:data" });
         Assert.Equal("cmt-1", proof.CommitmentId);
+        Assert.Equal("read:data", proof.RevealedCapability);
+#pragma warning disable CS0618 // the obsolete names are filled from the NA's fields
         Assert.Equal("read:data", proof.Capability);
+#pragma warning restore CS0618
         Assert.Equal("hash-abc", proof.LeafHash);
     }
 
