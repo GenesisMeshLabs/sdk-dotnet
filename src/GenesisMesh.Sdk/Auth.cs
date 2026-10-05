@@ -52,26 +52,55 @@ public static class Auth
         }
     }
 
+    /// <summary>The admin signature format this SDK produces (Genesis Mesh 1.0.2).</summary>
+    public const int AdminSignatureVersion = 2;
+
     /// <summary>
-    /// Computes the four X-Admin-* request headers for a signed admin request.
-    /// <para>
-    /// The signature covers canonicalJSON({body, key_id, nonce, timestamp}).
-    /// </para>
+    /// The canonical bytes an operator signs for <paramref name="request"/>
+    /// (signature version 2): {v, method, path, query, audience, body, key_id, timestamp, nonce}.
     /// </summary>
-    public static AdminHeaders BuildAdminHeaders(object? body, string keyId, byte[] seed)
+    public static byte[] AdminSigningPayload(AdminRequest request, string keyId, string timestamp, string nonce)
     {
-        var timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fff") + "Z";
-        var nonce     = Guid.NewGuid().ToString();
+        // A decoded path may itself contain '?' (from %3F); query parameters go in Query.
+        if (!request.Path.StartsWith('/'))
+            throw new ArgumentException("Admin request path must start with '/'.", nameof(request));
+
+        var query = new Dictionary<string, object?>();
+        if (request.Query is not null)
+            foreach (var (name, values) in request.Query)
+                query[name] = values.ToList();
 
         var payload = new Dictionary<string, object?>
         {
-            ["body"]      = body,
+            ["v"]         = AdminSignatureVersion,
+            ["method"]    = request.Method.ToUpperInvariant(),
+            ["path"]      = request.Path,
+            ["query"]     = query,
+            ["audience"]  = request.Audience,
+            ["body"]      = request.Body ?? new Dictionary<string, object?>(),
             ["key_id"]    = keyId,
-            ["nonce"]     = nonce,
             ["timestamp"] = timestamp,
+            ["nonce"]     = nonce,
         };
+        return CanonicalJson(payload);
+    }
 
-        var canonical = CanonicalJson(payload);
+    /// <summary>
+    /// Computes the four X-Admin-* request headers for one admin request.
+    /// <para>
+    /// The signature (version 2) binds the HTTP method, the request path, the
+    /// query parameters, the target NA's public key and the body.
+    /// <paramref name="timestamp"/> and <paramref name="nonce"/> may be fixed
+    /// to reproduce a signature (tests and conformance vectors).
+    /// </para>
+    /// </summary>
+    public static AdminHeaders BuildAdminHeaders(
+        AdminRequest request, string keyId, byte[] seed, string? timestamp = null, string? nonce = null)
+    {
+        timestamp ??= DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fff") + "Z";
+        nonce     ??= Guid.NewGuid().ToString();
+
+        var canonical = AdminSigningPayload(request, keyId, timestamp, nonce);
         var sig       = SignatureAlgorithm.Ed25519.Sign(
             Key.Import(SignatureAlgorithm.Ed25519, seed, KeyBlobFormat.RawPrivateKey),
             canonical);
@@ -85,6 +114,19 @@ public static class Auth
         };
     }
 }
+
+/// <summary>
+/// What an admin signature binds (signature version 2, Genesis Mesh 1.0.2): the
+/// HTTP method, the path the NA serves (decoded, without the query string),
+/// the target NA's public key (network_authority.public_key in its /sovereign.json), the
+/// JSON body (null signs {}) and the query parameters as sent.
+/// </summary>
+public sealed record AdminRequest(
+    string Method,
+    string Path,
+    string Audience,
+    object? Body = null,
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? Query = null);
 
 /// <summary>The four X-Admin-* headers used to authenticate admin API requests.</summary>
 public sealed class AdminHeaders

@@ -14,6 +14,7 @@ public class BoundaryTests
         {
             BaseUrl     = "http://localhost",
             SigningKey   = TestHelpers.ZeroSeedB64,
+            Audience = "TEST",
             KeyId        = "test-key",
             HttpHandler  = h,
         });
@@ -32,7 +33,7 @@ public class BoundaryTests
         {
             Assert.Equal("/admin/boundary/decide", req.RequestUri!.PathAndQuery);
             var json = JsonSerializer.Serialize(
-                new BoundaryDecision { DecisionId = "dec-1", Allowed = true, Reason = "capability matched" },
+                new { decision_id = "dec-1", authorized = true, denial_reason = (string?)null },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -42,8 +43,11 @@ public class BoundaryTests
         var dec = await AdminClient(handler).Boundary.Decide(
             new Dictionary<string, object?> { ["requested_capability"] = "read:data" });
         Assert.Equal("dec-1", dec.DecisionId);
+        Assert.True(dec.Authorized);
+        Assert.Null(dec.DenialReason);
+#pragma warning disable CS0618 // the obsolete names are filled from the NA's fields
         Assert.True(dec.Allowed);
-        Assert.Equal("capability matched", dec.Reason);
+#pragma warning restore CS0618
     }
 
     [Fact]
@@ -54,7 +58,7 @@ public class BoundaryTests
         {
             capturedKeyId = req.Headers.GetValues("X-Admin-Key-Id").FirstOrDefault();
             var json = JsonSerializer.Serialize(
-                new BoundaryDecision { DecisionId = "dec-1", Allowed = false },
+                new { decision_id = "dec-1", authorized = false, denial_reason = "no agreement" },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {

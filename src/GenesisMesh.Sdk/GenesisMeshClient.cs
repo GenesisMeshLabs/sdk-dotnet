@@ -65,6 +65,13 @@ public sealed class ClientOptions
     /// <summary>Key identifier sent in X-Admin-Key-Id (required for admin routes).</summary>
     public string? KeyId      { get; set; }
 
+    /// <summary>
+    /// The NA's public key, which admin signatures name as their audience
+    /// (signature version 2). When unset it is read once from /sovereign.json
+    /// (network_authority.public_key).
+    /// </summary>
+    public string? Audience   { get; set; }
+
     /// <summary>HTTP request timeout. Defaults to 10 s.</summary>
     public TimeSpan Timeout   { get; set; }
 

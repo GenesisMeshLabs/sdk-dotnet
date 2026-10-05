@@ -90,7 +90,7 @@ public class AuthTests
     public void BuildAdminHeaders_ReturnsAllFourHeaders()
     {
         var seed = Auth.LoadSeed(TestHelpers.ZeroSeedB64);
-        var h    = Auth.BuildAdminHeaders(new { }, "key-1", seed);
+        var h    = Auth.BuildAdminHeaders(new AdminRequest("POST", "/admin/invite", "TEST", new { }), "key-1", seed);
         Assert.Equal("key-1", h.KeyId);
         Assert.False(string.IsNullOrEmpty(h.Signature));
         Assert.False(string.IsNullOrEmpty(h.Timestamp));
@@ -101,7 +101,7 @@ public class AuthTests
     public void BuildAdminHeaders_TimestampEndsWithZ()
     {
         var seed = Auth.LoadSeed(TestHelpers.ZeroSeedB64);
-        var h    = Auth.BuildAdminHeaders(new { }, "k", seed);
+        var h    = Auth.BuildAdminHeaders(new AdminRequest("POST", "/admin/invite", "TEST", new { }), "k", seed);
         Assert.EndsWith("Z", h.Timestamp);
     }
 }
@@ -179,6 +179,7 @@ public class AgreementClientTests
         {
             BaseUrl     = "http://localhost",
             SigningKey   = TestHelpers.ZeroSeedB64,
+            Audience = "TEST",
             KeyId        = "test",
             HttpHandler  = handler,
         });
@@ -238,6 +239,7 @@ public class EvidenceClientTests
         {
             BaseUrl     = "http://localhost",
             SigningKey   = TestHelpers.ZeroSeedB64,
+            Audience = "TEST",
             KeyId        = "test",
             HttpHandler  = handler,
         });
@@ -264,7 +266,7 @@ public class BoundaryClientTests
         {
             Assert.Equal("/admin/boundary/decide", req.RequestUri!.PathAndQuery);
             var json = JsonSerializer.Serialize(
-                new BoundaryDecision { DecisionId = "dec-1", Allowed = true },
+                new { decision_id = "dec-1", authorized = true },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -275,12 +277,13 @@ public class BoundaryClientTests
         {
             BaseUrl     = "http://localhost",
             SigningKey   = TestHelpers.ZeroSeedB64,
+            Audience = "TEST",
             KeyId        = "test",
             HttpHandler  = handler,
         });
         var dec = await client.Boundary.Decide(
             new Dictionary<string, object?> { ["requested_capability"] = "read:data" });
-        Assert.True(dec.Allowed);
+        Assert.True(dec.Authorized);
     }
 }
 
@@ -302,6 +305,7 @@ public class HttpErrorTests
         {
             BaseUrl     = "http://localhost",
             SigningKey   = TestHelpers.ZeroSeedB64,
+            Audience = "TEST",
             KeyId        = "test",
             HttpHandler  = handler,
         });
