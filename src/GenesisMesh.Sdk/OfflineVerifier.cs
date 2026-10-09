@@ -167,6 +167,8 @@ public static class OfflineVerifier
         using var doc = JsonDocument.Parse(agreementJson);
         var a = doc.RootElement;
         var id = Str(a, "agreement_id");
+        // v1.2.0: a field this SDK does not know is refused by name (StrictFields).
+        if (StrictFields.UnknownFields("AgreementRecord", a).Count > 0) return new(false, "unknown_field", id);
         var sigs = SignaturesOf(a).ToList();
         if (sigs.Count == 0) return new(false, "missing_offerer_signature", id);
         var canonical = Canonical.OfKeys(a, AgreementCanonicalKeys);
@@ -190,6 +192,13 @@ public static class OfflineVerifier
         var decisionId = Str(d, "decision_id");
         DecisionVerificationResult Result(bool accepted, string reason, bool auth) => new(accepted, reason, auth, decisionId);
         DecisionVerificationResult Reject(string reason) => Result(false, reason, authorized);
+
+        // v1.2.0: a field this SDK does not know is refused by name (StrictFields).
+        if (StrictFields.UnknownFields("BoundaryDecision", d).Count > 0
+            || (options.ExpectedPolicies ?? Array.Empty<string>()).Any(p => StrictFields.UnknownFields("BoundaryPolicy", p).Count > 0)
+            || (options.ExpectedAttestation is not null
+                && StrictFields.UnknownFields("MembershipAttestation", options.ExpectedAttestation).Count > 0))
+            return Reject("unknown_field");
 
         var sig = SignatureOf(d);
         if (sig is null) return Reject("missing_signature");
@@ -277,6 +286,7 @@ public static class OfflineVerifier
     public static bool VerifyDataLicensePolicySignature(string policyJson, IReadOnlyList<string> licensorPublicKeys)
     {
         using var doc = JsonDocument.Parse(policyJson);
+        if (StrictFields.UnknownFields("DataLicensePolicy", doc.RootElement).Count > 0) return false;
         var sig = SignatureOf(doc.RootElement);
         return sig is not null && VerifyEd25519(Canonical.Of(doc.RootElement, Signature), sig, licensorPublicKeys);
     }
@@ -296,6 +306,10 @@ public static class OfflineVerifier
         var t = at ?? DateTimeOffset.UtcNow;
         static DataIntentVerificationResult Fail(List<DataUsageViolationResult> v) => new(false, v[0].ViolationType, v);
 
+        var unknown = StrictFields.UnknownFields("DataAccessIntent", intent)
+            .Concat(StrictFields.UnknownFields("DataLicensePolicy", policy).Select(f => "policy." + f)).ToList();
+        if (unknown.Count > 0)
+            return Fail(new() { new("intent_exceeds_license", "Unknown field: " + string.Join(", ", unknown)) });
         var sig = SignatureOf(intent);
         if (sig is null) return Fail(new() { new("intent_exceeds_license", "Missing intent signature") });
         if (!VerifyEd25519(Canonical.Of(intent, Signature), sig, agentPublicKeys))

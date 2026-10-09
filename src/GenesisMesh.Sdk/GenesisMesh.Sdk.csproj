@@ -28,6 +28,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- v1.2.0: the field registry of signed records (StrictFields.cs). -->
+    <EmbeddedResource Include="canonical_registry.json" LogicalName="GenesisMesh.canonical_registry.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
   </ItemGroup>
 </Project>
