@@ -27,8 +27,25 @@ Versions align with the [Genesis Mesh release sequence](https://github.com/Genes
   are not. Free-form fields (`claims`, `scope`, `execution_parameters`, ...)
   stay open.
 
+- **Records are valid only in their canonical form.**
+  `OfflineVerifier.VerifyBoundaryDecision` and `VerifyAgreement` refuse a
+  record signed over a timestamp the reference does not write (`+00:00`
+  rather than `Z`, a fraction `.000`) as `non_canonical_form`;
+  `VerifyDataLicensePolicySignature` returns false; an intent check reports
+  `Not in canonical form: intent` or `...: policy`. Records the NA signs are
+  always canonical.
+- **JSON is read strictly.** The verifiers, `Canonical.FromJson` and every
+  client response refuse JSON every implementation would not read alike with
+  `StrictJsonException`, whose `Reason` is `duplicate_key` (which
+  `JsonDocument` kept twice), `non_finite_number` (`1e400`),
+  `integer_out_of_range` (beyond 64 bits), `negative_zero`, `lone_surrogate`
+  or `invalid_json`.
+
 ### Added
 
+- `StrictJson` (`Check`, `Parse`), `StrictJsonException` and
+  `StrictFields.CanonicalTimestamp`; the shared conformance suite
+  `canonical`.
 - `StrictFields.UnknownFields(model, record)`;
   `python scripts/sync_canonical_registry.py` regenerates the embedded
   registry from a new copy of the suite.

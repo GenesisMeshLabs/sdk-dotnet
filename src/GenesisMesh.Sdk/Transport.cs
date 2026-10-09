@@ -131,6 +131,8 @@ internal sealed class Transport : IDisposable
             if (typeof(T) == typeof(object) || string.IsNullOrWhiteSpace(raw))
                 return default!;
 
+            // v1.2.0: refuse JSON every implementation would not read alike.
+            StrictJson.Check(raw);
             return JsonSerializer.Deserialize<T>(raw, Auth.SerializerOptions)
                 ?? throw new InvalidOperationException("genesismesh: empty response");
         }

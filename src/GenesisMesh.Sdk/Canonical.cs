@@ -16,7 +16,8 @@ public static class Canonical
     /// <summary>Canonical form of a JSON document given as text.</summary>
     public static string FromJson(string json)
     {
-        using var doc = JsonDocument.Parse(json);
+        // v1.2.0: JSON every implementation would not read alike is refused (StrictJsonException).
+        using var doc = StrictJson.Parse(json);
         return Of(doc.RootElement);
     }
 
