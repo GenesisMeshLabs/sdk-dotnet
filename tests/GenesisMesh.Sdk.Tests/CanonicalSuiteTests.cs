@@ -86,4 +86,20 @@ public class CanonicalSuiteTests
 
     [Fact]
     public void FloatUnderflowIsZero() => Assert.Equal("[0.0]", Canonical.FromJson("[1e-400]"));
+
+    [Fact]
+    public void BytesMustBeUtf8AndAByteOrderMarkIsRefused()
+    {
+        Assert.Equal("invalid_json", Assert.Throws<StrictJsonException>(() => StrictJson.DecodeUtf8(new byte[] { 0x7b, 0xff, 0x7d })).Reason);
+        var withMark = StrictJson.DecodeUtf8(new byte[] { 0xef, 0xbb, 0xbf, 0x7b, 0x7d });
+        Assert.Equal("\ufeff{}", withMark);
+        Assert.Equal("invalid_json", Assert.Throws<StrictJsonException>(() => StrictJson.Check(withMark)).Reason);
+    }
+
+    [Fact]
+    public void ARefusalIsAJsonException()
+    {
+        JsonException e = Assert.Throws<StrictJsonException>(() => StrictJson.Check("{\"a\":1,\"a\":2}"));
+        Assert.Equal("duplicate_key", ((StrictJsonException)e).Reason);
+    }
 }

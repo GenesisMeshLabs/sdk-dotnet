@@ -1,16 +1,19 @@
 using System.Globalization;
 using System.Numerics;
+using System.Text;
 using System.Text.Json;
 
 namespace GenesisMesh;
 
 /// <summary>
 /// JSON refused as input to a signed record (v1.2.0). <see cref="Reason"/> is one of
-/// <c>invalid_json</c> (not JSON, including <c>NaN</c> and <c>Infinity</c>), <c>duplicate_key</c>,
+/// <c>invalid_json</c> (not JSON, including <c>NaN</c> and <c>Infinity</c>, a byte order mark, text that
+/// is not UTF-8, and arrays or objects nested more than <see cref="StrictJson.MaxDepth"/> deep), <c>duplicate_key</c>,
 /// <c>non_finite_number</c> (<c>1e400</c>), <c>integer_out_of_range</c> (outside
 /// <c>-2**63 .. 2**64 - 1</c>), <c>negative_zero</c> (the integer <c>-0</c>) or <c>lone_surrogate</c>.
+/// A <see cref="JsonException"/>, as malformed JSON was before 1.2.0.
 /// </summary>
-public sealed class StrictJsonException : FormatException
+public sealed class StrictJsonException : JsonException
 {
     /// <summary>Why the input was refused, as every implementation names it.</summary>
     public string Reason { get; }
@@ -35,7 +38,26 @@ public static class StrictJson
 {
     private static readonly BigInteger MinInteger = -BigInteger.Pow(2, 63);
     private static readonly BigInteger MaxInteger = BigInteger.Pow(2, 64) - 1;
-    private const int MaxDepth = 10000;
+    /// <summary>How deep arrays and objects may nest; deeper is refused, as in every implementation.</summary>
+    public const int MaxDepth = 64;
+
+    private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    /// <summary>
+    /// Decode UTF-8, refusing bytes that are not (<c>invalid_json</c>) rather than replacing them; a byte
+    /// order mark is kept, so <see cref="Check"/> refuses it.
+    /// </summary>
+    public static string DecodeUtf8(byte[] bytes)
+    {
+        try
+        {
+            return Utf8.GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            throw new StrictJsonException("invalid_json", "the text is not UTF-8");
+        }
+    }
 
     /// <summary>Throw <see cref="StrictJsonException"/> unless <paramref name="json"/> is JSON every implementation reads alike.</summary>
     public static void Check(string json)
@@ -182,7 +204,7 @@ public static class StrictJson
             {
                 case '{':
                 {
-                    if (++_depth > MaxDepth) throw Refuse("invalid_json", "nested too deeply");
+                    if (++_depth > MaxDepth) throw Refuse("invalid_json", $"arrays or objects nested more than {MaxDepth} deep");
                     At++;
                     Space();
                     if (Peek == '}')
@@ -219,7 +241,7 @@ public static class StrictJson
                 }
                 case '[':
                 {
-                    if (++_depth > MaxDepth) throw Refuse("invalid_json", "nested too deeply");
+                    if (++_depth > MaxDepth) throw Refuse("invalid_json", $"arrays or objects nested more than {MaxDepth} deep");
                     At++;
                     Space();
                     if (Peek == ']')

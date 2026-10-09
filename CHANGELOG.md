@@ -36,16 +36,25 @@ Versions align with the [Genesis Mesh release sequence](https://github.com/Genes
   always canonical.
 - **JSON is read strictly.** The verifiers, `Canonical.FromJson` and every
   client response refuse JSON every implementation would not read alike with
-  `StrictJsonException`, whose `Reason` is `duplicate_key` (which
-  `JsonDocument` kept twice), `non_finite_number` (`1e400`),
-  `integer_out_of_range` (beyond 64 bits), `negative_zero`, `lone_surrogate`
-  or `invalid_json`.
+  `StrictJsonException` (a `JsonException`, as malformed JSON was before),
+  whose `Reason` is `duplicate_key` (which `JsonDocument` kept twice),
+  `non_finite_number` (`1e400`), `integer_out_of_range` (outside
+  `-2**63 .. 2**64 - 1`), `negative_zero`, `lone_surrogate` or
+  `invalid_json` (not JSON, a byte order mark, text that is not UTF-8, or
+  arrays and objects nested more than `StrictJson.MaxDepth`, 64, deep).
+  Client responses are decoded as strict UTF-8 rather than repaired with
+  U+FFFD.
+- **Canonical timestamps take ASCII digits only.** `CanonicalTimestamp` no
+  longer accepts other Unicode digits or a trailing newline.
+- `System.Text.Json` writes the float `-0.0` as `-0`, which the Network
+  Authority now refuses as `negative_zero`: send `0` instead in request
+  values you compute.
 
 ### Added
 
-- `StrictJson` (`Check`, `Parse`), `StrictJsonException` and
-  `StrictFields.CanonicalTimestamp`; the shared conformance suite
-  `canonical`.
+- `StrictJson` (`Check`, `Parse`, `DecodeUtf8`, `MaxDepth`),
+  `StrictJsonException` and `StrictFields.CanonicalTimestamp`; the shared
+  conformance suite `canonical`.
 - `StrictFields.UnknownFields(model, record)`;
   `python scripts/sync_canonical_registry.py` regenerates the embedded
   registry from a new copy of the suite.

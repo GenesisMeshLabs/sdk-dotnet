@@ -145,7 +145,7 @@ public static class StrictFields
     }
 
     private static readonly System.Text.RegularExpressions.Regex TimestampForm = new(
-        @"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{6}))?(Z|[+-](\d{2}):(\d{2}))?$",
+        @"\A([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{6}))?(Z|[+-]([0-9]{2}):([0-9]{2}))?\z",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>
