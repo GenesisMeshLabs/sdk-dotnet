@@ -33,6 +33,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="GenesisMesh.Sdk.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
   </ItemGroup>
 </Project>
