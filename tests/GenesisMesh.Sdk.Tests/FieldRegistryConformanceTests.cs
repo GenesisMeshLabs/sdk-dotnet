@@ -143,4 +143,23 @@ public class FieldRegistryConformanceTests
         Assert.False(policy.Valid);
         Assert.Equal("Unknown field: policy.x", Assert.Single(policy.Violations).Detail);
     }
+
+    [Theory]
+    [InlineData("policy_id")]
+    [InlineData("allowed_source_ids")]
+    [InlineData("allowed_access_types")]
+    [InlineData("max_volume_bytes_per_session")]
+    [InlineData("prohibited_classification_tags")]
+    public void AnIntentCheckRefusesAPolicyMissingAFieldTheReferenceWrites(string field)
+    {
+        // v1.3.0: the policy's whole canonical form is checked, not only its timestamps; the
+        // reference matches this in 1.3.1.
+        var intent = Input("int-001");
+        var policy = JsonNode.Parse(intent.GetProperty("policy").GetRawText())!.AsObject();
+        Assert.True(policy.Remove(field));
+        var r = OfflineVerifier.VerifyDataAccessIntent(intent.GetProperty("intent").GetRawText(), policy.ToJsonString(),
+            Strings(intent, "agent_public_keys"), OfflineVerifier.ParseTimestamp(intent.GetProperty("at").GetString()!));
+        Assert.False(r.Valid);
+        Assert.Equal("Not in canonical form: policy", Assert.Single(r.Violations).Detail);
+    }
 }
