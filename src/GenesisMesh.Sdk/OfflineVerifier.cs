@@ -47,7 +47,8 @@ public sealed class DecisionVerifyOptions
 /// </summary>
 public static class OfflineVerifier
 {
-    private static readonly string[] AgreementCanonicalKeys =
+    /// <summary>The fields both parties sign (checked against the field registry).</summary>
+    internal static readonly string[] AgreementCanonicalKeys =
     {
         "agreed_terms", "graph_digest", "offer_id", "offerer_evidence",
         "offerer_sovereign_id", "responder_evidence", "responder_sovereign_id",
@@ -60,7 +61,10 @@ public static class OfflineVerifier
     };
     private static readonly string[] Signature = { "signature" };
     private static readonly string[] Signatures = { "signatures" };
-    private static readonly string[] OptionalBindings = { "policy_binding", "attestation_binding" };
+    /// <summary>
+    /// The decision fields left out of the signed form when null (checked against the field registry).
+    /// </summary>
+    internal static readonly string[] DecisionOmittedWhenAbsent = { "policy_binding", "attestation_binding" };
 
     // ── primitives ─────────────────────────────────────────────────────────
 
@@ -176,6 +180,8 @@ public static class OfflineVerifier
             return new(false, sigs.Count < 2 ? "missing_responder_signature" : "invalid_responder_signature", id);
         if (expectedGraphDigest is not null && Str(a, "graph_digest") != expectedGraphDigest)
             return new(false, "graph_digest_mismatch", id);
+        // v1.2.0: an authentic agreement with a signed field this SDK does not know (StrictFields).
+        if (StrictFields.UnknownFields("AgreementRecord", a).Count > 0) return new(false, "unknown_field", id);
         return new(true, "accepted", id);
     }
 
@@ -195,8 +201,15 @@ public static class OfflineVerifier
         if (sig is null) return Reject("missing_signature");
         var now = options.Now ?? DateTimeOffset.UtcNow;
         if (now > ParseTimestamp(Str(d, "decision_valid_until") ?? "")) return Reject("decision_expired");
-        if (!VerifyEd25519(Canonical.Of(d, Signature, OptionalBindings), sig, options.OperatorPublicKeys))
+        if (!VerifyEd25519(Canonical.Of(d, Signature, DecisionOmittedWhenAbsent), sig, options.OperatorPublicKeys))
             return Reject("invalid_signature");
+        // v1.2.0: an authentic decision with a signed field this SDK does not know, or expected inputs
+        // it cannot read, is refused by name: upgrade this SDK (StrictFields).
+        if (StrictFields.UnknownFields("BoundaryDecision", d).Count > 0
+            || (options.ExpectedPolicies ?? Array.Empty<string>()).Any(p => StrictFields.UnknownFields("BoundaryPolicy", p).Count > 0)
+            || (options.ExpectedAttestation is not null
+                && StrictFields.UnknownFields("MembershipAttestation", options.ExpectedAttestation).Count > 0))
+            return Reject("unknown_field");
 
         if (IsObject(d, "freshness_proof", out var proof) && options.FreshnessProofIssuerKeys is { Count: > 0 } issuers)
         {
@@ -278,7 +291,8 @@ public static class OfflineVerifier
     {
         using var doc = JsonDocument.Parse(policyJson);
         var sig = SignatureOf(doc.RootElement);
-        return sig is not null && VerifyEd25519(Canonical.Of(doc.RootElement, Signature), sig, licensorPublicKeys);
+        return sig is not null && VerifyEd25519(Canonical.Of(doc.RootElement, Signature), sig, licensorPublicKeys)
+            && StrictFields.UnknownFields("DataLicensePolicy", doc.RootElement).Count == 0;
     }
 
     /// <summary>
@@ -296,6 +310,15 @@ public static class OfflineVerifier
         var t = at ?? DateTimeOffset.UtcNow;
         static DataIntentVerificationResult Fail(List<DataUsageViolationResult> v) => new(false, v[0].ViolationType, v);
 
+        // v1.2.0: fields this SDK does not know, as the reference reports them (StrictFields).
+        var unknown = StrictFields.UnknownFields("DataAccessIntent", intent, "");
+        if (unknown.Count > 0 && (SignatureOf(intent) is not { } signed
+                                  || !VerifyEd25519(Canonical.Of(intent, Signature), signed, agentPublicKeys)))
+            return Fail(new() { new("intent_exceeds_license", "Invalid intent signature") });
+        unknown.AddRange(StrictFields.UnknownFields("DataLicensePolicy", policy, "policy."));
+        unknown.Sort(Canonical.CodePointComparer.Instance);
+        if (unknown.Count > 0)
+            return Fail(new() { new("intent_exceeds_license", "Unknown field: " + string.Join(", ", unknown)) });
         var sig = SignatureOf(intent);
         if (sig is null) return Fail(new() { new("intent_exceeds_license", "Missing intent signature") });
         if (!VerifyEd25519(Canonical.Of(intent, Signature), sig, agentPublicKeys))
