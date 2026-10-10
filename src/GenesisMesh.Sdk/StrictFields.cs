@@ -94,7 +94,8 @@ public static class StrictFields
     /// </summary>
     public static IReadOnlyList<string> UnknownFields(string model, string recordJson)
     {
-        using var doc = JsonDocument.Parse(recordJson);
+        // v1.3.0: read strictly, as every record is (a duplicate key is refused, not resolved).
+        using var doc = StrictJson.Parse(recordJson);
         return UnknownFields(model, doc.RootElement);
     }
 
@@ -204,5 +205,48 @@ public static class StrictFields
         Walk(model, record, "", true);
         found.Sort(Canonical.CodePointComparer.Instance);
         return found;
+    }
+
+    /// <summary>
+    /// Dotted paths, sorted, where <paramref name="record"/>'s signed projection differs from the form the
+    /// reference writes (v1.3.0): timestamps not in canonical form (<see cref="NonCanonicalTimestamps"/>), and
+    /// a field the reference always writes left out (a field it leaves out when absent reads the same whether
+    /// absent or <c>null</c>). A record signed over such a form is refused as <c>non_canonical_form</c>, as the
+    /// reference refuses it.
+    /// </summary>
+    internal static List<string> NonCanonicalFields(string model, JsonElement record)
+    {
+        var found = new HashSet<string>(NonCanonicalTimestamps(model, record), StringComparer.Ordinal);
+        void Walk(string name, JsonElement data, string path, bool projection)
+        {
+            if (data.ValueKind != JsonValueKind.Object || !Models.Value.TryGetValue(name, out var spec)) return;
+            foreach (var (key, nested) in spec.Fields)
+            {
+                if (projection && OutsideProjection(spec, key)) continue;
+                if (!data.TryGetProperty(key, out var value))
+                {
+                    if (!spec.OmitWhenNone.Contains(key)) found.Add(path + key);
+                    continue;
+                }
+                if (value.ValueKind == JsonValueKind.Null || nested is null) continue;
+                switch (nested.Shape)
+                {
+                    case "object":
+                        Walk(nested.Model, value, $"{path}{key}.", false);
+                        break;
+                    case "list" when value.ValueKind == JsonValueKind.Array:
+                        var i = 0;
+                        foreach (var item in value.EnumerateArray()) Walk(nested.Model, item, $"{path}{key}.{i++}.", false);
+                        break;
+                    case "map" when value.ValueKind == JsonValueKind.Object:
+                        foreach (var item in value.EnumerateObject()) Walk(nested.Model, item.Value, $"{path}{key}.{item.Name}.", false);
+                        break;
+                }
+            }
+        }
+        Walk(model, record, "", true);
+        var sorted = found.ToList();
+        sorted.Sort(Canonical.CodePointComparer.Instance);
+        return sorted;
     }
 }

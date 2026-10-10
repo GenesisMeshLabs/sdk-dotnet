@@ -183,7 +183,7 @@ public static class OfflineVerifier
         // v1.2.0: an authentic agreement with a signed field this SDK does not know (StrictFields).
         if (StrictFields.UnknownFields("AgreementRecord", a).Count > 0) return new(false, "unknown_field", id);
         // v1.2.0: an agreement signed over a form the reference does not write.
-        if (StrictFields.NonCanonicalTimestamps("AgreementRecord", a).Count > 0) return new(false, "non_canonical_form", id);
+        if (StrictFields.NonCanonicalFields("AgreementRecord", a).Count > 0) return new(false, "non_canonical_form", id);
         return new(true, "accepted", id);
     }
 
@@ -213,7 +213,7 @@ public static class OfflineVerifier
                 && StrictFields.UnknownFields("MembershipAttestation", options.ExpectedAttestation).Count > 0))
             return Reject("unknown_field");
         // v1.2.0: a decision signed over a form the reference does not write.
-        if (StrictFields.NonCanonicalTimestamps("BoundaryDecision", d).Count > 0) return Reject("non_canonical_form");
+        if (StrictFields.NonCanonicalFields("BoundaryDecision", d).Count > 0) return Reject("non_canonical_form");
 
         if (IsObject(d, "freshness_proof", out var proof) && options.FreshnessProofIssuerKeys is { Count: > 0 } issuers)
         {
@@ -297,7 +297,7 @@ public static class OfflineVerifier
         var sig = SignatureOf(doc.RootElement);
         return sig is not null && VerifyEd25519(Canonical.Of(doc.RootElement, Signature), sig, licensorPublicKeys)
             && StrictFields.UnknownFields("DataLicensePolicy", doc.RootElement).Count == 0
-            && StrictFields.NonCanonicalTimestamps("DataLicensePolicy", doc.RootElement).Count == 0;
+            && StrictFields.NonCanonicalFields("DataLicensePolicy", doc.RootElement).Count == 0;
     }
 
     /// <summary>
@@ -317,7 +317,7 @@ public static class OfflineVerifier
 
         // v1.2.0: fields this SDK does not know, as the reference reports them (StrictFields).
         var unknown = StrictFields.UnknownFields("DataAccessIntent", intent, "");
-        var loose = StrictFields.NonCanonicalTimestamps("DataAccessIntent", intent);
+        var loose = StrictFields.NonCanonicalFields("DataAccessIntent", intent);
         if ((unknown.Count > 0 || loose.Count > 0) && (SignatureOf(intent) is not { } signed
                                   || !VerifyEd25519(Canonical.Of(intent, Signature), signed, agentPublicKeys)))
             return Fail(new() { new("intent_exceeds_license", "Invalid intent signature") });
@@ -326,7 +326,7 @@ public static class OfflineVerifier
         if (unknown.Count > 0)
             return Fail(new() { new("intent_exceeds_license", "Unknown field: " + string.Join(", ", unknown)) });
         if (loose.Count > 0) return Fail(new() { new("intent_exceeds_license", "Not in canonical form: intent") });
-        if (StrictFields.NonCanonicalTimestamps("DataLicensePolicy", policy).Count > 0)
+        if (StrictFields.NonCanonicalFields("DataLicensePolicy", policy).Count > 0)
             return Fail(new() { new("intent_exceeds_license", "Not in canonical form: policy") });
         var sig = SignatureOf(intent);
         if (sig is null) return Fail(new() { new("intent_exceeds_license", "Missing intent signature") });
