@@ -128,14 +128,14 @@ public static class OfflineVerifier
     /// <summary>MembershipAttestation.digest(): SHA-256 of the canonical body without signatures.</summary>
     public static string AttestationDigest(string attestationJson)
     {
-        using var doc = JsonDocument.Parse(attestationJson);
+        using var doc = StrictJson.Parse(attestationJson);
         return Sha256Hex(Canonical.Of(doc.RootElement, Signatures));
     }
 
     /// <summary>BoundaryPolicy.digest(): SHA-256 of the canonical body without the signature.</summary>
     public static string PolicyDigest(string policyJson)
     {
-        using var doc = JsonDocument.Parse(policyJson);
+        using var doc = StrictJson.Parse(policyJson);
         return Sha256Hex(Canonical.Of(doc.RootElement, Signature));
     }
 
@@ -168,7 +168,7 @@ public static class OfflineVerifier
         string agreementJson, IReadOnlyList<string> offererPublicKeys, IReadOnlyList<string> responderPublicKeys,
         string? expectedGraphDigest = null)
     {
-        using var doc = JsonDocument.Parse(agreementJson);
+        using var doc = StrictJson.Parse(agreementJson);
         var a = doc.RootElement;
         var id = Str(a, "agreement_id");
         var sigs = SignaturesOf(a).ToList();
@@ -182,6 +182,8 @@ public static class OfflineVerifier
             return new(false, "graph_digest_mismatch", id);
         // v1.2.0: an authentic agreement with a signed field this SDK does not know (StrictFields).
         if (StrictFields.UnknownFields("AgreementRecord", a).Count > 0) return new(false, "unknown_field", id);
+        // v1.2.0: an agreement signed over a form the reference does not write.
+        if (StrictFields.NonCanonicalTimestamps("AgreementRecord", a).Count > 0) return new(false, "non_canonical_form", id);
         return new(true, "accepted", id);
     }
 
@@ -190,7 +192,7 @@ public static class OfflineVerifier
     /// <summary>Verify a BoundaryDecision's signature, expiry and bindings offline.</summary>
     public static DecisionVerificationResult VerifyBoundaryDecision(string decisionJson, DecisionVerifyOptions options)
     {
-        using var doc = JsonDocument.Parse(decisionJson);
+        using var doc = StrictJson.Parse(decisionJson);
         var d = doc.RootElement;
         var authorized = Bool(d, "authorized");
         var decisionId = Str(d, "decision_id");
@@ -210,6 +212,8 @@ public static class OfflineVerifier
             || (options.ExpectedAttestation is not null
                 && StrictFields.UnknownFields("MembershipAttestation", options.ExpectedAttestation).Count > 0))
             return Reject("unknown_field");
+        // v1.2.0: a decision signed over a form the reference does not write.
+        if (StrictFields.NonCanonicalTimestamps("BoundaryDecision", d).Count > 0) return Reject("non_canonical_form");
 
         if (IsObject(d, "freshness_proof", out var proof) && options.FreshnessProofIssuerKeys is { Count: > 0 } issuers)
         {
@@ -227,7 +231,7 @@ public static class OfflineVerifier
             var expected = options.ExpectedPolicies
                 .Select(json =>
                 {
-                    using var p = JsonDocument.Parse(json);
+                    using var p = StrictJson.Parse(json);
                     var version = p.RootElement.GetProperty("version");
                     return (Id: Str(p.RootElement, "policy_id") ?? "", Version: version.GetRawText(),
                         VersionValue: version.GetInt64(), Digest: Sha256Hex(Canonical.Of(p.RootElement, Signature)));
@@ -245,7 +249,7 @@ public static class OfflineVerifier
         if (options.ExpectedAttestation is not null)
         {
             if (!IsObject(d, "attestation_binding", out var ab)) return Reject("attestation_binding_missing");
-            using var att = JsonDocument.Parse(options.ExpectedAttestation);
+            using var att = StrictJson.Parse(options.ExpectedAttestation);
             var e = att.RootElement;
             if (Str(ab, "attestation_id") != Str(e, "attestation_id") || Str(ab, "subject_id") != Str(e, "subject_id")
                 || Str(ab, "issuer_sovereign_id") != Str(e, "issuer_sovereign_id")
@@ -289,10 +293,11 @@ public static class OfflineVerifier
     /// <summary>True when the licensor signed the DataLicensePolicy.</summary>
     public static bool VerifyDataLicensePolicySignature(string policyJson, IReadOnlyList<string> licensorPublicKeys)
     {
-        using var doc = JsonDocument.Parse(policyJson);
+        using var doc = StrictJson.Parse(policyJson);
         var sig = SignatureOf(doc.RootElement);
         return sig is not null && VerifyEd25519(Canonical.Of(doc.RootElement, Signature), sig, licensorPublicKeys)
-            && StrictFields.UnknownFields("DataLicensePolicy", doc.RootElement).Count == 0;
+            && StrictFields.UnknownFields("DataLicensePolicy", doc.RootElement).Count == 0
+            && StrictFields.NonCanonicalTimestamps("DataLicensePolicy", doc.RootElement).Count == 0;
     }
 
     /// <summary>
@@ -303,8 +308,8 @@ public static class OfflineVerifier
     public static DataIntentVerificationResult VerifyDataAccessIntent(
         string intentJson, string policyJson, IReadOnlyList<string> agentPublicKeys, DateTimeOffset? at = null)
     {
-        using var intentDoc = JsonDocument.Parse(intentJson);
-        using var policyDoc = JsonDocument.Parse(policyJson);
+        using var intentDoc = StrictJson.Parse(intentJson);
+        using var policyDoc = StrictJson.Parse(policyJson);
         var intent = intentDoc.RootElement;
         var policy = policyDoc.RootElement;
         var t = at ?? DateTimeOffset.UtcNow;
@@ -312,13 +317,17 @@ public static class OfflineVerifier
 
         // v1.2.0: fields this SDK does not know, as the reference reports them (StrictFields).
         var unknown = StrictFields.UnknownFields("DataAccessIntent", intent, "");
-        if (unknown.Count > 0 && (SignatureOf(intent) is not { } signed
+        var loose = StrictFields.NonCanonicalTimestamps("DataAccessIntent", intent);
+        if ((unknown.Count > 0 || loose.Count > 0) && (SignatureOf(intent) is not { } signed
                                   || !VerifyEd25519(Canonical.Of(intent, Signature), signed, agentPublicKeys)))
             return Fail(new() { new("intent_exceeds_license", "Invalid intent signature") });
         unknown.AddRange(StrictFields.UnknownFields("DataLicensePolicy", policy, "policy."));
         unknown.Sort(Canonical.CodePointComparer.Instance);
         if (unknown.Count > 0)
             return Fail(new() { new("intent_exceeds_license", "Unknown field: " + string.Join(", ", unknown)) });
+        if (loose.Count > 0) return Fail(new() { new("intent_exceeds_license", "Not in canonical form: intent") });
+        if (StrictFields.NonCanonicalTimestamps("DataLicensePolicy", policy).Count > 0)
+            return Fail(new() { new("intent_exceeds_license", "Not in canonical form: policy") });
         var sig = SignatureOf(intent);
         if (sig is null) return Fail(new() { new("intent_exceeds_license", "Missing intent signature") });
         if (!VerifyEd25519(Canonical.Of(intent, Signature), sig, agentPublicKeys))

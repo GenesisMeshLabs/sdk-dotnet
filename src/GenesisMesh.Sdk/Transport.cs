@@ -124,13 +124,17 @@ internal sealed class Transport : IDisposable
 
         using (resp)
         {
-            var raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            // The bytes, so a body that is not UTF-8 is refused rather than repaired.
+            var bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
-                throw ErrorParser.Parse((int)resp.StatusCode, raw);
+                throw ErrorParser.Parse((int)resp.StatusCode, Encoding.UTF8.GetString(bytes));
+            var raw = StrictJson.DecodeUtf8(bytes);
 
             if (typeof(T) == typeof(object) || string.IsNullOrWhiteSpace(raw))
                 return default!;
 
+            // v1.2.0: refuse JSON every implementation would not read alike.
+            StrictJson.Check(raw);
             return JsonSerializer.Deserialize<T>(raw, Auth.SerializerOptions)
                 ?? throw new InvalidOperationException("genesismesh: empty response");
         }
