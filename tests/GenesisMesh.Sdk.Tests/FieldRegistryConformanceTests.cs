@@ -1,6 +1,8 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GenesisMesh;
+using NSec.Cryptography;
 using Xunit;
 
 namespace GenesisMesh.Sdk.Tests;
@@ -142,6 +144,109 @@ public class FieldRegistryConformanceTests
             WithField(intent.GetProperty("policy"), "x"), Strings(intent, "agent_public_keys"), at);
         Assert.False(policy.Valid);
         Assert.Equal("Unknown field: policy.x", Assert.Single(policy.Violations).Detail);
+    }
+
+    private static DecisionVerifyOptions Options(JsonElement input) => new()
+    {
+        OperatorPublicKeys = Strings(input, "operator_public_keys"),
+        Now = OfflineVerifier.ParseTimestamp(input.GetProperty("now").GetString()!),
+    };
+
+    private static JsonObject WithValue(JsonElement record, string key, string json)
+    {
+        var node = JsonNode.Parse(record.GetRawText())!.AsObject();
+        node[key] = JsonNode.Parse(json);
+        return node;
+    }
+
+    /// <summary>The vector generator's signing key (seeds 00..1f, 20..3f, 40..5f) for one of the public keys.</summary>
+    private static Key ConformanceKey(IReadOnlyCollection<string> publicKeys)
+    {
+        foreach (var start in new[] { 0, 32, 64 })
+        {
+            var key = Key.Import(SignatureAlgorithm.Ed25519, Enumerable.Range(start, 32).Select(i => (byte)i).ToArray(),
+                KeyBlobFormat.RawPrivateKey);
+            if (publicKeys.Contains(Convert.ToBase64String(key.PublicKey.Export(KeyBlobFormat.RawPublicKey)))) return key;
+            key.Dispose();
+        }
+        throw new InvalidOperationException("no generator key for these public keys");
+    }
+
+    /// <summary>The decision signed over its signed form, as the vector generator signs it.</summary>
+    private static string Resigned(JsonObject decision, Key key)
+    {
+        using var doc = JsonDocument.Parse(decision.ToJsonString());
+        var body = Canonical.Of(doc.RootElement, new[] { "signature" }, OfflineVerifier.DecisionOmittedWhenAbsent);
+        decision["signature"] = new JsonObject
+        {
+            ["key_id"] = "k",
+            ["sig"] = Convert.ToBase64String(SignatureAlgorithm.Ed25519.Sign(key, Encoding.UTF8.GetBytes(body))),
+        };
+        return decision.ToJsonString();
+    }
+
+    [Theory]
+    [InlineData("{\"key_id\":\"k\",\"sig\":\"\"}")]
+    [InlineData("{}")]
+    [InlineData("\"abc\"")]
+    [InlineData("[]")]
+    [InlineData("5")]
+    public void ASignatureOfAnotherShapeIsInvalidNotMissing(string signature)
+    {
+        // v1.3.1: missing only when absent or null, as in the reference.
+        var bd = Input("bd-003");
+        var decision = WithValue(bd.GetProperty("decision"), "signature", signature).ToJsonString();
+        Assert.Equal("invalid_signature", OfflineVerifier.VerifyBoundaryDecision(decision, Options(bd)).Reason);
+
+        var intent = Input("int-001");
+        var r = OfflineVerifier.VerifyDataAccessIntent(WithValue(intent.GetProperty("intent"), "signature", signature).ToJsonString(),
+            intent.GetProperty("policy").GetRawText(), Strings(intent, "agent_public_keys"),
+            OfflineVerifier.ParseTimestamp(intent.GetProperty("at").GetString()!));
+        Assert.Equal("Invalid intent signature", Assert.Single(r.Violations).Detail);
+    }
+
+    [Fact]
+    public void ASignatureIsMissingOnlyWhenAbsentOrNull()
+    {
+        var bd = Input("bd-003");
+        Assert.Equal("missing_signature", OfflineVerifier.VerifyBoundaryDecision(
+            WithValue(bd.GetProperty("decision"), "signature", "null").ToJsonString(), Options(bd)).Reason);
+        var absent = WithValue(bd.GetProperty("decision"), "signature", "null");
+        absent.Remove("signature");
+        Assert.Equal("missing_signature", OfflineVerifier.VerifyBoundaryDecision(absent.ToJsonString(), Options(bd)).Reason);
+        var expired = Input("bd-006");
+        Assert.Equal("decision_expired", OfflineVerifier.VerifyBoundaryDecision(
+            WithValue(expired.GetProperty("decision"), "signature", "{\"sig\":\"\"}").ToJsonString(), Options(expired)).Reason);
+
+        var intent = Input("int-001");
+        var r = OfflineVerifier.VerifyDataAccessIntent(WithValue(intent.GetProperty("intent"), "signature", "null").ToJsonString(),
+            intent.GetProperty("policy").GetRawText(), Strings(intent, "agent_public_keys"),
+            OfflineVerifier.ParseTimestamp(intent.GetProperty("at").GetString()!));
+        Assert.Equal("Missing intent signature", Assert.Single(r.Violations).Detail);
+    }
+
+    [Theory]
+    [InlineData("\"x\"")]
+    [InlineData("\"\"")]
+    [InlineData("null")]
+    [InlineData("true")]
+    public void AnExpiryThatDoesNotParseIsLeftToTheSignatureAndFormChecks(string expiry)
+    {
+        // v1.3.1: as in the reference; it was a FormatException before any of them.
+        var newer = Vector("verify-decision-newer-signed-field").GetProperty("input");
+        using var key = ConformanceKey(Strings(newer, "operator_public_keys"));
+        var decision = WithValue(newer.GetProperty("decision"), "decision_valid_until", expiry);
+        Assert.Equal("invalid_signature", OfflineVerifier.VerifyBoundaryDecision(decision.ToJsonString(), Options(newer)).Reason);
+        Assert.Equal("unknown_field", OfflineVerifier.VerifyBoundaryDecision(Resigned(decision, key), Options(newer)).Reason);
+    }
+
+    [Fact]
+    public void AnExpiryThatDoesNotParseIsNeverAccepted()
+    {
+        var newer = Vector("verify-decision-newer-signed-field").GetProperty("input");
+        using var key = ConformanceKey(Strings(newer, "operator_public_keys"));
+        var decision = WithValue(Input("bd-003").GetProperty("decision"), "decision_valid_until", "5");
+        Assert.Throws<FormatException>(() => OfflineVerifier.VerifyBoundaryDecision(Resigned(decision, key), Options(newer)));
     }
 
     [Theory]
