@@ -20,6 +20,15 @@ Versions align with the [Genesis Mesh release sequence](https://github.com/Genes
   `observation_heads`. This SDK does not verify evidence exports, so it has
   nothing to refuse; the TypeScript and Rust SDKs verify the new records.
 
+### Fixed
+
+- Verifiers refuse a record that leaves out a field the reference always
+  writes (`non_canonical_form`), as the reference does: a decision signed
+  without `denial_reason` verified here. A field the reference leaves out
+  when absent reads the same whether absent or `null`.
+- `StrictFields.UnknownFields(string, string)` reads its JSON strictly (a
+  duplicate key is refused), as every other record is read.
+
 ## [1.2.0] - Unreleased
 
 ### Changed (breaking)
