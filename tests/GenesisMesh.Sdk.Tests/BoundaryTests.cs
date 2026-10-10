@@ -50,6 +50,48 @@ public class BoundaryTests
 #pragma warning restore CS0618
     }
 
+    private static FuncHandler RawResponse(string json) =>
+        new(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, Encoding.UTF8, new MediaTypeHeaderValue("application/json")),
+        });
+
+    [Theory]
+    [InlineData("{\"decision_id\":\"dec-1\",\"authorized\":false,\"Authorized\":true}")]
+    [InlineData("{\"decision_id\":\"dec-1\",\"Authorized\":true,\"authorized\":false}")]
+    [InlineData("{\"decision_id\":\"dec-1\",\"AUTHORIZED\":true,\"Decision_Id\":\"dec-2\"}")]
+    public async Task Decide_ReadsKeysInTheirOwnCaseOnly(string json)
+    {
+        // v1.3.1: a key in another case named the same property, so the first decision read as
+        // authorized; every other implementation reads it as a key it does not know.
+        using var handler = RawResponse(json);
+        var dec = await AdminClient(handler).Boundary.Decide(new Dictionary<string, object?>());
+        Assert.False(dec.Authorized);
+        Assert.Equal("dec-1", dec.DecisionId);
+    }
+
+    [Fact]
+    public async Task Decide_RefusesADuplicateKey()
+    {
+        using var handler = RawResponse("{\"decision_id\":\"dec-1\",\"authorized\":false,\"authorized\":true}");
+        var e = await Assert.ThrowsAsync<StrictJsonException>(() =>
+            AdminClient(handler).Boundary.Decide(new Dictionary<string, object?>()));
+        Assert.Equal("duplicate_key", e.Reason);
+    }
+
+    [Fact]
+    public void SerializerOptions_ReadNestedKeysInTheirOwnCaseOnly()
+    {
+        var intent = JsonSerializer.Deserialize<DataAccessIntent>(
+            "{\"intent_id\":\"i-1\",\"declared_sources\":[{\"source_id\":\"s-1\",\"Source_Id\":\"s-2\"}],"
+            + "\"Estimated_Volume_Bytes\":5}", Auth.SerializerOptions)!;
+        Assert.Equal("s-1", intent.DeclaredSources.Single().SourceId);
+        Assert.Null(intent.EstimatedVolumeBytes);
+        var verified = JsonSerializer.Deserialize<VerifyResult>("{\"Valid\":true,\"Accepted\":true}", Auth.SerializerOptions)!;
+        Assert.False(verified.Valid);
+        Assert.False(verified.Accepted);
+    }
+
     [Fact]
     public async Task Decide_SendsAdminKeyIdHeader()
     {

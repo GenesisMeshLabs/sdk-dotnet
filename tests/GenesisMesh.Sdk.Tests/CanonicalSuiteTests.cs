@@ -96,6 +96,68 @@ public class CanonicalSuiteTests
         Assert.Equal("invalid_json", Assert.Throws<StrictJsonException>(() => StrictJson.Check(withMark)).Reason);
     }
 
+    private static string Reason(string json)
+    {
+        try
+        {
+            StrictJson.Check(json);
+            return "ok";
+        }
+        catch (StrictJsonException e)
+        {
+            return e.Reason;
+        }
+    }
+
+    [Theory]
+    [InlineData("[-0.]", "invalid_json")]
+    [InlineData("[-0e]", "invalid_json")]
+    [InlineData("[-0.e1]", "invalid_json")]
+    [InlineData("[-0E+]", "invalid_json")]
+    [InlineData("{\"a\":-0.}", "invalid_json")]
+    [InlineData("[100000000000000000000.]", "invalid_json")]
+    [InlineData("[18446744073709551616e]", "invalid_json")]
+    [InlineData("[1.]", "invalid_json")]
+    [InlineData("[1e]", "invalid_json")]
+    [InlineData("[+1]", "invalid_json")]
+    [InlineData("[.5]", "invalid_json")]
+    [InlineData("[00]", "invalid_json")]
+    [InlineData("[01]", "invalid_json")]
+    [InlineData("[1.5+]", "invalid_json")]
+    [InlineData("[1e20.]", "invalid_json")]
+    [InlineData("[0x1]", "invalid_json")]
+    [InlineData("[-01]", "negative_zero")]
+    [InlineData("[-0-]", "negative_zero")]
+    [InlineData("[-0]", "negative_zero")]
+    [InlineData("[-0 1]", "negative_zero")]
+    [InlineData("[-0,1e400]", "negative_zero")]
+    [InlineData("-0", "negative_zero")]
+    [InlineData("[1e400.]", "non_finite_number")]
+    [InlineData("[1e400]", "non_finite_number")]
+    [InlineData("[18446744073709551616]", "integer_out_of_range")]
+    [InlineData("[1,-0.0,0e5]", "ok")]
+    public void ANumberMatchesTheGrammarBeforeItsValueIsChecked(string json, string reason) =>
+        // v1.3.1, as the reference reads it: a number that breaks off after "." or an exponent letter is
+        // invalid_json; only a whole number goes on to the value checks, and what follows it is the next token.
+        Assert.Equal(reason, Reason(json));
+
+    [Theory]
+    [InlineData("18446744073709551615", "ok")]
+    [InlineData("-9223372036854775808", "ok")]
+    [InlineData("-9223372036854775809", "integer_out_of_range")]
+    [InlineData("100000000000000000000", "integer_out_of_range")]
+    [InlineData("-100000000000000000000", "integer_out_of_range")]
+    public void IntegersHaveAtMostTwentyDigits(string json, string reason) => Assert.Equal(reason, Reason(json));
+
+    [Fact]
+    public void AnOverlongIntegerIsRefusedBeforeItIsParsed()
+    {
+        // v1.3.1: BigInteger.Parse takes time that grows with the square of the length.
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Equal("integer_out_of_range", Reason("[" + new string('7', 3_000_000) + "]"));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"3M digits took {watch.Elapsed}");
+    }
+
     [Fact]
     public void ARefusalIsAJsonException()
     {
