@@ -94,6 +94,9 @@ public static class OfflineVerifier
     public static DateTimeOffset ParseTimestamp(string value) =>
         DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
 
+    private static bool TryParseTimestamp(string value, out DateTimeOffset result) =>
+        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out result);
+
     private static string Sha256Hex(string text) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
 
@@ -108,6 +111,10 @@ public static class OfflineVerifier
 
     private static string? SignatureOf(JsonElement obj) =>
         IsObject(obj, "signature", out var sig) ? Str(sig, "sig") : null;
+
+    /// <summary>True when a record has no signature: the field is absent or null (v1.3.1, as the reference reads it).</summary>
+    private static bool SignatureAbsent(JsonElement obj) =>
+        !obj.TryGetProperty("signature", out var sig) || sig.ValueKind == JsonValueKind.Null;
 
     private static IEnumerable<string> SignaturesOf(JsonElement obj)
     {
@@ -199,10 +206,16 @@ public static class OfflineVerifier
         DecisionVerificationResult Result(bool accepted, string reason, bool auth) => new(accepted, reason, auth, decisionId);
         DecisionVerificationResult Reject(string reason) => Result(false, reason, authorized);
 
-        var sig = SignatureOf(d);
-        if (sig is null) return Reject("missing_signature");
+        // v1.3.1: missing only when absent or null, as in the reference; a signature of another shape
+        // fails as invalid_signature.
+        if (SignatureAbsent(d)) return Reject("missing_signature");
+        var sig = SignatureOf(d) ?? "";
         var now = options.Now ?? DateTimeOffset.UtcNow;
-        if (now > ParseTimestamp(Str(d, "decision_valid_until") ?? "")) return Reject("decision_expired");
+        // v1.3.1: an expiry that does not parse is left to the signature and form checks, as in the
+        // reference; when they pass, it is refused as before (FormatException).
+        var expiry = Str(d, "decision_valid_until") ?? "";
+        var expiryParses = TryParseTimestamp(expiry, out var validUntil);
+        if (expiryParses && now > validUntil) return Reject("decision_expired");
         if (!VerifyEd25519(Canonical.Of(d, Signature, DecisionOmittedWhenAbsent), sig, options.OperatorPublicKeys))
             return Reject("invalid_signature");
         // v1.2.0: an authentic decision with a signed field this SDK does not know, or expected inputs
@@ -214,6 +227,7 @@ public static class OfflineVerifier
             return Reject("unknown_field");
         // v1.2.0: a decision signed over a form the reference does not write.
         if (StrictFields.NonCanonicalFields("BoundaryDecision", d).Count > 0) return Reject("non_canonical_form");
+        if (!expiryParses) throw new FormatException($"decision_valid_until \"{expiry}\" is not a timestamp");
 
         if (IsObject(d, "freshness_proof", out var proof) && options.FreshnessProofIssuerKeys is { Count: > 0 } issuers)
         {
@@ -328,9 +342,9 @@ public static class OfflineVerifier
         if (loose.Count > 0) return Fail(new() { new("intent_exceeds_license", "Not in canonical form: intent") });
         if (StrictFields.NonCanonicalFields("DataLicensePolicy", policy).Count > 0)
             return Fail(new() { new("intent_exceeds_license", "Not in canonical form: policy") });
-        var sig = SignatureOf(intent);
-        if (sig is null) return Fail(new() { new("intent_exceeds_license", "Missing intent signature") });
-        if (!VerifyEd25519(Canonical.Of(intent, Signature), sig, agentPublicKeys))
+        // v1.3.1: missing only when absent or null, as in the reference.
+        if (SignatureAbsent(intent)) return Fail(new() { new("intent_exceeds_license", "Missing intent signature") });
+        if (!VerifyEd25519(Canonical.Of(intent, Signature), SignatureOf(intent) ?? "", agentPublicKeys))
             return Fail(new() { new("intent_exceeds_license", "Invalid intent signature") });
 
         var violations = new List<DataUsageViolationResult>();
