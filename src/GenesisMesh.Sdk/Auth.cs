@@ -10,9 +10,13 @@ namespace GenesisMesh;
 /// </summary>
 public static class Auth
 {
+    /// <summary>
+    /// How this SDK writes request bodies and reads the NA's responses. Keys are matched in their own
+    /// case only (v1.3.1): before, <c>{"authorized":false,"Authorized":true}</c> read as authorized,
+    /// where every other implementation reads <c>Authorized</c> as a key it does not know.
+    /// </summary>
     public static readonly JsonSerializerOptions SerializerOptions = new()
     {
-        PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 

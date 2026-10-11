@@ -40,6 +40,8 @@ public static class StrictJson
     private static readonly BigInteger MaxInteger = BigInteger.Pow(2, 64) - 1;
     /// <summary>How deep arrays and objects may nest; deeper is refused, as in every implementation.</summary>
     public const int MaxDepth = 64;
+    /// <summary>The length of <c>2**64 - 1</c>: a longer integer is out of range whatever its digits (v1.3.1).</summary>
+    private const int MaxIntegerDigits = 20;
 
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
@@ -156,6 +158,13 @@ public static class StrictJson
             return units?.ToString() ?? "";
         }
 
+        /// <summary>
+        /// A number by the RFC 8259 grammar: a <c>.</c> or an exponent letter commits to a fraction or an
+        /// exponent, which must then have its digits (<c>-0.</c>, <c>1e</c> and <c>1E+</c> are
+        /// <c>invalid_json</c>). Only a whole number goes on to the <c>negative_zero</c>, range and
+        /// precision checks; what follows it is the next token (<c>[-01]</c> is <c>negative_zero</c> for the
+        /// <c>-0</c> before the <c>1</c>).
+        /// </summary>
         private void Number()
         {
             var start = At;
@@ -187,6 +196,9 @@ public static class StrictJson
             if (integer)
             {
                 if (literal == "-0") throw Refuse("negative_zero", "the integer -0");
+                // v1.3.1: refused before BigInteger.Parse, whose time grows with the square of the length.
+                if (literal.TrimStart('-').Length > MaxIntegerDigits)
+                    throw Refuse("integer_out_of_range", $"an integer longer than {MaxIntegerDigits} digits");
                 var value = BigInteger.Parse(literal, CultureInfo.InvariantCulture);
                 if (value < MinInteger || value > MaxInteger)
                     throw Refuse("integer_out_of_range", $"{literal} is outside the 64-bit range");
