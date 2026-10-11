@@ -39,6 +39,67 @@ public class FieldRegistryConformanceTests
     {
         Assert.Equal(OfflineVerifier.DecisionOmittedWhenAbsent, StrictFields.Model("BoundaryDecision").OmitWhenNone);
         Assert.Equal(OfflineVerifier.AgreementCanonicalKeys, StrictFields.Model("AgreementRecord").CanonicalFields);
+        Assert.Equal(OfflineVerifier.PolicyOmittedWhenAbsent, StrictFields.Model("BoundaryPolicy").OmitWhenNone);
+    }
+
+    /// <summary>
+    /// The reference's BoundaryPolicy.digest() of the field registry's <c>boundarypolicy-guided</c> record
+    /// (v1.4.0); without the new sections it is the digest bd-001 binds.
+    /// </summary>
+    private const string GuidedPolicyDigest = "768bdcfaadfbd0bd434a86990c6567c23bee8978aafa75a5ed88ef2d2e54cb95";
+    private const string BoundPolicyDigest = "7921f8ac5dccd5cfb09489e69ca1d0325158e7b457de65a7fc4563af7f7b8601";
+
+    [Fact]
+    public void APolicyWithoutTheStage3SectionsKeepsItsDigest()
+    {
+        // v1.4.0: remediation, review_required and emergency are left out when absent, so null reads as
+        // absent and a 1.3 policy keeps its digest.
+        var bd = Input("bd-001");
+        var policy = bd.GetProperty("expected_policies")[0];
+        Assert.Equal(BoundPolicyDigest, OfflineVerifier.PolicyDigest(policy.GetRawText()));
+        var nulls = WithValue(policy, "remediation", "null");
+        nulls["review_required"] = null;
+        nulls["emergency"] = null;
+        Assert.Equal(BoundPolicyDigest, OfflineVerifier.PolicyDigest(nulls.ToJsonString()));
+        var r = OfflineVerifier.VerifyBoundaryDecision(bd.GetProperty("decision").GetRawText(), new DecisionVerifyOptions
+        {
+            OperatorPublicKeys = Strings(bd, "operator_public_keys"),
+            Now = OfflineVerifier.ParseTimestamp(bd.GetProperty("now").GetString()!),
+            ExpectedPolicies = new[] { nulls.ToJsonString() },
+        });
+        Assert.Equal((true, "authorized"), (r.Accepted, r.Reason));
+        Assert.Equal(GuidedPolicyDigest,
+            OfflineVerifier.PolicyDigest(Vector("boundarypolicy-guided").GetProperty("record").GetRawText()));
+    }
+
+    [Fact]
+    public void ADecisionUnderAPolicyWithTheStage3SectionsVerifiesOffline()
+    {
+        // v1.4.0: a policy with remediation guidance, a review requirement and an emergency section is
+        // known to this SDK, and binds by its digest.
+        var bd = Input("bd-001");
+        var guided = Vector("boundarypolicy-guided").GetProperty("record");
+        var decision = JsonNode.Parse(bd.GetProperty("decision").GetRawText())!.AsObject();
+        var binding = decision["policy_binding"]!.AsObject();
+        var applied = binding["policies"]![0]!.AsObject();
+        applied["policy_digest"] = GuidedPolicyDigest;
+        binding["policy_set_digest"] = OfflineVerifier.PolicySetDigest(new[]
+        {
+            (applied["policy_id"]!.GetValue<string>(), applied["version"]!.ToJsonString(), GuidedPolicyDigest),
+        });
+        using var key = ConformanceKey(Strings(bd, "operator_public_keys"));
+        var signed = Resigned(decision, key);
+        DecisionVerificationResult Verify(string policy) => OfflineVerifier.VerifyBoundaryDecision(signed, new DecisionVerifyOptions
+        {
+            OperatorPublicKeys = Strings(bd, "operator_public_keys"),
+            Now = OfflineVerifier.ParseTimestamp(bd.GetProperty("now").GetString()!),
+            ExpectedPolicies = new[] { policy },
+        });
+        var ok = Verify(guided.GetRawText());
+        Assert.Equal((true, "authorized"), (ok.Accepted, ok.Reason));
+        // The sections are signed: the policy without them binds another digest.
+        Assert.Equal("policy_binding_mismatch", Verify(bd.GetProperty("expected_policies")[0].GetRawText()).Reason);
+        Assert.Equal("unknown_field", Verify(WithField(guided, "x_added_field")).Reason);
     }
 
     [Fact]
