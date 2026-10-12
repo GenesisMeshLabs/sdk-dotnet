@@ -65,6 +65,12 @@ public static class OfflineVerifier
     /// The decision fields left out of the signed form when null (checked against the field registry).
     /// </summary>
     internal static readonly string[] DecisionOmittedWhenAbsent = { "policy_binding", "attestation_binding" };
+    /// <summary>
+    /// The policy sections left out of the signed form when null (v1.4.0: remediation guidance, the review
+    /// requirement and the emergency capability), so a policy without them keeps its 1.3 digest (checked
+    /// against the field registry).
+    /// </summary>
+    internal static readonly string[] PolicyOmittedWhenAbsent = { "remediation", "review_required", "emergency" };
 
     // ── primitives ─────────────────────────────────────────────────────────
 
@@ -139,12 +145,18 @@ public static class OfflineVerifier
         return Sha256Hex(Canonical.Of(doc.RootElement, Signatures));
     }
 
-    /// <summary>BoundaryPolicy.digest(): SHA-256 of the canonical body without the signature.</summary>
+    /// <summary>
+    /// BoundaryPolicy.digest(): SHA-256 of the canonical body without the signature, the 1.4.0 sections
+    /// left out when null.
+    /// </summary>
     public static string PolicyDigest(string policyJson)
     {
         using var doc = StrictJson.Parse(policyJson);
-        return Sha256Hex(Canonical.Of(doc.RootElement, Signature));
+        return PolicyDigestOf(doc.RootElement);
     }
+
+    private static string PolicyDigestOf(JsonElement policy) =>
+        Sha256Hex(Canonical.Of(policy, Signature, PolicyOmittedWhenAbsent));
 
     /// <summary>Digest of the ordered (policy_id, version, policy_digest) list of a PolicyBinding.</summary>
     public static string PolicySetDigest(IEnumerable<(string PolicyId, string VersionLiteral, string PolicyDigest)> refs)
@@ -248,7 +260,7 @@ public static class OfflineVerifier
                     using var p = StrictJson.Parse(json);
                     var version = p.RootElement.GetProperty("version");
                     return (Id: Str(p.RootElement, "policy_id") ?? "", Version: version.GetRawText(),
-                        VersionValue: version.GetInt64(), Digest: Sha256Hex(Canonical.Of(p.RootElement, Signature)));
+                        VersionValue: version.GetInt64(), Digest: PolicyDigestOf(p.RootElement));
                 })
                 .OrderBy(e => e.Id, Canonical.CodePointComparer.Instance).ThenBy(e => e.VersionValue)
                 .Select(e => (e.Id, e.Version, e.Digest)).ToList();
