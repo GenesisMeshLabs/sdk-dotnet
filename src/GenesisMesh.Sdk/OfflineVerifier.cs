@@ -26,8 +26,21 @@ public sealed class DecisionVerifyOptions
 {
     /// <summary>NA keys that may sign decisions (base64 Ed25519).</summary>
     public IReadOnlyList<string> OperatorPublicKeys { get; init; } = Array.Empty<string>();
+    /// <summary>
+    /// v1.5.0: instead of <see cref="OperatorPublicKeys"/>, the NA's verified key history
+    /// (<see cref="OfflineVerifier.VerifyKeyHistory(string, string?, string)"/>): the decision must be signed by
+    /// the key valid at its <c>decision_made_at</c> (<c>na_key_not_valid_at_time</c> for another key of the
+    /// history), and expire no later than that key's end, the hand-over and
+    /// <see cref="NAKeyHistory.MaxDecisionLifetime"/> (<c>decision_outlives_key</c>).
+    /// </summary>
+    public NAKeyHistory? KeyHistory { get; init; }
     /// <summary>Verification time; default now.</summary>
     public DateTimeOffset? Now { get; init; }
+    /// <summary>
+    /// v1.5.0: judge the decision as of its own time (<c>decision_made_at</c>) rather than <see cref="Now"/>: an
+    /// archived decision was valid when it was made, and its expiry since then says nothing against it.
+    /// </summary>
+    public bool AtRecordTime { get; init; }
     /// <summary>When set, an embedded freshness proof must verify under these keys.</summary>
     public IReadOnlyList<string>? FreshnessProofIssuerKeys { get; init; }
     /// <summary>Signed BoundaryPolicy JSON; when not null, must equal the decision's policy binding.</summary>
@@ -45,7 +58,7 @@ public sealed class DecisionVerifyOptions
 /// form of exactly what was signed, and re-serializing a typed model can change it.
 /// </para>
 /// </summary>
-public static class OfflineVerifier
+public static partial class OfflineVerifier
 {
     /// <summary>The fields both parties sign (checked against the field registry).</summary>
     internal static readonly string[] AgreementCanonicalKeys =
@@ -206,11 +219,36 @@ public static class OfflineVerifier
         return new(true, "accepted", id);
     }
 
+    /// <summary>
+    /// v1.5.0: verify an AgreementRecord as <see cref="VerifyAgreement"/> does, each party's keys being those of its
+    /// key history valid at the agreement's <c>agreed_terms.valid_from</c> (signed; <c>established_at</c> is not) and
+    /// still accepted at <paramref name="now"/> (default now): an agreement a succeeded key signed stops vouching when
+    /// that key's hand-over ends. Use <see cref="NAKeyHistory.ValidAlways"/> for a party whose history the verifier
+    /// does not hold. A signature by a key of a party's history that is not valid then fails as that party's invalid
+    /// signature, as in the reference.
+    /// </summary>
+    public static AgreementVerificationResult VerifyAgreementWithKeyHistory(
+        string agreementJson, NAKeyHistory offerer, NAKeyHistory responder, string? expectedGraphDigest = null,
+        DateTimeOffset? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(offerer);
+        ArgumentNullException.ThrowIfNull(responder);
+        DateTimeOffset at;
+        using (var doc = StrictJson.Parse(agreementJson))
+            at = ParseTimestamp((IsObject(doc.RootElement, "agreed_terms", out var terms) ? Str(terms, "valid_from") : null)
+                ?? throw new FormatException("the agreement has no agreed_terms.valid_from"));
+        var t = now ?? DateTimeOffset.UtcNow;
+        IReadOnlyList<string> Vouching(NAKeyHistory h) => h.KeysAt(at).Intersect(h.KeysAt(t)).ToList();
+        return VerifyAgreement(agreementJson, Vouching(offerer), Vouching(responder), expectedGraphDigest);
+    }
+
     // ── boundary decisions ─────────────────────────────────────────────────
 
     /// <summary>Verify a BoundaryDecision's signature, expiry and bindings offline.</summary>
     public static DecisionVerificationResult VerifyBoundaryDecision(string decisionJson, DecisionVerifyOptions options)
     {
+        if (options.KeyHistory is not null && options.OperatorPublicKeys.Count > 0)
+            throw new ArgumentException("pass OperatorPublicKeys or KeyHistory, not both", nameof(options));
         using var doc = StrictJson.Parse(decisionJson);
         var d = doc.RootElement;
         var authorized = Bool(d, "authorized");
@@ -222,13 +260,19 @@ public static class OfflineVerifier
         // fails as invalid_signature.
         if (SignatureAbsent(d)) return Reject("missing_signature");
         var sig = SignatureOf(d) ?? "";
-        var now = options.Now ?? DateTimeOffset.UtcNow;
+        // v1.5.0: the decision's own time, for the key history and AtRecordTime.
+        var madeAtText = Str(d, "decision_made_at") ?? "";
+        var madeAtParses = TryParseTimestamp(madeAtText, out var madeAt);
+        var now = options.AtRecordTime ? madeAt : options.Now ?? DateTimeOffset.UtcNow;
         // v1.3.1: an expiry that does not parse is left to the signature and form checks, as in the
         // reference; when they pass, it is refused as before (FormatException).
         var expiry = Str(d, "decision_valid_until") ?? "";
         var expiryParses = TryParseTimestamp(expiry, out var validUntil);
-        if (expiryParses && now > validUntil) return Reject("decision_expired");
-        if (!VerifyEd25519(Canonical.Of(d, Signature, DecisionOmittedWhenAbsent), sig, options.OperatorPublicKeys))
+        if (expiryParses && (madeAtParses || !options.AtRecordTime) && now > validUntil) return Reject("decision_expired");
+        var signed = Canonical.Of(d, Signature, DecisionOmittedWhenAbsent);
+        // v1.5.0: with a key history, any key of it first; the key valid at decision_made_at after the form
+        // checks, as the reference orders them.
+        if (!VerifyEd25519(signed, sig, options.KeyHistory?.AllKeys() ?? options.OperatorPublicKeys))
             return Reject("invalid_signature");
         // v1.2.0: an authentic decision with a signed field this SDK does not know, or expected inputs
         // it cannot read, is refused by name: upgrade this SDK (StrictFields).
@@ -240,6 +284,16 @@ public static class OfflineVerifier
         // v1.2.0: a decision signed over a form the reference does not write.
         if (StrictFields.NonCanonicalFields("BoundaryDecision", d).Count > 0) return Reject("non_canonical_form");
         if (!expiryParses) throw new FormatException($"decision_valid_until \"{expiry}\" is not a timestamp");
+        if ((options.KeyHistory is not null || options.AtRecordTime) && !madeAtParses)
+            throw new FormatException($"decision_made_at \"{madeAtText}\" is not a timestamp");
+        if (options.KeyHistory is { } history)
+        {
+            // v1.5.0: signed by a key of the NA's history, but not the one valid when the decision was made.
+            if (history.KeysAt(madeAt).FirstOrDefault(k => VerifyEd25519(signed, sig, new[] { k })) is not { } signer)
+                return Reject("na_key_not_valid_at_time");
+            // v1.5.0: valid longer than the key that signed it may vouch for.
+            if (history.DecisionOutlivesKey(signer, validUntil)) return Reject("decision_outlives_key");
+        }
 
         if (IsObject(d, "freshness_proof", out var proof) && options.FreshnessProofIssuerKeys is { Count: > 0 } issuers)
         {
