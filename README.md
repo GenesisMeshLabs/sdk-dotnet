@@ -254,9 +254,13 @@ From 1.5.0 a Network Authority can move to a new signing key (a key
 succession, signed by its offline root key and by the outgoing key). Pass the
 NA's key history and a record must carry the signature of the key valid at
 the record's own time: a decision's `decision_made_at`, an agreement's
-`established_at`. A succeeded key is still accepted for 300 seconds after the
-next key takes effect (`NAKeyHistory.SuccessionHandover`). Without a history
-nothing changes: a list of keys is valid at every time.
+`agreed_terms.valid_from` (`NAKeyHistory.RecordTimeFields` lists the time of
+each NA-signed record). A succeeded key is still accepted for 300 seconds
+after the next key takes effect (`NAKeyHistory.SuccessionHandover`). A
+decision may not stay valid more than `NAKeyHistory.MaxDecisionLifetime`
+(300 seconds) past the end of the key that signed it, and an agreement
+vouches only while its key is still accepted. Without a history nothing
+changes: a list of keys is valid at every time.
 
 ```csharp
 // The body of GET /na/key-history, checked from the root key you hold out of band.
@@ -269,18 +273,21 @@ var d = OfflineVerifier.VerifyBoundaryDecision(decisionJson, new DecisionVerifyO
     KeyHistory = h.History,   // instead of OperatorPublicKeys
     AtRecordTime = true,      // optional: an archived decision, judged as of decision_made_at
 });
-// d.Reason "na_key_not_valid_at_time": signed by a key of the history, but not the one valid then.
+// d.Reason "na_key_not_valid_at_time": signed by a key of the history, but not the one valid then;
+// "decision_outlives_key": valid longer than its key may vouch for.
 
 var a = OfflineVerifier.VerifyAgreementWithKeyHistory(agreementJson, h.History!,
-    NAKeyHistory.ValidAlways(new[] { responderKey }));
+    NAKeyHistory.ValidAlways(new[] { responderKey }));   // optional now: the time the key must still be accepted
 ```
 
 `OfflineVerifier.VerifyKeyHistory(genesisJson, successionsJson, rootPublicKey)`
 takes the genesis block and the succession records directly. The refusal
 reasons and their order are the reference's: `genesis_invalid`,
-`genesis_root_mismatch`, `genesis_invalid_signature`, then for each
-succession `payload_invalid`, `invalid_signature`, `unknown_field`,
-`non_canonical_form` and the `succession_*` reasons. The SDK runs the key
+`genesis_root_mismatch`, `unknown_field`, `non_canonical_form`,
+`genesis_invalid_signature`, then for each succession `payload_invalid`,
+`unknown_field` or `invalid_signature`, `non_canonical_form` and the
+`succession_*` reasons. A succession carries three signatures: the root
+key's, the new key's (proof that it is held) and the outgoing key's. The SDK runs the key
 history vectors of the shared `audit` suite
 (`tests/GenesisMesh.Sdk.Tests/testdata/conformance/audit.json`).
 
