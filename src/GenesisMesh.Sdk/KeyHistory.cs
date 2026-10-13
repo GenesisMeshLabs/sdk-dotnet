@@ -33,6 +33,35 @@ public sealed class NAKeyHistory
     /// </summary>
     public static readonly TimeSpan SuccessionHandover = TimeSpan.FromSeconds(300);
 
+    /// <summary>
+    /// The longest lifetime of a decision the NA issues: a decision signed by a key with an end is refused when it
+    /// stays valid past that end, the hand-over and this lifetime (<c>decision_outlives_key</c>), so the holder of a
+    /// succeeded key cannot mint a long-lived decision dated inside its window.
+    /// </summary>
+    public static readonly TimeSpan MaxDecisionLifetime = TimeSpan.FromSeconds(300);
+
+    /// <summary>
+    /// The field giving the time an NA-signed record read alone is placed at in the key history: the key that may
+    /// sign it is the key valid then. In the evidence store every entry is placed at its envelope's
+    /// <c>recorded_at</c> instead.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> RecordTimeFields = new Dictionary<string, string>
+    {
+        ["ArchiveRecord"] = "archived_at",
+        ["AuditPackManifest"] = "created_at",
+        ["BoundaryDecision"] = "decision_made_at",
+        ["BoundaryPolicy"] = "issued_at",
+        ["JudgementRecord"] = "judged_at",
+        ["JustificationProof"] = "proof_issued_at",
+        ["MembershipAttestation"] = "issued_at",
+        ["QuarantineRecord"] = "quarantined_at",
+        ["RecognitionTreaty"] = "issued_at",
+        ["RegistryRecord"] = "effective_at",
+        ["RetentionCheckpoint"] = "created_at",
+        ["ReviewRecord"] = "decided_at",
+        ["StoreAnchor"] = "anchored_at",
+    };
+
     public NAKeyHistory(string sovereignId, string? rootPublicKey, IReadOnlyList<NAKey> keys)
     {
         SovereignId = sovereignId;
@@ -56,6 +85,18 @@ public sealed class NAKeyHistory
 
     /// <summary>The public keys a record dated <paramref name="at"/> may be signed with.</summary>
     public IReadOnlyList<string> KeysAt(DateTimeOffset at) => Keys.Where(k => k.Accepts(at)).Select(k => k.PublicKey).ToList();
+
+    /// <summary>
+    /// True when a decision signed by <paramref name="publicKey"/> stays valid past what that key may vouch for: its
+    /// end (its succession, or its enforced valid_to), the hand-over and <see cref="MaxDecisionLifetime"/>.
+    /// </summary>
+    internal bool DecisionOutlivesKey(string publicKey, DateTimeOffset validUntil)
+    {
+        var key = Keys.FirstOrDefault(k => k.PublicKey == publicKey);
+        if (key is null) return false;
+        var ends = new[] { key.SucceededAt, key.ValidToEnforced ? key.ValidTo : null }.OfType<DateTimeOffset>().ToList();
+        return ends.Count > 0 && validUntil > ends.Min() + SuccessionHandover + MaxDecisionLifetime;
+    }
 }
 
 /// <summary>
@@ -124,6 +165,9 @@ public static partial class OfflineVerifier
             throw new FormatException("successions must be a JSON array");
         if (block.ValueKind != JsonValueKind.Object || !ValidGenesis(block)) return Fail(1, "genesis_invalid");
         if (Str(block, "root_public_key") != root) return Fail(1, "genesis_root_mismatch");
+        // v1.5.0 review fixes: strict like every other signed root.
+        if (StrictRefusal("GenesisBlock", block, new[] { root }) is { } form && form != "invalid_signature")
+            return Fail(1, form);
         if (!SignedAsReceived("GenesisBlock", block, new[] { root })) return Fail(1, "genesis_invalid_signature");
         var sovereign = Str(block, "network_name")!;
         var na = block.GetProperty("network_authority");
@@ -168,38 +212,61 @@ public static partial class OfflineVerifier
 
     private sealed record Succession(
         int KeySequence, string PreviousKeyId, string PreviousPublicKey, string? PreviousDigest, string NewKeyId,
-        string NewPublicKey, DateTimeOffset EffectiveAt, DateTimeOffset NewValidTo, string Digest);
+        string NewPublicKey, DateTimeOffset EffectiveAt, DateTimeOffset NewValidTo, DateTimeOffset IssuedAt, string Digest);
 
-    /// <summary>The parsed record (null when it does not parse) and why it is refused, in the reference order.</summary>
+    /// <summary>
+    /// The parsed record (null when it does not parse) and why it is refused, in the reference order (v1.5.0 review
+    /// fixes): <c>payload_invalid</c>; <c>unknown_field</c> or <c>invalid_signature</c>, <c>non_canonical_form</c>;
+    /// <c>succession_sovereign_mismatch</c>, <c>succession_chain_break</c>, <c>succession_key_reused</c> (the root key
+    /// included), <c>succession_backdated</c>, <c>succession_not_increasing</c>, <c>succession_after_expiry</c>; then
+    /// the root key's, the new key's and the outgoing key's signatures.
+    /// </summary>
     private static (Succession? Record, string? Reason) SuccessionRefusal(
         JsonElement raw, NAKey previous, string? previousDigest, string sovereign, string root, IReadOnlyList<NAKey> held)
     {
         const string model = "KeySuccessionRecord";
         if (raw.ValueKind != JsonValueKind.Object) return (null, "payload_invalid");
-        var signers = new[] { root, previous.PublicKey };
-        if (StrictFields.UnknownFields(model, raw).Count > 0)
-            // Signed over a field this release does not know, or not signed as received.
-            return (null, SignedAsReceived(model, raw, signers) ? "unknown_field" : "invalid_signature");
+        // Parsed with its unknown fields set aside.
         var record = ParseSuccession(raw);
         if (record is null) return (null, "payload_invalid");
-        if (StrictFields.NonCanonicalFields(model, raw).Count > 0)
-            return (record, SignedAsReceived(model, raw, signers) ? "non_canonical_form" : "invalid_signature");
+        var signers = ValidPublicKey(record.NewPublicKey)
+            ? new[] { root, previous.PublicKey, record.NewPublicKey } : new[] { root, previous.PublicKey };
+        if (StrictRefusal(model, raw, signers) is { } form) return (record, form);
         if (Str(raw, "sovereign_id") != sovereign) return (record, "succession_sovereign_mismatch");
         if (record.KeySequence != previous.KeySequence + 1 || record.PreviousPublicKey != previous.PublicKey
             || record.PreviousDigest != previousDigest)
             return (record, "succession_chain_break");
-        if (!ValidPublicKey(record.NewPublicKey) || held.Any(k => k.PublicKey == record.NewPublicKey))
+        if (!ValidPublicKey(record.NewPublicKey) || record.NewPublicKey == root || held.Any(k => k.PublicKey == record.NewPublicKey))
             return (record, "succession_key_reused");
+        if (record.IssuedAt > record.EffectiveAt) return (record, "succession_backdated");
         if ((previous.ValidFrom is { } start && record.EffectiveAt <= start) || record.NewValidTo <= record.EffectiveAt)
             return (record, "succession_not_increasing");
         if (previous.ValidToEnforced && previous.ValidTo is { } end && record.EffectiveAt > end)
             return (record, "succession_after_expiry");
         if (!SignedAsReceived(model, raw, new[] { root })) return (record, "succession_invalid_root_signature");
+        // The new key's signature proves it exists and is held.
+        if (!SignedAsReceived(model, raw, new[] { record.NewPublicKey })) return (record, "succession_invalid_new_key_signature");
         if (!SignedAsReceived(model, raw, new[] { previous.PublicKey })) return (record, "succession_invalid_previous_signature");
         return (record, null);
     }
 
-    /// <summary>A KeySuccessionRecord read as the reference validates it; null for <c>payload_invalid</c>.</summary>
+    /// <summary>
+    /// Why a record must be refused for its form, or null: with a field this release does not know, or not in
+    /// canonical form, <c>unknown_field</c> or <c>non_canonical_form</c> when a signature by one of the signers
+    /// verifies over it as received, <c>invalid_signature</c> otherwise.
+    /// </summary>
+    private static string? StrictRefusal(string model, JsonElement obj, IReadOnlyList<string> signers)
+    {
+        var unknown = StrictFields.UnknownFields(model, obj).Count > 0;
+        if (!unknown && StrictFields.NonCanonicalFields(model, obj).Count == 0) return null;
+        if (!SignedAsReceived(model, obj, signers)) return "invalid_signature";
+        return unknown ? "unknown_field" : "non_canonical_form";
+    }
+
+    /// <summary>
+    /// A KeySuccessionRecord read as the reference validates it, its unknown fields set aside; null for
+    /// <c>payload_invalid</c>.
+    /// </summary>
     private static Succession? ParseSuccession(JsonElement obj)
     {
         string? Text(string key, int min, int max)
@@ -235,9 +302,9 @@ public static partial class OfflineVerifier
             return null;
         if (Text("previous_key_id", 1, 128) is not { } previousKeyId || Text("previous_public_key", 1, 128) is not { } previousKey
             || Text("new_key_id", 1, 128) is not { } newKeyId || Text("new_public_key", 1, 128) is not { } newKey
-            || Utc("effective_at") is not { } effective || Utc("new_valid_to") is not { } validTo || Utc("issued_at") is null)
+            || Utc("effective_at") is not { } effective || Utc("new_valid_to") is not { } validTo || Utc("issued_at") is not { } issued)
             return null;
-        return new Succession(keySequence, previousKeyId, previousKey, previousDigest, newKeyId, newKey, effective, validTo,
+        return new Succession(keySequence, previousKeyId, previousKey, previousDigest, newKeyId, newKey, effective, validTo, issued,
             Sha256Hex(ReceivedCanonical("KeySuccessionRecord", obj)));
     }
 
