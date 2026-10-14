@@ -41,9 +41,9 @@ public sealed class NAKeyHistory
     public static readonly TimeSpan MaxDecisionLifetime = TimeSpan.FromSeconds(300);
 
     /// <summary>
-    /// The field giving the time an NA-signed record read alone is placed at in the key history: the key that may
-    /// sign it is the key valid then. In the evidence store every entry is placed at its envelope's
-    /// <c>recorded_at</c> instead.
+    /// The field giving the time an NA-signed record read alone is placed at in the key history (from v1.6.0 also a
+    /// grant, its revocation and a time token, read alone or nested in a use): the key that may sign it is the key
+    /// valid then. In the evidence store every entry is placed at its envelope's <c>recorded_at</c> instead.
     /// </summary>
     public static readonly IReadOnlyDictionary<string, string> RecordTimeFields = new Dictionary<string, string>
     {
@@ -51,6 +51,8 @@ public sealed class NAKeyHistory
         ["AuditPackManifest"] = "created_at",
         ["BoundaryDecision"] = "decision_made_at",
         ["BoundaryPolicy"] = "issued_at",
+        ["CapabilityGrant"] = "issued_at",
+        ["GrantRevocationRecord"] = "revoked_at",
         ["JudgementRecord"] = "judged_at",
         ["JustificationProof"] = "proof_issued_at",
         ["MembershipAttestation"] = "issued_at",
@@ -60,6 +62,7 @@ public sealed class NAKeyHistory
         ["RetentionCheckpoint"] = "created_at",
         ["ReviewRecord"] = "decided_at",
         ["StoreAnchor"] = "anchored_at",
+        ["TimeToken"] = "issued_at",
     };
 
     public NAKeyHistory(string sovereignId, string? rootPublicKey, IReadOnlyList<NAKey> keys)
@@ -328,7 +331,7 @@ public static partial class OfflineVerifier
     }
 
     /// <summary>True when a signature on the record verifies over its received form with one of the keys.</summary>
-    private static bool SignedAsReceived(string model, JsonElement obj, IReadOnlyList<string> keys)
+    internal static bool SignedAsReceived(string model, JsonElement obj, IReadOnlyList<string> keys)
     {
         var spec = StrictFields.Model(model);
         var body = ReceivedCanonical(model, obj);
