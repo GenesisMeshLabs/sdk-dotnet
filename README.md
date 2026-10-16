@@ -434,6 +434,10 @@ dotnet build
 dotnet test
 ```
 
+Contributing: [CONTRIBUTING.md](https://github.com/GenesisMeshLabs/sdk-dotnet/blob/main/CONTRIBUTING.md).
+How the SDK is laid out and where a change goes:
+[docs/architecture.md](https://github.com/GenesisMeshLabs/sdk-dotnet/blob/main/docs/architecture.md).
+
 ## License
 
 MIT
