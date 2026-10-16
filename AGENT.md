@@ -168,7 +168,8 @@ Every version shipped must:
 5. Once the package is on NuGet.org, set `<PackageValidationBaselineVersion>`
    in `src/GenesisMesh.Sdk/GenesisMesh.Sdk.csproj` to the new version and
    delete `src/GenesisMesh.Sdk/CompatibilitySuppressions.xml` if it exists.
-   The `API compatibility` check fails every pull request until then.
+   Until then the `API compatibility` check warns on pull requests and
+   fails on main, and package validation compares with the older release.
 
 Publishing uses NuGet trusted publishing when it is configured, and the
 long-lived `NUGET_API_KEY` secret only as a fallback. To configure it:

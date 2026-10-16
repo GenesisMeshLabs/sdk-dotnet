@@ -153,8 +153,8 @@ changed public member (`CP0001`, `CP0002`, ...). To make the break on purpose:
 run by CI); the `release/<version>` pull request folds the fragments
 (`python scripts/changelog.py release`). After the package is on NuGet, set
 `<PackageValidationBaselineVersion>` to it and delete
-`CompatibilitySuppressions.xml`; the `API compatibility` check fails every
-pull request until then.
+`CompatibilitySuppressions.xml`; until then the `API compatibility` check
+warns on pull requests and fails on main.
 
 ## Other checks
 

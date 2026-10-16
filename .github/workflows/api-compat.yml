@@ -4,9 +4,10 @@ name: API compatibility
 # removed or changed public member. A break made on purpose is recorded in
 # src/GenesisMesh.Sdk/CompatibilitySuppressions.xml; this check fails a pull
 # request that changes that file unless it carries the label "breaking" and
-# adds a changelog fragment with an "### Upgrading" section. It also fails
-# when a newer release than the validation baseline is on NuGet
-# (scripts/api_compat.py).
+# adds a changelog fragment with an "### Upgrading" section. When a newer
+# release than the validation baseline is on NuGet, it warns on pull requests
+# and in the merge queue, and fails on a push to main, until the baseline is
+# moved to that release (scripts/api_compat.py, AGENT.md release steps).
 
 on:
   push:
@@ -29,7 +30,12 @@ jobs:
           fetch-depth: 0
 
       - name: The validation baseline is the latest release
-        run: python3 scripts/api_compat.py baseline
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            python3 scripts/api_compat.py baseline --strict
+          else
+            python3 scripts/api_compat.py baseline
+          fi
 
       - name: A break accepted on purpose is labelled breaking and has an Upgrading note
         if: github.event_name == 'pull_request'

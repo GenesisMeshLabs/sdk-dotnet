@@ -10,14 +10,16 @@ public member (CP0001, CP0002, ...). A break made on purpose is recorded in
 
 This script checks the two things package validation cannot:
 
-    python3 scripts/api_compat.py baseline
+    python3 scripts/api_compat.py baseline [--strict]
     python3 scripts/api_compat.py gate --base BASE_SHA --head HEAD_SHA --labels '["breaking"]'
 
-``baseline`` fails when a release newer than the baseline is on NuGet: the
+``baseline`` reports a release newer than the baseline that is on NuGet: the
 baseline must be the latest release, or a later break would be compared with
-an older API. (A tag whose package is not on NuGet yet, while publish.yml
-runs, only warns.) After a release, set the baseline to it and delete the
-suppression file in one pull request.
+an older API. It warns, so a release does not turn every open pull request
+red; with ``--strict`` (CI on a push to main) it fails. After a release, set
+the baseline to it and delete the suppression file in one pull request (the
+release steps in AGENT.md). A tag whose package is not on NuGet yet, while
+publish.yml runs, only warns.
 
 ``gate`` fails a pull request that adds or changes the suppression file (it
 accepts a break) unless the pull request carries the label ``breaking`` and
@@ -74,7 +76,7 @@ def _published(package: str) -> set[str]:
         return set(json.load(response)["versions"])
 
 
-def baseline(remote: str) -> int:
+def baseline(remote: str, strict: bool) -> int:
     current = _property("PackageValidationBaselineVersion")
     tags = _release_tags(remote)
     if not tags:
@@ -89,10 +91,11 @@ def baseline(remote: str) -> int:
         print(f"::warning::Release {latest_text} is tagged but not on NuGet yet; package validation still compares "
               f"with {current}. Once it is published, set PackageValidationBaselineVersion to {latest_text}.")
         return 0
-    print(f"::error::Package validation compares with {current}, but {latest_text} is released. Set "
+    level = "error" if strict else "warning"
+    print(f"::{level}::Package validation compares with {current}, but {latest_text} is released. Set "
           f"<PackageValidationBaselineVersion> in {PROJECT.relative_to(ROOT).as_posix()} to {latest_text} and delete "
           f"{SUPPRESSIONS} (its breaks are in the release now).")
-    return 1
+    return 1 if strict else 0
 
 
 def _changed(base: str, head: str, *paths: str) -> list[str]:
@@ -126,13 +129,14 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     base_cmd = commands.add_parser("baseline", help="the baseline is the latest release on NuGet")
     base_cmd.add_argument("--remote", default="https://github.com/GenesisMeshLabs/sdk-dotnet.git")
+    base_cmd.add_argument("--strict", action="store_true", help="fail, rather than warn, on a stale baseline")
     gate_cmd = commands.add_parser("gate", help="an accepted break has the label and an Upgrading note")
     gate_cmd.add_argument("--base", required=True)
     gate_cmd.add_argument("--head", required=True)
     gate_cmd.add_argument("--labels", default="[]", help="the pull request's labels as a JSON list")
     args = parser.parse_args()
     if args.command == "baseline":
-        return baseline(args.remote)
+        return baseline(args.remote, args.strict)
     return gate(args.base, args.head, json.loads(args.labels))
 
 
