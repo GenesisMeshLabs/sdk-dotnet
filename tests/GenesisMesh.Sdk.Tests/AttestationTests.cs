@@ -83,6 +83,60 @@ public class AttestationTests
         Assert.Equal("/admin/attestations/att-99/revoke", capturedPath);
     }
 
+    // 1.7.1: the ID went into the path as given, so "x/../../recognition-policy?" signed and sent a request to
+    // POST /admin/recognition-policy (the HTTP client resolves the dot segments). An ID that is not one path
+    // segment is refused before anything is signed or sent.
+    [Theory]
+    [InlineData("x/../../recognition-policy?")]
+    [InlineData("a/b")]
+    [InlineData("..")]
+    [InlineData(".")]
+    [InlineData("")]
+    [InlineData("a?b")]
+    [InlineData("a#b")]
+    [InlineData("a%2Fb")]
+    [InlineData("a\\b")]
+    [InlineData("a\nb")]
+    [InlineData("a\u007fb")]
+    public async Task Revoke_RefusesAnIdThatIsNotOnePathSegment(string attestationId)
+    {
+        var sent = 0;
+        using var handler = new FuncHandler(_ =>
+        {
+            sent++;
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        var e = await Assert.ThrowsAsync<ArgumentException>(() =>
+            AdminClient(handler).Attestation.Revoke(attestationId, new Dictionary<string, object?> { ["reason"] = "x" }));
+        Assert.Equal("attestationId", e.ParamName);
+        Assert.Equal(0, sent);
+    }
+
+    [Fact]
+    public async Task Revoke_RefusesANullId()
+    {
+        using var handler = new FuncHandler(_ => new HttpResponseMessage(HttpStatusCode.NoContent));
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            AdminClient(handler).Attestation.Revoke(null!, new Dictionary<string, object?>()));
+    }
+
+    [Theory]
+    [InlineData("att-99")]
+    [InlineData("0f8fad5b-d9cb-469f-a165-70867728950e")]
+    [InlineData("att_1.2~x")]
+    [InlineData("...")]
+    public async Task Revoke_KeepsAnIdThatIsOnePathSegment(string attestationId)
+    {
+        string? path = null;
+        using var handler = new FuncHandler(req =>
+        {
+            path = req.RequestUri!.AbsolutePath;
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        await AdminClient(handler).Attestation.Revoke(attestationId, new Dictionary<string, object?>());
+        Assert.Equal($"/admin/attestations/{attestationId}/revoke", path);
+    }
+
     [Fact]
     public async Task Revoke_422Response_ThrowsValidationException()
     {
