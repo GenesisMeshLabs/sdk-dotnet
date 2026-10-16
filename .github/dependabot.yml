@@ -20,3 +20,5 @@ updates:
         patterns:
           - "Microsoft.NET.Test.Sdk"
           - "xunit*"
+          - "FsCheck"
+          - "coverlet.collector"

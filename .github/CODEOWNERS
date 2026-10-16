@@ -38,3 +38,12 @@
 /scripts/changelog.py @GenesisMeshLabs/maintainers
 /scripts/check-version.ps1 @GenesisMeshLabs/maintainers
 /scripts/check_trx.py @GenesisMeshLabs/maintainers
+
+# Ratchets: the layer table and its allowlist, accepted API breaks, the
+# coverage and compatibility checks, the formatting rules
+/tests/GenesisMesh.Sdk.Tests/ArchitectureTests.cs @GenesisMeshLabs/maintainers
+/src/GenesisMesh.Sdk/CompatibilitySuppressions.xml @GenesisMeshLabs/maintainers
+/tests/GenesisMesh.Sdk.Tests/GenesisMesh.Sdk.Tests.csproj @GenesisMeshLabs/maintainers
+/scripts/check_coverage.py @GenesisMeshLabs/maintainers
+/scripts/api_compat.py @GenesisMeshLabs/maintainers
+/.editorconfig @GenesisMeshLabs/maintainers
