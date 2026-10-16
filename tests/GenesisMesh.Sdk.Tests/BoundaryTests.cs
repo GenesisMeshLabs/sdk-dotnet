@@ -14,17 +14,17 @@ public class BoundaryTests
     private static GenesisMeshClient AdminClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
-            SigningKey   = TestHelpers.ZeroSeedB64,
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
             Audience = "TEST",
-            KeyId        = "test-key",
-            HttpHandler  = h,
+            KeyId = "test-key",
+            HttpHandler = h,
         });
 
     private static GenesisMeshClient PublicClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
+            BaseUrl = "http://localhost",
             HttpHandler = h,
         });
 

@@ -9,19 +9,19 @@ namespace GenesisMesh;
 internal sealed class Transport : IDisposable
 {
     private readonly HttpClient _http;
-    private readonly string     _baseUrl;
-    private readonly byte[]?    _seed;
-    private readonly string     _keyId;
+    private readonly string _baseUrl;
+    private readonly byte[]? _seed;
+    private readonly string _keyId;
     private readonly SemaphoreSlim _audienceLock = new(1, 1);
-    private string?             _audience;
+    private string? _audience;
 
     internal Transport(ClientOptions opts)
     {
         _baseUrl = opts.BaseUrl.TrimEnd('/');
-        _keyId   = opts.KeyId ?? "";
-        _http    = opts.HttpHandler is not null
+        _keyId = opts.KeyId ?? "";
+        _http = opts.HttpHandler is not null
             ? new HttpClient(opts.HttpHandler, disposeHandler: false) { Timeout = opts.Timeout > TimeSpan.Zero ? opts.Timeout : TimeSpan.FromSeconds(10) }
-            : new HttpClient                                          { Timeout = opts.Timeout > TimeSpan.Zero ? opts.Timeout : TimeSpan.FromSeconds(10) };
+            : new HttpClient { Timeout = opts.Timeout > TimeSpan.Zero ? opts.Timeout : TimeSpan.FromSeconds(10) };
 
         if (!string.IsNullOrEmpty(opts.SigningKey))
             _seed = Auth.LoadSeed(opts.SigningKey);
@@ -90,10 +90,10 @@ internal sealed class Transport : IDisposable
         await DoAsync<T>(HttpMethod.Get, path, null, null, ct).ConfigureAwait(false);
 
     private async Task<T> DoAsync<T>(
-        HttpMethod     method,
-        string         path,
-        object?        body,
-        AdminHeaders?  adminHeaders,
+        HttpMethod method,
+        string path,
+        object? body,
+        AdminHeaders? adminHeaders,
         CancellationToken ct)
     {
         using var req = new HttpRequestMessage(method, _baseUrl + path);
@@ -106,10 +106,10 @@ internal sealed class Transport : IDisposable
 
         if (adminHeaders is not null)
         {
-            req.Headers.Add("X-Admin-Key-Id",    adminHeaders.KeyId);
+            req.Headers.Add("X-Admin-Key-Id", adminHeaders.KeyId);
             req.Headers.Add("X-Admin-Signature", adminHeaders.Signature);
             req.Headers.Add("X-Admin-Timestamp", adminHeaders.Timestamp);
-            req.Headers.Add("X-Admin-Nonce",     adminHeaders.Nonce);
+            req.Headers.Add("X-Admin-Nonce", adminHeaders.Nonce);
         }
 
         HttpResponseMessage resp;

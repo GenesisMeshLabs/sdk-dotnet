@@ -18,9 +18,9 @@ internal static class TestHelpers
     public static GenesisMeshClient ClientWithHandler(HttpMessageHandler handler) =>
         new(new ClientOptions
         {
-            BaseUrl    = "http://localhost",
+            BaseUrl = "http://localhost",
             SigningKey = ZeroSeedB64,
-            KeyId      = "test-key",
+            KeyId = "test-key",
         });
 
     public static HttpMessageHandler RespondWith(int status, object body)
@@ -48,7 +48,7 @@ public class AuthTests
     {
         var dict = new Dictionary<string, object?> { ["z"] = 1, ["a"] = 2 };
         var bytes = Auth.CanonicalJson(dict);
-        var json  = Encoding.UTF8.GetString(bytes);
+        var json = Encoding.UTF8.GetString(bytes);
         Assert.Equal("{\"a\":2,\"z\":1}", json);
     }
 
@@ -57,7 +57,7 @@ public class AuthTests
     {
         var dict = new Dictionary<string, object?> { ["detail"] = "A -> B" };
         var bytes = Auth.CanonicalJson(dict);
-        var json  = Encoding.UTF8.GetString(bytes);
+        var json = Encoding.UTF8.GetString(bytes);
         Assert.Contains("->", json);
         Assert.DoesNotContain("\\u003e", json);
     }
@@ -91,7 +91,7 @@ public class AuthTests
     public void BuildAdminHeaders_ReturnsAllFourHeaders()
     {
         var seed = Auth.LoadSeed(TestHelpers.ZeroSeedB64);
-        var h    = Auth.BuildAdminHeaders(new AdminRequest("POST", "/admin/invite", "TEST", new { }), "key-1", seed);
+        var h = Auth.BuildAdminHeaders(new AdminRequest("POST", "/admin/invite", "TEST", new { }), "key-1", seed);
         Assert.Equal("key-1", h.KeyId);
         Assert.False(string.IsNullOrEmpty(h.Signature));
         Assert.False(string.IsNullOrEmpty(h.Timestamp));
@@ -102,7 +102,7 @@ public class AuthTests
     public void BuildAdminHeaders_TimestampEndsWithZ()
     {
         var seed = Auth.LoadSeed(TestHelpers.ZeroSeedB64);
-        var h    = Auth.BuildAdminHeaders(new AdminRequest("POST", "/admin/invite", "TEST", new { }), "k", seed);
+        var h = Auth.BuildAdminHeaders(new AdminRequest("POST", "/admin/invite", "TEST", new { }), "k", seed);
         Assert.EndsWith("Z", h.Timestamp);
     }
 
@@ -260,20 +260,20 @@ public class AgreementClientTests
 
         var client = new GenesisMeshClient(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
-            SigningKey   = TestHelpers.ZeroSeedB64,
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
             Audience = "TEST",
-            KeyId        = "test",
-            HttpHandler  = handler,
+            KeyId = "test",
+            HttpHandler = handler,
         });
         var rec = await client.Agreement.Offer(new CapabilityOffer
         {
             ResponderSovereignId = "NA-B",
             Capabilities = ["read"],
-            Roles        = ["role:client"],
-            ValidFrom    = "2026-01-01T00:00:00.000Z",
-            ValidUntil   = "2027-01-01T00:00:00.000Z",
-            ExpiresAt    = "2026-01-08T00:00:00.000Z",
+            Roles = ["role:client"],
+            ValidFrom = "2026-01-01T00:00:00.000Z",
+            ValidUntil = "2027-01-01T00:00:00.000Z",
+            ExpiresAt = "2026-01-08T00:00:00.000Z",
         });
 
         Assert.Equal("off-1", rec.OfferId);
@@ -292,7 +292,7 @@ public class AgreementClientTests
         });
         var client = new GenesisMeshClient(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
+            BaseUrl = "http://localhost",
             HttpHandler = handler,
         });
         var result = await client.Agreement.Verify(
@@ -320,18 +320,18 @@ public class EvidenceClientTests
         });
         var client = new GenesisMeshClient(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
-            SigningKey   = TestHelpers.ZeroSeedB64,
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
             Audience = "TEST",
-            KeyId        = "test",
-            HttpHandler  = handler,
+            KeyId = "test",
+            HttpHandler = handler,
         });
         var ev = await client.Evidence.Build(new TrustDecision
         {
             SourceSovereignId = "ALPHA",
             TargetSovereignId = "BETA",
-            Verdict           = "allow",
-            Reason            = "passed",
+            Verdict = "allow",
+            Reason = "passed",
         });
         Assert.Equal("ev-1", ev.EvidenceId);
         Assert.Equal("allow", ev.Verdict);
@@ -358,11 +358,11 @@ public class BoundaryClientTests
         });
         var client = new GenesisMeshClient(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
-            SigningKey   = TestHelpers.ZeroSeedB64,
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
             Audience = "TEST",
-            KeyId        = "test",
-            HttpHandler  = handler,
+            KeyId = "test",
+            HttpHandler = handler,
         });
         var dec = await client.Boundary.Decide(
             new Dictionary<string, object?> { ["requested_capability"] = "read:data" });
@@ -386,11 +386,11 @@ public class HttpErrorTests
             });
         var client = new GenesisMeshClient(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
-            SigningKey   = TestHelpers.ZeroSeedB64,
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
             Audience = "TEST",
-            KeyId        = "test",
-            HttpHandler  = handler,
+            KeyId = "test",
+            HttpHandler = handler,
         });
         var ex = await Assert.ThrowsAsync<ValidationException>(() =>
             client.Evidence.Build(new TrustDecision { Verdict = "trusted" }));
@@ -409,7 +409,10 @@ public class HttpErrorTests
             });
         var client = new GenesisMeshClient(new ClientOptions
         {
-            BaseUrl = "http://localhost", SigningKey = TestHelpers.ZeroSeedB64, Audience = "TEST", KeyId = "test",
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
+            Audience = "TEST",
+            KeyId = "test",
             HttpHandler = handler,
         });
         GenesisMeshException ex = await Assert.ThrowsAsync<ForbiddenException>(() =>

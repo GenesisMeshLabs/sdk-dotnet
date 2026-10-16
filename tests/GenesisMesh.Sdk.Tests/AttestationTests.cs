@@ -12,11 +12,11 @@ public class AttestationTests
     private static GenesisMeshClient AdminClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
-            SigningKey   = TestHelpers.ZeroSeedB64,
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
             Audience = "TEST",
-            KeyId        = "test-key",
-            HttpHandler  = h,
+            KeyId = "test-key",
+            HttpHandler = h,
         });
 
     [Fact]
@@ -29,8 +29,8 @@ public class AttestationTests
                 new MembershipAttestation
                 {
                     AttestationId = "att-1",
-                    Roles         = ["role:client"],
-                    IssuedAt      = "2026-06-30T00:00:00.000Z",
+                    Roles = ["role:client"],
+                    IssuedAt = "2026-06-30T00:00:00.000Z",
                 },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.Created)
@@ -42,7 +42,7 @@ public class AttestationTests
             new Dictionary<string, object?>
             {
                 ["subject_sovereign_id"] = "NA-B",
-                ["roles"]                = new[] { "role:client" },
+                ["roles"] = new[] { "role:client" },
             });
         Assert.Equal("att-1", att.AttestationId);
         Assert.Contains("role:client", att.Roles);
@@ -111,7 +111,7 @@ public class AttestationTests
         await AdminClient(handler).Attestation.SavePolicy(
             new Dictionary<string, object?>
             {
-                ["min_roles"]          = new[] { "role:anchor" },
+                ["min_roles"] = new[] { "role:anchor" },
                 ["require_signatures"] = true,
             });
         Assert.Equal("/admin/recognition-policy", capturedPath);

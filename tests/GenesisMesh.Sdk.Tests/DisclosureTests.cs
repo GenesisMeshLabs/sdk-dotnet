@@ -12,17 +12,17 @@ public class DisclosureTests
     private static GenesisMeshClient AdminClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
-            SigningKey   = TestHelpers.ZeroSeedB64,
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
             Audience = "TEST",
-            KeyId        = "test-key",
-            HttpHandler  = h,
+            KeyId = "test-key",
+            HttpHandler = h,
         });
 
     private static GenesisMeshClient PublicClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
+            BaseUrl = "http://localhost",
             HttpHandler = h,
         });
 
@@ -36,8 +36,8 @@ public class DisclosureTests
                 new
                 {
                     commitment_id = "cmt-1",
-                    merkle_root   = "abc123",
-                    committed_at  = "2026-06-30T00:00:00.000Z",
+                    merkle_root = "abc123",
+                    committed_at = "2026-06-30T00:00:00.000Z",
                 },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.Created)
@@ -99,9 +99,9 @@ public class DisclosureTests
             var json = JsonSerializer.Serialize(
                 new
                 {
-                    commitment_id       = "cmt-1",
+                    commitment_id = "cmt-1",
                     revealed_capability = "read:data",
-                    leaf_hash           = "hash-abc",
+                    leaf_hash = "hash-abc",
                 },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.OK)

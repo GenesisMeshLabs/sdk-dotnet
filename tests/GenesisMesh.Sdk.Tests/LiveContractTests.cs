@@ -68,7 +68,10 @@ public class LiveContractTests
             var recorder = new Recorder { InnerHandler = new HttpClientHandler() };
             using var gm = new GenesisMeshClient(new ClientOptions
             {
-                BaseUrl = baseUrl, SigningKey = seed, KeyId = keyId, HttpHandler = recorder,
+                BaseUrl = baseUrl,
+                SigningKey = seed,
+                KeyId = keyId,
+                HttpHandler = recorder,
             });
             var now = DateTimeOffset.UtcNow;
             string Iso(TimeSpan d) => now.Add(d).ToString("yyyy-MM-ddTHH:mm:ssK", CultureInfo.InvariantCulture);
@@ -96,8 +99,11 @@ public class LiveContractTests
 
             var offer = await gm.Agreement.Offer(new CapabilityOffer
             {
-                ResponderSovereignId = "sovereign-b", Capabilities = ["read", "write"], ValidFrom = Iso(TimeSpan.Zero),
-                ValidUntil = Iso(TimeSpan.FromHours(24)), ExpiresAt = Iso(TimeSpan.FromHours(1)),
+                ResponderSovereignId = "sovereign-b",
+                Capabilities = ["read", "write"],
+                ValidFrom = Iso(TimeSpan.Zero),
+                ValidUntil = Iso(TimeSpan.FromHours(24)),
+                ExpiresAt = Iso(TimeSpan.FromHours(1)),
             });
             var rawOffer = Check("agreement_offer", offer);
             Check("agreement_counter", await gm.Agreement.Counter(D(("offer", Raw(rawOffer)), ("capabilities", new[] { "read" }),
@@ -116,8 +122,12 @@ public class LiveContractTests
 
             var evidence = await gm.Evidence.Build(new TrustDecision
             {
-                SourceSovereignId = network, TargetSovereignId = "sovereign-b", Verdict = "allow",
-                Reason = "direct recognition", Trusted = true, HopCount = 1,
+                SourceSovereignId = network,
+                TargetSovereignId = "sovereign-b",
+                Verdict = "allow",
+                Reason = "direct recognition",
+                Trusted = true,
+                HopCount = 1,
             });
             var rawEvidence = Check("evidence_build", evidence);
             Assert.True(evidence.Trusted);

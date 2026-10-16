@@ -47,30 +47,30 @@ public class CanonicalSuiteTests
                 Assert.Equal(expected.GetProperty("canonical").GetBoolean(), StrictFields.CanonicalTimestamp(input.GetString()!));
                 break;
             case "verify_decision":
-            {
-                var r = OfflineVerifier.VerifyBoundaryDecision(input.GetProperty("decision").GetRawText(), new DecisionVerifyOptions
                 {
-                    OperatorPublicKeys = Strings(input, "operator_public_keys"),
-                    Now = OfflineVerifier.ParseTimestamp(input.GetProperty("now").GetString()!),
-                });
-                Assert.Equal((expected.GetProperty("accepted").GetBoolean(), expected.GetProperty("reason").GetString()), (r.Accepted, r.Reason));
-                break;
-            }
+                    var r = OfflineVerifier.VerifyBoundaryDecision(input.GetProperty("decision").GetRawText(), new DecisionVerifyOptions
+                    {
+                        OperatorPublicKeys = Strings(input, "operator_public_keys"),
+                        Now = OfflineVerifier.ParseTimestamp(input.GetProperty("now").GetString()!),
+                    });
+                    Assert.Equal((expected.GetProperty("accepted").GetBoolean(), expected.GetProperty("reason").GetString()), (r.Accepted, r.Reason));
+                    break;
+                }
             case "verify_agreement":
-            {
-                var r = OfflineVerifier.VerifyAgreement(input.GetProperty("agreement").GetRawText(),
-                    Strings(input, "offerer_public_keys"), Strings(input, "responder_public_keys"));
-                Assert.Equal((expected.GetProperty("accepted").GetBoolean(), expected.GetProperty("reason").GetString()), (r.Accepted, r.Reason));
-                break;
-            }
+                {
+                    var r = OfflineVerifier.VerifyAgreement(input.GetProperty("agreement").GetRawText(),
+                        Strings(input, "offerer_public_keys"), Strings(input, "responder_public_keys"));
+                    Assert.Equal((expected.GetProperty("accepted").GetBoolean(), expected.GetProperty("reason").GetString()), (r.Accepted, r.Reason));
+                    break;
+                }
             case "verify_intent":
-            {
-                var r = OfflineVerifier.VerifyDataAccessIntent(input.GetProperty("intent").GetRawText(),
-                    input.GetProperty("policy").GetRawText(), Strings(input, "agent_public_keys"),
-                    OfflineVerifier.ParseTimestamp(input.GetProperty("at").GetString()!));
-                Assert.Equal(expected.GetProperty("detail").GetString(), (r.Violations.Count > 0 ? r.Violations[0].Detail : null));
-                break;
-            }
+                {
+                    var r = OfflineVerifier.VerifyDataAccessIntent(input.GetProperty("intent").GetRawText(),
+                        input.GetProperty("policy").GetRawText(), Strings(input, "agent_public_keys"),
+                        OfflineVerifier.ParseTimestamp(input.GetProperty("at").GetString()!));
+                    Assert.Equal(expected.GetProperty("detail").GetString(), (r.Violations.Count > 0 ? r.Violations[0].Detail : null));
+                    break;
+                }
             default:
                 Assert.Fail($"unknown kind {v.GetProperty("kind").GetString()}");
                 break;

@@ -12,17 +12,17 @@ public class ConsensusTests
     private static GenesisMeshClient AdminClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
-            SigningKey   = TestHelpers.ZeroSeedB64,
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
             Audience = "TEST",
-            KeyId        = "test-key",
-            HttpHandler  = h,
+            KeyId = "test-key",
+            HttpHandler = h,
         });
 
     private static GenesisMeshClient PublicClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
+            BaseUrl = "http://localhost",
             HttpHandler = h,
         });
 
@@ -35,11 +35,11 @@ public class ConsensusTests
             var json = JsonSerializer.Serialize(
                 new ConsensusVote
                 {
-                    VoteId               = "vote-1",
-                    ProofId              = "jp-42",
+                    VoteId = "vote-1",
+                    ProofId = "jp-42",
                     ValidatorSovereignId = "ALPHA",
-                    Vote                 = true,
-                    VotedAt              = "2026-06-30T00:00:00Z",
+                    Vote = true,
+                    VotedAt = "2026-06-30T00:00:00Z",
                 },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.Created)
@@ -96,9 +96,9 @@ public class ConsensusTests
         var proof = await AdminClient(handler).Consensus.Proof(
             new Dictionary<string, object?>
             {
-                ["justification_proof"]     = new { proof_id = "proof-1" },
-                ["votes"]                   = votes,
-                ["required_threshold"]      = 2,
+                ["justification_proof"] = new { proof_id = "proof-1" },
+                ["votes"] = votes,
+                ["required_threshold"] = 2,
                 ["validator_sovereign_ids"] = new[] { "A", "B" },
             });
         Assert.Equal("proof-1", proof.ProofId);

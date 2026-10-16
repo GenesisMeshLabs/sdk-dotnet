@@ -53,8 +53,12 @@ public class KeyHistoryTests
     private static List<Dictionary<string, object?>> KeyDicts(NAKeyHistory? history) => (history?.Keys ?? Array.Empty<NAKey>()).Select(k =>
         new Dictionary<string, object?>
         {
-            ["key_sequence"] = k.KeySequence, ["key_id"] = k.KeyId, ["public_key"] = k.PublicKey,
-            ["valid_from"] = Iso(k.ValidFrom), ["succeeded_at"] = Iso(k.SucceededAt), ["valid_to"] = Iso(k.ValidTo),
+            ["key_sequence"] = k.KeySequence,
+            ["key_id"] = k.KeyId,
+            ["public_key"] = k.PublicKey,
+            ["valid_from"] = Iso(k.ValidFrom),
+            ["succeeded_at"] = Iso(k.SucceededAt),
+            ["valid_to"] = Iso(k.ValidTo),
             ["valid_to_enforced"] = k.ValidToEnforced,
         }).ToList();
 
@@ -75,54 +79,55 @@ public class KeyHistoryTests
         switch (v.GetProperty("kind").GetString())
         {
             case "canonical_form":
-            {
-                var body = OfflineVerifier.ReceivedCanonical(v.GetProperty("model").GetString()!, v.GetProperty("record"));
-                got = new Dictionary<string, object>
                 {
-                    ["canonical"] = body,
-                    ["digest"] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(body))).ToLowerInvariant(),
-                };
-                break;
-            }
-            case "key_history":
-            {
-                var input = v.GetProperty("input");
-                var r = OfflineVerifier.VerifyKeyHistory(input.GetProperty("genesis").GetRawText(),
-                    input.GetProperty("successions").GetRawText(), input.GetProperty("root_public_key").GetString()!);
-                got = new Dictionary<string, object>
-                {
-                    ["verified"] = r.Verified,
-                    ["failures"] = r.Verified ? new List<object>()
-                        : new List<object> { new Dictionary<string, object?> { ["key_sequence"] = r.KeySequence, ["reason"] = r.Reason } },
-                    ["keys"] = KeyDicts(r.History),
-                };
-                break;
-            }
-            case "key_at":
-            {
-                var input = v.GetProperty("input");
-                got = new Dictionary<string, object>
-                {
-                    ["keys"] = HistoryOf(input).KeysAt(OfflineVerifier.ParseTimestamp(input.GetProperty("at").GetString()!)),
-                };
-                break;
-            }
-            case "decision_at_record_time":
-            {
-                var input = v.GetProperty("input");
-                var history = HistoryOf(input);
-                var decision = input.GetProperty("decision").GetRawText();
-                got = new Dictionary<string, object>
-                {
-                    ["at_record_time"] = OfflineVerifier.VerifyBoundaryDecision(decision,
-                        new DecisionVerifyOptions { KeyHistory = history, AtRecordTime = true }).Reason,
-                    ["now"] = OfflineVerifier.VerifyBoundaryDecision(decision, new DecisionVerifyOptions
+                    var body = OfflineVerifier.ReceivedCanonical(v.GetProperty("model").GetString()!, v.GetProperty("record"));
+                    got = new Dictionary<string, object>
                     {
-                        KeyHistory = history, Now = OfflineVerifier.ParseTimestamp(input.GetProperty("now").GetString()!),
-                    }).Reason,
-                };
-                break;
-            }
+                        ["canonical"] = body,
+                        ["digest"] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(body))).ToLowerInvariant(),
+                    };
+                    break;
+                }
+            case "key_history":
+                {
+                    var input = v.GetProperty("input");
+                    var r = OfflineVerifier.VerifyKeyHistory(input.GetProperty("genesis").GetRawText(),
+                        input.GetProperty("successions").GetRawText(), input.GetProperty("root_public_key").GetString()!);
+                    got = new Dictionary<string, object>
+                    {
+                        ["verified"] = r.Verified,
+                        ["failures"] = r.Verified ? new List<object>()
+                            : new List<object> { new Dictionary<string, object?> { ["key_sequence"] = r.KeySequence, ["reason"] = r.Reason } },
+                        ["keys"] = KeyDicts(r.History),
+                    };
+                    break;
+                }
+            case "key_at":
+                {
+                    var input = v.GetProperty("input");
+                    got = new Dictionary<string, object>
+                    {
+                        ["keys"] = HistoryOf(input).KeysAt(OfflineVerifier.ParseTimestamp(input.GetProperty("at").GetString()!)),
+                    };
+                    break;
+                }
+            case "decision_at_record_time":
+                {
+                    var input = v.GetProperty("input");
+                    var history = HistoryOf(input);
+                    var decision = input.GetProperty("decision").GetRawText();
+                    got = new Dictionary<string, object>
+                    {
+                        ["at_record_time"] = OfflineVerifier.VerifyBoundaryDecision(decision,
+                            new DecisionVerifyOptions { KeyHistory = history, AtRecordTime = true }).Reason,
+                        ["now"] = OfflineVerifier.VerifyBoundaryDecision(decision, new DecisionVerifyOptions
+                        {
+                            KeyHistory = history,
+                            Now = OfflineVerifier.ParseTimestamp(input.GetProperty("now").GetString()!),
+                        }).Reason,
+                    };
+                    break;
+                }
             case "record_time":
                 got = new Dictionary<string, object?>
                 {
@@ -157,13 +162,19 @@ public class KeyHistoryTests
     /// <summary>A genesis block in the form the reference writes, signed by the root key.</summary>
     private static JsonObject Genesis(string sovereign, Key root, Key na) => SignedWith("GenesisBlock", new JsonObject
     {
-        ["network_name"] = sovereign, ["network_version"] = "v1", ["root_public_key"] = Pub(root),
+        ["network_name"] = sovereign,
+        ["network_version"] = "v1",
+        ["root_public_key"] = Pub(root),
         ["network_authority"] = new JsonObject
         {
-            ["public_key"] = Pub(na), ["valid_from"] = "2026-01-01T00:00:00Z", ["valid_to"] = "2026-04-01T00:00:00Z",
+            ["public_key"] = Pub(na),
+            ["valid_from"] = "2026-01-01T00:00:00Z",
+            ["valid_to"] = "2026-04-01T00:00:00Z",
         },
-        ["allowed_crypto_suites"] = new JsonArray("ed25519", "x25519"), ["allowed_transports"] = new JsonArray("quic", "wireguard"),
-        ["policy_manifest"] = new JsonObject { ["hash"] = "sha256:test", ["url"] = null }, ["bootstrap_anchors"] = new JsonArray(),
+        ["allowed_crypto_suites"] = new JsonArray("ed25519", "x25519"),
+        ["allowed_transports"] = new JsonArray("quic", "wireguard"),
+        ["policy_manifest"] = new JsonObject { ["hash"] = "sha256:test", ["url"] = null },
+        ["bootstrap_anchors"] = new JsonArray(),
     }, ("root", root));
 
     /// <summary>
@@ -173,9 +184,15 @@ public class KeyHistoryTests
     private static JsonObject Succession(string sovereign, Key root, Key previous, Key next, DateTimeOffset effective) =>
         SignedWith("KeySuccessionRecord", new JsonObject
         {
-            ["succession_id"] = "00000000-0000-4000-8000-000000000001", ["sovereign_id"] = sovereign, ["key_sequence"] = 2,
-            ["previous_key_id"] = "na-1", ["previous_public_key"] = Pub(previous), ["new_key_id"] = "na-2",
-            ["new_public_key"] = Pub(next), ["effective_at"] = Utc(effective), ["new_valid_to"] = Utc(effective.AddYears(2)),
+            ["succession_id"] = "00000000-0000-4000-8000-000000000001",
+            ["sovereign_id"] = sovereign,
+            ["key_sequence"] = 2,
+            ["previous_key_id"] = "na-1",
+            ["previous_public_key"] = Pub(previous),
+            ["new_key_id"] = "na-2",
+            ["new_public_key"] = Pub(next),
+            ["effective_at"] = Utc(effective),
+            ["new_valid_to"] = Utc(effective.AddYears(2)),
             ["issued_at"] = Utc(effective.AddDays(-9)),
         }, ("root", root), ("na-2", next), ("na-1", previous));
 
@@ -219,7 +236,8 @@ public class KeyHistoryTests
         var body = Canonical.Of(doc.RootElement, new[] { "signature" }, OfflineVerifier.DecisionOmittedWhenAbsent);
         decision["signature"] = new JsonObject
         {
-            ["key_id"] = "k", ["sig"] = Convert.ToBase64String(SignatureAlgorithm.Ed25519.Sign(key, Encoding.UTF8.GetBytes(body))),
+            ["key_id"] = "k",
+            ["sig"] = Convert.ToBase64String(SignatureAlgorithm.Ed25519.Sign(key, Encoding.UTF8.GetBytes(body))),
         };
         return decision.ToJsonString();
     }
@@ -339,9 +357,13 @@ public class KeyHistoryTests
         using var w = new World();
         var body = new JsonObject
         {
-            ["sovereign_id"] = "sovereign-s", ["root_public_key"] = "not trusted", ["handover_seconds"] = 300,
-            ["genesis"] = JsonNode.Parse(w.GenesisJson), ["successions"] = JsonNode.Parse(w.SuccessionsJson),
-            ["keys"] = new JsonArray(), ["signing_key_sequence"] = 2,
+            ["sovereign_id"] = "sovereign-s",
+            ["root_public_key"] = "not trusted",
+            ["handover_seconds"] = 300,
+            ["genesis"] = JsonNode.Parse(w.GenesisJson),
+            ["successions"] = JsonNode.Parse(w.SuccessionsJson),
+            ["keys"] = new JsonArray(),
+            ["signing_key_sequence"] = 2,
         }.ToJsonString();
         var r = OfflineVerifier.VerifyKeyHistoryResponse(body, Pub(w.Root));
         Assert.True(r.Verified);

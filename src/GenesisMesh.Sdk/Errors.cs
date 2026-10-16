@@ -6,15 +6,15 @@ namespace GenesisMesh;
 /// <summary>Base error for all NA API errors.</summary>
 public class GenesisMeshException : Exception
 {
-    public int    Status  { get; }
-    public string Code    { get; }
-    public string Detail  { get; }
+    public int Status { get; }
+    public string Code { get; }
+    public string Detail { get; }
 
     public GenesisMeshException(int status, string code, string detail)
         : base($"genesismesh: HTTP {status} {code}: {detail}")
     {
         Status = status;
-        Code   = code;
+        Code = code;
         Detail = detail;
     }
 }
@@ -30,43 +30,43 @@ public sealed class NetworkException : Exception
 }
 
 /// <summary>HTTP 400 — request body failed validation.</summary>
-public sealed class BadRequestException     : GenesisMeshException { public BadRequestException(int s, string c, string d)     : base(s, c, d) { } }
+public sealed class BadRequestException : GenesisMeshException { public BadRequestException(int s, string c, string d) : base(s, c, d) { } }
 
 /// <summary>HTTP 401 — admin signature or key not accepted.</summary>
-public sealed class UnauthorizedException   : GenesisMeshException { public UnauthorizedException(int s, string c, string d)   : base(s, c, d) { } }
+public sealed class UnauthorizedException : GenesisMeshException { public UnauthorizedException(int s, string c, string d) : base(s, c, d) { } }
 
 /// <summary>
 /// HTTP 403 (1.7.1) — the caller may not do this, such as <c>insufficient_operator_tier</c> or
 /// <c>node_key_revoked</c>. Retrying the same request does not help.
 /// </summary>
-public sealed class ForbiddenException      : GenesisMeshException { public ForbiddenException(int s, string c, string d)      : base(s, c, d) { } }
+public sealed class ForbiddenException : GenesisMeshException { public ForbiddenException(int s, string c, string d) : base(s, c, d) { } }
 
 /// <summary>HTTP 404 — resource not found.</summary>
-public sealed class NotFoundException       : GenesisMeshException { public NotFoundException(int s, string c, string d)       : base(s, c, d) { } }
+public sealed class NotFoundException : GenesisMeshException { public NotFoundException(int s, string c, string d) : base(s, c, d) { } }
 
 /// <summary>
 /// HTTP 409 (1.7.1) — the request conflicts with the NA's state or configuration, such as
 /// <c>boundary_policy_required</c>. Retrying the same request does not help.
 /// </summary>
-public sealed class ConflictException       : GenesisMeshException { public ConflictException(int s, string c, string d)       : base(s, c, d) { } }
+public sealed class ConflictException : GenesisMeshException { public ConflictException(int s, string c, string d) : base(s, c, d) { } }
 
 /// <summary>HTTP 413 (1.7.1) — the request body is larger than the NA accepts (<c>request_entity_too_large</c>).</summary>
 public sealed class PayloadTooLargeException : GenesisMeshException { public PayloadTooLargeException(int s, string c, string d) : base(s, c, d) { } }
 
 /// <summary>HTTP 422 — semantic validation failed.</summary>
-public sealed class ValidationException     : GenesisMeshException { public ValidationException(int s, string c, string d)     : base(s, c, d) { } }
+public sealed class ValidationException : GenesisMeshException { public ValidationException(int s, string c, string d) : base(s, c, d) { } }
 
 /// <summary>HTTP 429 — rate limit exceeded.</summary>
-public sealed class RateLimitException      : GenesisMeshException { public RateLimitException(int s, string c, string d)      : base(s, c, d) { } }
+public sealed class RateLimitException : GenesisMeshException { public RateLimitException(int s, string c, string d) : base(s, c, d) { } }
 
 /// <summary>
 /// Any other HTTP 4xx (1.7.1), such as 405 <c>method_not_allowed</c>: the NA refused the request as sent.
 /// Before 1.7.1 these, and 403, 409 and 413, were <see cref="ServerException"/>.
 /// </summary>
-public sealed class ClientErrorException    : GenesisMeshException { public ClientErrorException(int s, string c, string d)    : base(s, c, d) { } }
+public sealed class ClientErrorException : GenesisMeshException { public ClientErrorException(int s, string c, string d) : base(s, c, d) { } }
 
 /// <summary>HTTP 5xx only — server-side error (1.7.1: no longer any status below 500).</summary>
-public sealed class ServerException         : GenesisMeshException { public ServerException(int s, string c, string d)         : base(s, c, d) { } }
+public sealed class ServerException : GenesisMeshException { public ServerException(int s, string c, string d) : base(s, c, d) { } }
 
 /// <summary>Reads the NA's error response into the typed exception for its HTTP status.</summary>
 [Obsolete("ErrorParser is an implementation detail of this SDK and becomes internal in 2.0. Catch the GenesisMeshException subclasses the client throws instead.")]
@@ -86,19 +86,19 @@ internal static class ErrorMapping
 
     private sealed class ErrorBody
     {
-        [JsonPropertyName("message")]   public string? Message   { get; set; }
-        [JsonPropertyName("code")]      public string? Code      { get; set; }
-        [JsonPropertyName("request_id")]public string? RequestId { get; set; }
+        [JsonPropertyName("message")] public string? Message { get; set; }
+        [JsonPropertyName("code")] public string? Code { get; set; }
+        [JsonPropertyName("request_id")] public string? RequestId { get; set; }
     }
 
     internal static GenesisMeshException Parse(int status, string body)
     {
-        string code    = "";
+        string code = "";
         string message = body;
         try
         {
             var env = JsonSerializer.Deserialize<ErrorEnvelope>(body);
-            code    = env?.Error?.Code    ?? "";
+            code = env?.Error?.Code ?? "";
             message = env?.Error?.Message ?? body;
         }
         catch { /* keep defaults */ }

@@ -15,28 +15,30 @@ namespace GenesisMesh;
 /// <summary>Request body for POST /admin/agreements/offer.</summary>
 public sealed class CapabilityOffer
 {
-    [JsonPropertyName("offeror_sovereign_id")]   [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? OfferorSovereignId   { get; set; }
+    [JsonPropertyName("offeror_sovereign_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OfferorSovereignId { get; set; }
 
     [JsonPropertyName("responder_sovereign_id")]
-    public string  ResponderSovereignId { get; set; } = "";
+    public string ResponderSovereignId { get; set; } = "";
 
     [JsonPropertyName("capabilities")]
-    public IList<string> Capabilities  { get; set; } = [];
+    public IList<string> Capabilities { get; set; } = [];
 
     [JsonPropertyName("roles")]
-    public IList<string> Roles          { get; set; } = [];
+    public IList<string> Roles { get; set; } = [];
 
     [JsonPropertyName("valid_from")]
-    public string  ValidFrom            { get; set; } = "";
+    public string ValidFrom { get; set; } = "";
 
     [JsonPropertyName("valid_until")]
-    public string  ValidUntil           { get; set; } = "";
+    public string ValidUntil { get; set; } = "";
 
     [JsonPropertyName("expires_at")]
-    public string  ExpiresAt            { get; set; } = "";
+    public string ExpiresAt { get; set; } = "";
 
-    [JsonPropertyName("metadata")]  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("metadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IDictionary<string, string>? Metadata { get; set; }
 }
 
@@ -49,87 +51,99 @@ public sealed class CapabilityOffer
 public sealed class OfferRecord
 {
     [JsonPropertyName("offer_id")]
-    public string       OfferId              { get; set; } = "";
+    public string OfferId { get; set; } = "";
 
     [JsonPropertyName("offerer_sovereign_id")]
-    public string       OffererSovereignId   { get; set; } = "";
+    public string OffererSovereignId { get; set; } = "";
 
     [JsonPropertyName("responder_sovereign_id")]
-    public string       ResponderSovereignId { get; set; } = "";
+    public string ResponderSovereignId { get; set; } = "";
 
-    [JsonPropertyName("requested_terms")]   [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  RequestedTerms       { get; set; }
+    [JsonPropertyName("requested_terms")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement RequestedTerms { get; set; }
 
-    [JsonPropertyName("agreed_terms")]      [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  AgreedTerms          { get; set; }
+    [JsonPropertyName("agreed_terms")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement AgreedTerms { get; set; }
 
-    [JsonPropertyName("offerer_evidence")]  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  OffererEvidence      { get; set; }
+    [JsonPropertyName("offerer_evidence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement OffererEvidence { get; set; }
 
-    [JsonPropertyName("responder_evidence")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  ResponderEvidence    { get; set; }
+    [JsonPropertyName("responder_evidence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement ResponderEvidence { get; set; }
 
-    [JsonPropertyName("signatures")]        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  Signatures           { get; set; }
+    [JsonPropertyName("signatures")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signatures { get; set; }
 
-    [JsonPropertyName("graph_digest")]      [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string?      GraphDigest          { get; set; }
+    [JsonPropertyName("graph_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? GraphDigest { get; set; }
 
-    [JsonPropertyName("created_at")]        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string?      CreatedAt            { get; set; }
+    [JsonPropertyName("created_at")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CreatedAt { get; set; }
 
     [JsonPropertyName("expires_at")]
-    public string       ExpiresAt            { get; set; } = "";
+    public string ExpiresAt { get; set; } = "";
 }
 
 /// <summary>Returned by POST /admin/agreements/accept: the agreement with both parties' signatures.</summary>
 public sealed class AgreementRecord : IJsonOnDeserialized
 {
     [JsonPropertyName("agreement_id")]
-    public string       AgreementId          { get; set; } = "";
+    public string AgreementId { get; set; } = "";
 
-    [JsonPropertyName("offer_id")]           [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string?      OfferId              { get; set; }
+    [JsonPropertyName("offer_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OfferId { get; set; }
 
     [JsonPropertyName("offerer_sovereign_id")]
-    public string       OffererSovereignId   { get; set; } = "";
+    public string OffererSovereignId { get; set; } = "";
 
     [JsonPropertyName("responder_sovereign_id")]
-    public string       ResponderSovereignId { get; set; } = "";
+    public string ResponderSovereignId { get; set; } = "";
 
-    [JsonPropertyName("agreed_terms")]       [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  AgreedTerms          { get; set; }
+    [JsonPropertyName("agreed_terms")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement AgreedTerms { get; set; }
 
-    [JsonPropertyName("offerer_evidence")]   [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  OffererEvidence      { get; set; }
+    [JsonPropertyName("offerer_evidence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement OffererEvidence { get; set; }
 
-    [JsonPropertyName("responder_evidence")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  ResponderEvidence    { get; set; }
+    [JsonPropertyName("responder_evidence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement ResponderEvidence { get; set; }
 
     [JsonPropertyName("graph_digest")]
-    public string       GraphDigest          { get; set; } = "";
+    public string GraphDigest { get; set; } = "";
 
     [JsonPropertyName("established_at")]
-    public string       EstablishedAt        { get; set; } = "";
+    public string EstablishedAt { get; set; } = "";
 
     [JsonPropertyName("expires_at")]
-    public string       ExpiresAt            { get; set; } = "";
+    public string ExpiresAt { get; set; } = "";
 
-    [JsonPropertyName("signatures")]         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  Signatures           { get; set; }
+    [JsonPropertyName("signatures")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signatures { get; set; }
 
     /// <summary>The capabilities in AgreedTerms, filled in on deserialization.</summary>
     [JsonIgnore, Obsolete("Read agreed_terms (AgreedTerms); this is filled from it.")]
-    public IList<string> Capabilities        { get; set; } = [];
+    public IList<string> Capabilities { get; set; } = [];
 
     [JsonIgnore, Obsolete("Agreements carry no roles; always empty.")]
-    public IList<string> Roles               { get; set; } = [];
+    public IList<string> Roles { get; set; } = [];
 
     [JsonIgnore, Obsolete("The NA sends no agreement status; always empty.")]
-    public string       Status               { get; set; } = "";
+    public string Status { get; set; } = "";
 
     [JsonIgnore, Obsolete("Use EstablishedAt, which this is filled from.")]
-    public string       CreatedAt            { get; set; } = "";
+    public string CreatedAt { get; set; } = "";
 
     void IJsonOnDeserialized.OnDeserialized()
     {
@@ -154,67 +168,74 @@ public sealed class AgreementRecord : IJsonOnDeserialized
 public sealed class BoundaryDecision : IJsonOnDeserialized
 {
     [JsonPropertyName("decision_id")]
-    public string      DecisionId          { get; set; } = "";
+    public string DecisionId { get; set; } = "";
 
     [JsonPropertyName("context_id")]
-    public string      ContextId           { get; set; } = "";
+    public string ContextId { get; set; } = "";
 
-    [JsonPropertyName("agreement_id")]     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string?     AgreementId         { get; set; }
+    [JsonPropertyName("agreement_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AgreementId { get; set; }
 
     [JsonPropertyName("authorized")]
-    public bool        Authorized          { get; set; }
+    public bool Authorized { get; set; }
 
-    [JsonPropertyName("denial_reason")]    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string?     DenialReason        { get; set; }
+    [JsonPropertyName("denial_reason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DenialReason { get; set; }
 
-    [JsonPropertyName("gate_results")]     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement GateResults         { get; set; }
+    [JsonPropertyName("gate_results")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement GateResults { get; set; }
 
     [JsonPropertyName("decision_made_at")]
-    public string      DecisionMadeAt      { get; set; } = "";
+    public string DecisionMadeAt { get; set; } = "";
 
     [JsonPropertyName("decision_valid_until")]
-    public string      DecisionValidUntil  { get; set; } = "";
+    public string DecisionValidUntil { get; set; } = "";
 
     [JsonPropertyName("operator_sovereign_id")]
-    public string      OperatorSovereignId { get; set; } = "";
+    public string OperatorSovereignId { get; set; } = "";
 
-    [JsonPropertyName("freshness_proof")]  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement FreshnessProof      { get; set; }
+    [JsonPropertyName("freshness_proof")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement FreshnessProof { get; set; }
 
-    [JsonPropertyName("policy_binding")]   [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement PolicyBinding       { get; set; }
+    [JsonPropertyName("policy_binding")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement PolicyBinding { get; set; }
 
-    [JsonPropertyName("attestation_binding")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement AttestationBinding  { get; set; }
+    [JsonPropertyName("attestation_binding")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement AttestationBinding { get; set; }
 
-    [JsonPropertyName("signature")]        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement Signature           { get; set; }
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
 
     [JsonIgnore, Obsolete("Use Authorized, which this is filled from.")]
-    public bool        Allowed             { get; set; }
+    public bool Allowed { get; set; }
 
     [JsonIgnore, Obsolete("Use DenialReason, which this is filled from (null when authorized).")]
-    public string?     Reason              { get; set; }
+    public string? Reason { get; set; }
 
     [JsonIgnore, Obsolete("Use DecisionMadeAt, which this is filled from.")]
-    public string      IssuedAt            { get; set; } = "";
+    public string IssuedAt { get; set; } = "";
 
     [JsonIgnore, Obsolete("Not part of a decision (it is in the ContextRecord); always null.")]
-    public string?     RequestingAgentId   { get; set; }
+    public string? RequestingAgentId { get; set; }
 
     [JsonIgnore, Obsolete("Not part of a decision; always null.")]
-    public string?     TargetAgentId       { get; set; }
+    public string? TargetAgentId { get; set; }
 
     [JsonIgnore, Obsolete("Not part of a decision; always null.")]
-    public string?     Capability          { get; set; }
+    public string? Capability { get; set; }
 
     void IJsonOnDeserialized.OnDeserialized()
     {
 #pragma warning disable CS0618
-        Allowed  = Authorized;
-        Reason   = DenialReason;
+        Allowed = Authorized;
+        Reason = DenialReason;
         IssuedAt = DecisionMadeAt;
 #pragma warning restore CS0618
     }
@@ -229,42 +250,52 @@ public sealed class BoundaryDecision : IJsonOnDeserialized
 /// </summary>
 public sealed class TrustDecision
 {
-    [JsonPropertyName("source_sovereign_id")]  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string?   SourceSovereignId { get; set; }
+    [JsonPropertyName("source_sovereign_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourceSovereignId { get; set; }
 
-    [JsonPropertyName("target_sovereign_id")]  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string?   TargetSovereignId { get; set; }
+    [JsonPropertyName("target_sovereign_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TargetSovereignId { get; set; }
 
     [JsonPropertyName("verdict")]
-    public string    Verdict           { get; set; } = "";
+    public string Verdict { get; set; } = "";
 
     [JsonPropertyName("reason")]
-    public string    Reason            { get; set; } = "";
+    public string Reason { get; set; } = "";
 
-    [JsonPropertyName("requested_roles")]      [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("requested_roles")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IList<string>? RequestedRoles { get; set; }
 
-    [JsonPropertyName("trusted")]              [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public bool      Trusted           { get; set; }
+    [JsonPropertyName("trusted")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Trusted { get; set; }
 
-    [JsonPropertyName("trust_path")]           [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("trust_path")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IList<IDictionary<string, object?>>? TrustPath { get; set; }
 
-    [JsonPropertyName("hop_count")]            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public int       HopCount          { get; set; }
+    [JsonPropertyName("hop_count")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int HopCount { get; set; }
 
-    [JsonPropertyName("signals")]              [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public IList<object>? Signals      { get; set; }
+    [JsonPropertyName("signals")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<object>? Signals { get; set; }
 
-    [JsonPropertyName("evaluated_at")]         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string?   EvaluatedAt       { get; set; }
+    [JsonPropertyName("evaluated_at")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EvaluatedAt { get; set; }
 
     /// <summary>Not read by the NA.</summary>
-    [JsonPropertyName("subject_id")]           [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string?   SubjectId         { get; set; }
+    [JsonPropertyName("subject_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SubjectId { get; set; }
 
     /// <summary>Not read by the NA.</summary>
-    [JsonPropertyName("context")]              [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("context")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IDictionary<string, object>? Context { get; set; }
 }
 
@@ -272,72 +303,75 @@ public sealed class TrustDecision
 public sealed class TrustEvidence : IJsonOnDeserialized
 {
     [JsonPropertyName("evidence_id")]
-    public string      EvidenceId        { get; set; } = "";
+    public string EvidenceId { get; set; } = "";
 
     [JsonPropertyName("issuer_sovereign_id")]
-    public string      IssuerSovereignId { get; set; } = "";
+    public string IssuerSovereignId { get; set; } = "";
 
     [JsonPropertyName("source_sovereign_id")]
-    public string      SourceSovereignId { get; set; } = "";
+    public string SourceSovereignId { get; set; } = "";
 
     [JsonPropertyName("target_sovereign_id")]
-    public string      TargetSovereignId { get; set; } = "";
+    public string TargetSovereignId { get; set; } = "";
 
     [JsonPropertyName("verdict")]
-    public string      Verdict           { get; set; } = "";
+    public string Verdict { get; set; } = "";
 
     [JsonPropertyName("reason")]
-    public string      Reason            { get; set; } = "";
+    public string Reason { get; set; } = "";
 
     [JsonPropertyName("trusted")]
-    public bool        Trusted           { get; set; }
+    public bool Trusted { get; set; }
 
     [JsonPropertyName("hop_count")]
-    public int         HopCount          { get; set; }
+    public int HopCount { get; set; }
 
     [JsonPropertyName("requested_roles")]
-    public IList<string> RequestedRoles  { get; set; } = [];
+    public IList<string> RequestedRoles { get; set; } = [];
 
-    [JsonPropertyName("signals")]         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement Signals           { get; set; }
+    [JsonPropertyName("signals")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signals { get; set; }
 
     [JsonPropertyName("graph_digest")]
-    public string      GraphDigest       { get; set; } = "";
+    public string GraphDigest { get; set; } = "";
 
     [JsonPropertyName("evaluated_at")]
-    public string      EvaluatedAt       { get; set; } = "";
+    public string EvaluatedAt { get; set; } = "";
 
     [JsonPropertyName("issued_at")]
-    public string      IssuedAt          { get; set; } = "";
+    public string IssuedAt { get; set; } = "";
 
     [JsonPropertyName("issued_by")]
-    public string      IssuedBy          { get; set; } = "";
+    public string IssuedBy { get; set; } = "";
 
-    [JsonPropertyName("metadata")]        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement Metadata          { get; set; }
+    [JsonPropertyName("metadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Metadata { get; set; }
 
-    [JsonPropertyName("signatures")]      [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement Signatures        { get; set; }
+    [JsonPropertyName("signatures")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signatures { get; set; }
 
     [JsonIgnore, Obsolete("Use IssuerSovereignId, which this is filled from.")]
-    public string?     IssuerId          { get; set; }
+    public string? IssuerId { get; set; }
 
     [JsonIgnore, Obsolete("Use TargetSovereignId, which this is filled from.")]
-    public string?     SubjectId         { get; set; }
+    public string? SubjectId { get; set; }
 
     [JsonIgnore, Obsolete("Use Signatures; this is filled from its first entry.")]
-    public JsonElement Signature         { get; set; }
+    public JsonElement Signature { get; set; }
 
     [JsonIgnore, Obsolete("Trust evidence names no decision; always null.")]
-    public string?     DecisionId        { get; set; }
+    public string? DecisionId { get; set; }
 
     [JsonIgnore, Obsolete("Trust evidence does not embed the decision; always undefined.")]
-    public JsonElement Decision          { get; set; }
+    public JsonElement Decision { get; set; }
 
     void IJsonOnDeserialized.OnDeserialized()
     {
 #pragma warning disable CS0618
-        IssuerId  = IssuerSovereignId;
+        IssuerId = IssuerSovereignId;
         SubjectId = TargetSovereignId;
         Signature = ModelHelpers.FirstSignature(Signatures);
 #pragma warning restore CS0618
@@ -350,52 +384,55 @@ public sealed class TrustEvidence : IJsonOnDeserialized
 public sealed class MembershipAttestation : IJsonOnDeserialized
 {
     [JsonPropertyName("attestation_id")]
-    public string       AttestationId      { get; set; } = "";
+    public string AttestationId { get; set; } = "";
 
     [JsonPropertyName("issuer_sovereign_id")]
-    public string       IssuerSovereignId  { get; set; } = "";
+    public string IssuerSovereignId { get; set; } = "";
 
     [JsonPropertyName("subject_id")]
-    public string       SubjectId          { get; set; } = "";
+    public string SubjectId { get; set; } = "";
 
-    [JsonPropertyName("subject_public_key")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string?      SubjectPublicKey   { get; set; }
+    [JsonPropertyName("subject_public_key")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SubjectPublicKey { get; set; }
 
     [JsonPropertyName("roles")]
-    public IList<string> Roles             { get; set; } = [];
+    public IList<string> Roles { get; set; } = [];
 
     [JsonPropertyName("status")]
-    public string       Status             { get; set; } = "";
+    public string Status { get; set; } = "";
 
     [JsonPropertyName("issued_at")]
-    public string       IssuedAt           { get; set; } = "";
+    public string IssuedAt { get; set; } = "";
 
     [JsonPropertyName("valid_from")]
-    public string       ValidFrom          { get; set; } = "";
+    public string ValidFrom { get; set; } = "";
 
     [JsonPropertyName("expires_at")]
-    public string       ExpiresAt          { get; set; } = "";
+    public string ExpiresAt { get; set; } = "";
 
     [JsonPropertyName("issued_by")]
-    public string       IssuedBy           { get; set; } = "";
+    public string IssuedBy { get; set; } = "";
 
-    [JsonPropertyName("claims")]            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  Claims             { get; set; }
+    [JsonPropertyName("claims")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Claims { get; set; }
 
-    [JsonPropertyName("signatures")]        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  Signatures         { get; set; }
+    [JsonPropertyName("signatures")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signatures { get; set; }
 
     [JsonIgnore, Obsolete("Use SubjectId, which this is filled from.")]
-    public string?      SubjectSovereignId { get; set; }
+    public string? SubjectSovereignId { get; set; }
 
     [JsonIgnore, Obsolete("Use Signatures; this is filled from its first entry.")]
-    public JsonElement  Signature          { get; set; }
+    public JsonElement Signature { get; set; }
 
     void IJsonOnDeserialized.OnDeserialized()
     {
 #pragma warning disable CS0618
         SubjectSovereignId = SubjectId;
-        Signature          = ModelHelpers.FirstSignature(Signatures);
+        Signature = ModelHelpers.FirstSignature(Signatures);
 #pragma warning restore CS0618
     }
 }
@@ -406,28 +443,29 @@ public sealed class MembershipAttestation : IJsonOnDeserialized
 public sealed class CapabilityCommitment : IJsonOnDeserialized
 {
     [JsonPropertyName("commitment_id")]
-    public string      CommitmentId      { get; set; } = "";
+    public string CommitmentId { get; set; } = "";
 
     [JsonPropertyName("agreement_id")]
-    public string      AgreementId       { get; set; } = "";
+    public string AgreementId { get; set; } = "";
 
     [JsonPropertyName("issuer_sovereign_id")]
-    public string      IssuerSovereignId { get; set; } = "";
+    public string IssuerSovereignId { get; set; } = "";
 
     [JsonPropertyName("merkle_root")]
-    public string      MerkleRoot        { get; set; } = "";
+    public string MerkleRoot { get; set; } = "";
 
     [JsonPropertyName("capability_count")]
-    public int         CapabilityCount   { get; set; }
+    public int CapabilityCount { get; set; }
 
     [JsonPropertyName("committed_at")]
-    public string      CommittedAt       { get; set; } = "";
+    public string CommittedAt { get; set; } = "";
 
-    [JsonPropertyName("signature")]   [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement Signature         { get; set; }
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
 
     [JsonIgnore, Obsolete("Use CommittedAt, which this is filled from.")]
-    public string      IssuedAt          { get; set; } = "";
+    public string IssuedAt { get; set; } = "";
 
     void IJsonOnDeserialized.OnDeserialized()
     {
@@ -441,37 +479,38 @@ public sealed class CapabilityCommitment : IJsonOnDeserialized
 public sealed class CapabilityMembershipProof : IJsonOnDeserialized
 {
     [JsonPropertyName("proof_id")]
-    public string      ProofId            { get; set; } = "";
+    public string ProofId { get; set; } = "";
 
     [JsonPropertyName("commitment_id")]
-    public string      CommitmentId       { get; set; } = "";
+    public string CommitmentId { get; set; } = "";
 
     [JsonPropertyName("prover_sovereign_id")]
-    public string      ProverSovereignId  { get; set; } = "";
+    public string ProverSovereignId { get; set; } = "";
 
     [JsonPropertyName("revealed_capability")]
-    public string      RevealedCapability { get; set; } = "";
+    public string RevealedCapability { get; set; } = "";
 
     [JsonPropertyName("leaf_hash")]
-    public string      LeafHash           { get; set; } = "";
+    public string LeafHash { get; set; } = "";
 
-    [JsonPropertyName("merkle_path")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement MerklePath         { get; set; }
+    [JsonPropertyName("merkle_path")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement MerklePath { get; set; }
 
     [JsonPropertyName("proved_at")]
-    public string      ProvedAt           { get; set; } = "";
+    public string ProvedAt { get; set; } = "";
 
     [JsonIgnore, Obsolete("Use RevealedCapability, which this is filled from.")]
-    public string      Capability         { get; set; } = "";
+    public string Capability { get; set; } = "";
 
     [JsonIgnore, Obsolete("Use MerklePath, which this is filled from.")]
-    public JsonElement Proof              { get; set; }
+    public JsonElement Proof { get; set; }
 
     void IJsonOnDeserialized.OnDeserialized()
     {
 #pragma warning disable CS0618
         Capability = RevealedCapability;
-        Proof      = MerklePath;
+        Proof = MerklePath;
 #pragma warning restore CS0618
     }
 }
@@ -485,33 +524,34 @@ public sealed class CapabilityMembershipProof : IJsonOnDeserialized
 public sealed class ConsensusVote
 {
     [JsonPropertyName("vote_id")]
-    public string      VoteId               { get; set; } = "";
+    public string VoteId { get; set; } = "";
 
     [JsonPropertyName("proof_id")]
-    public string      ProofId              { get; set; } = "";
+    public string ProofId { get; set; } = "";
 
     [JsonPropertyName("decision_id")]
-    public string      DecisionId           { get; set; } = "";
+    public string DecisionId { get; set; } = "";
 
     [JsonPropertyName("validator_sovereign_id")]
-    public string      ValidatorSovereignId { get; set; } = "";
+    public string ValidatorSovereignId { get; set; } = "";
 
     /// <summary>True approves, false rejects.</summary>
     [JsonPropertyName("vote")]
-    public bool        Vote                 { get; set; }
+    public bool Vote { get; set; }
 
     [JsonPropertyName("reason")]
-    public string?     Reason               { get; set; }
+    public string? Reason { get; set; }
 
     [JsonPropertyName("voted_at")]
-    public string      VotedAt              { get; set; } = "";
+    public string VotedAt { get; set; } = "";
 
     /// <summary>Binds the vote to the validator's view of the proof (v0.38); required on approve votes.</summary>
     [JsonPropertyName("context_digest")]
-    public string?     ContextDigest        { get; set; }
+    public string? ContextDigest { get; set; }
 
-    [JsonPropertyName("signature")]  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement Signature            { get; set; }
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
 }
 
 /// <summary>
@@ -521,35 +561,36 @@ public sealed class ConsensusVote
 public sealed class ConsensusProof
 {
     [JsonPropertyName("consensus_id")]
-    public string               ConsensusId             { get; set; } = "";
+    public string ConsensusId { get; set; } = "";
 
     [JsonPropertyName("proof_id")]
-    public string               ProofId                 { get; set; } = "";
+    public string ProofId { get; set; } = "";
 
     [JsonPropertyName("decision_id")]
-    public string               DecisionId              { get; set; } = "";
+    public string DecisionId { get; set; } = "";
 
     /// <summary>K: distinct named validators that must approve.</summary>
     [JsonPropertyName("required_threshold")]
-    public int                  RequiredThreshold       { get; set; }
+    public int RequiredThreshold { get; set; }
 
     [JsonPropertyName("validator_sovereign_ids")]
-    public IList<string>        ValidatorSovereignIds   { get; set; } = [];
+    public IList<string> ValidatorSovereignIds { get; set; } = [];
 
     [JsonPropertyName("votes")]
-    public IList<ConsensusVote> Votes                   { get; set; } = [];
+    public IList<ConsensusVote> Votes { get; set; } = [];
 
     [JsonPropertyName("reached_at")]
-    public string               ReachedAt               { get; set; } = "";
+    public string ReachedAt { get; set; } = "";
 
     [JsonPropertyName("expires_at")]
-    public string               ExpiresAt               { get; set; } = "";
+    public string ExpiresAt { get; set; } = "";
 
     [JsonPropertyName("cascade_assessment_digest")]
-    public string?              CascadeAssessmentDigest { get; set; }
+    public string? CascadeAssessmentDigest { get; set; }
 
-    [JsonPropertyName("signature")]  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement          Signature               { get; set; }
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
 }
 
 /// <summary>
@@ -560,10 +601,10 @@ public sealed class ConsensusProof
 public sealed class ConsensusVerification
 {
     [JsonPropertyName("valid")]
-    public bool    Valid       { get; set; }
+    public bool Valid { get; set; }
 
     [JsonPropertyName("reason")]
-    public string  Reason      { get; set; } = "";
+    public string Reason { get; set; } = "";
 
     [JsonPropertyName("consensus_id")]
     public string? ConsensusId { get; set; }
@@ -575,68 +616,72 @@ public sealed class ConsensusVerification
 public sealed class DataSourceDescriptor
 {
     [JsonPropertyName("source_id")]
-    public string        SourceId           { get; set; } = "";
+    public string SourceId { get; set; } = "";
 
     [JsonPropertyName("source_type")]
-    public string        SourceType         { get; set; } = "";
+    public string SourceType { get; set; } = "";
 
     [JsonPropertyName("owner_sovereign_id")]
-    public string        OwnerSovereignId   { get; set; } = "";
+    public string OwnerSovereignId { get; set; } = "";
 
-    [JsonPropertyName("classification_tags")]  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("classification_tags")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IList<string>? ClassificationTags { get; set; }
 
-    [JsonPropertyName("estimated_volume_bytes")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public long?          EstimatedVolumeBytes { get; set; }
+    [JsonPropertyName("estimated_volume_bytes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? EstimatedVolumeBytes { get; set; }
 }
 
 /// <summary>Returned by POST /admin/data-usage/policy and GET /data-usage/policy.</summary>
 public sealed class DataLicensePolicy : IJsonOnDeserialized
 {
     [JsonPropertyName("policy_id")]
-    public string       PolicyId                     { get; set; } = "";
+    public string PolicyId { get; set; } = "";
 
     [JsonPropertyName("licensor_sovereign_id")]
-    public string       LicensorSovereignId          { get; set; } = "";
+    public string LicensorSovereignId { get; set; } = "";
 
     [JsonPropertyName("licensee_sovereign_id")]
-    public string       LicenseeSovereignId          { get; set; } = "";
+    public string LicenseeSovereignId { get; set; } = "";
 
     [JsonPropertyName("allowed_source_ids")]
-    public IList<string> AllowedSourceIds            { get; set; } = [];
+    public IList<string> AllowedSourceIds { get; set; } = [];
 
     [JsonPropertyName("allowed_access_types")]
-    public IList<string> AllowedAccessTypes          { get; set; } = [];
+    public IList<string> AllowedAccessTypes { get; set; } = [];
 
     [JsonPropertyName("prohibited_classification_tags")]
     public IList<string> ProhibitedClassificationTags { get; set; } = [];
 
-    [JsonPropertyName("max_volume_bytes_per_session")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public long?        MaxVolumeBytesPerSession     { get; set; }
+    [JsonPropertyName("max_volume_bytes_per_session")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? MaxVolumeBytesPerSession { get; set; }
 
     [JsonPropertyName("valid_from")]
-    public string       ValidFrom                    { get; set; } = "";
+    public string ValidFrom { get; set; } = "";
 
     [JsonPropertyName("valid_until")]
-    public string       ValidUntil                   { get; set; } = "";
+    public string ValidUntil { get; set; } = "";
 
-    [JsonPropertyName("signature")]          [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  Signature                    { get; set; }
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
 
     [JsonIgnore, Obsolete("Use LicensorSovereignId, which this is filled from.")]
-    public string?      LocalSovereignId             { get; set; }
+    public string? LocalSovereignId { get; set; }
 
     [JsonIgnore, Obsolete("Policies name no purposes (see AllowedAccessTypes); always null.")]
-    public IList<string>? AllowedPurposes            { get; set; }
+    public IList<string>? AllowedPurposes { get; set; }
 
     [JsonIgnore, Obsolete("Use ValidFrom, which this is filled from.")]
-    public string       IssuedAt                     { get; set; } = "";
+    public string IssuedAt { get; set; } = "";
 
     void IJsonOnDeserialized.OnDeserialized()
     {
 #pragma warning disable CS0618
         LocalSovereignId = LicensorSovereignId;
-        IssuedAt         = ValidFrom;
+        IssuedAt = ValidFrom;
 #pragma warning restore CS0618
     }
 }
@@ -645,13 +690,15 @@ public sealed class DataLicensePolicy : IJsonOnDeserialized
 public sealed class DataAccessIntent : IJsonOnDeserialized
 {
     [JsonPropertyName("intent_id")]
-    public string       IntentId             { get; set; } = "";
+    public string IntentId { get; set; } = "";
 
-    [JsonPropertyName("agent_sovereign_id")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string?      AgentSovereignId     { get; set; }
+    [JsonPropertyName("agent_sovereign_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AgentSovereignId { get; set; }
 
-    [JsonPropertyName("decision_id")]        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string?      DecisionId           { get; set; }
+    [JsonPropertyName("decision_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DecisionId { get; set; }
 
     [JsonPropertyName("declared_sources")]
     public IList<DataSourceDescriptor> DeclaredSources { get; set; } = [];
@@ -659,39 +706,41 @@ public sealed class DataAccessIntent : IJsonOnDeserialized
     [JsonPropertyName("declared_access_types")]
     public IList<string> DeclaredAccessTypes { get; set; } = [];
 
-    [JsonPropertyName("estimated_volume_bytes")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public long?        EstimatedVolumeBytes { get; set; }
+    [JsonPropertyName("estimated_volume_bytes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? EstimatedVolumeBytes { get; set; }
 
     [JsonPropertyName("declared_at")]
-    public string       DeclaredAt           { get; set; } = "";
+    public string DeclaredAt { get; set; } = "";
 
     [JsonPropertyName("expires_at")]
-    public string       ExpiresAt            { get; set; } = "";
+    public string ExpiresAt { get; set; } = "";
 
-    [JsonPropertyName("signature")]          [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement  Signature            { get; set; }
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
 
     [JsonIgnore, Obsolete("Use DeclaredSources, which this is filled from.")]
     public IList<DataSourceDescriptor> Sources { get; set; } = [];
 
     [JsonIgnore, Obsolete("Use DeclaredAccessTypes, which this is filled from.")]
-    public IList<string> AccessTypes         { get; set; } = [];
+    public IList<string> AccessTypes { get; set; } = [];
 
     [JsonIgnore, Obsolete("Intents name no policy; always null.")]
-    public string?      PolicyId             { get; set; }
+    public string? PolicyId { get; set; }
 
     [JsonIgnore, Obsolete("Intents name no issuer (see AgentSovereignId); always null.")]
-    public string?      IssuerId             { get; set; }
+    public string? IssuerId { get; set; }
 
     [JsonIgnore, Obsolete("Use DeclaredAt, which this is filled from.")]
-    public string       IssuedAt             { get; set; } = "";
+    public string IssuedAt { get; set; } = "";
 
     void IJsonOnDeserialized.OnDeserialized()
     {
 #pragma warning disable CS0618
-        Sources     = DeclaredSources;
+        Sources = DeclaredSources;
         AccessTypes = DeclaredAccessTypes;
-        IssuedAt    = DeclaredAt;
+        IssuedAt = DeclaredAt;
 #pragma warning restore CS0618
     }
 }
@@ -707,51 +756,62 @@ public sealed class DataAccessIntent : IJsonOnDeserialized
 public sealed class VerifyResult : IJsonOnDeserialized
 {
     [JsonPropertyName("valid")]
-    public bool    Valid    { get; set; }
+    public bool Valid { get; set; }
 
     [JsonPropertyName("accepted")]
-    public bool    Accepted { get; set; }
+    public bool Accepted { get; set; }
 
-    [JsonPropertyName("reason")]  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Reason   { get; set; }
+    [JsonPropertyName("reason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Reason { get; set; }
 
     /// <summary>Boundary verification: whether the verified decision authorizes the action.</summary>
-    [JsonPropertyName("authorized")]          [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool?   Authorized        { get; set; }
+    [JsonPropertyName("authorized")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Authorized { get; set; }
 
-    [JsonPropertyName("agreement_id")]        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? AgreementId       { get; set; }
+    [JsonPropertyName("agreement_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AgreementId { get; set; }
 
-    [JsonPropertyName("decision_id")]         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? DecisionId        { get; set; }
+    [JsonPropertyName("decision_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DecisionId { get; set; }
 
-    [JsonPropertyName("evidence_id")]         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? EvidenceId        { get; set; }
+    [JsonPropertyName("evidence_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EvidenceId { get; set; }
 
-    [JsonPropertyName("commitment_id")]       [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? CommitmentId      { get; set; }
+    [JsonPropertyName("commitment_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CommitmentId { get; set; }
 
-    [JsonPropertyName("issuer_sovereign_id")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("issuer_sovereign_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? IssuerSovereignId { get; set; }
 
-    [JsonPropertyName("verdict")]             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Verdict           { get; set; }
+    [JsonPropertyName("verdict")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Verdict { get; set; }
 
     /// <summary>Data-usage verification: the number of violations found.</summary>
-    [JsonPropertyName("violation_count")]     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int?    ViolationCount    { get; set; }
+    [JsonPropertyName("violation_count")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ViolationCount { get; set; }
 
     /// <summary>Data-usage verification: the first violation's reason; Reason is set from it.</summary>
-    [JsonPropertyName("violation_reason")]    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ViolationReason   { get; set; }
+    [JsonPropertyName("violation_reason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ViolationReason { get; set; }
 
-    [JsonPropertyName("violations")]          [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public JsonElement Violations    { get; set; }
+    [JsonPropertyName("violations")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Violations { get; set; }
 
     void IJsonOnDeserialized.OnDeserialized()
     {
         var ok = Valid || Accepted;
-        Valid    = ok;
+        Valid = ok;
         Accepted = ok;
         Reason ??= ViolationReason;
     }

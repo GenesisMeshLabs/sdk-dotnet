@@ -42,46 +42,46 @@ public class ConformanceTests
                 Assert.Equal(expected.GetProperty("canonical").GetString(), Canonical.FromJson(input.GetProperty("json").GetString()!));
                 break;
             case "agreement":
-            {
-                var digest = input.TryGetProperty("expected_graph_digest", out var g) ? g.GetString() : null;
-                var r = OfflineVerifier.VerifyAgreement(input.GetProperty("agreement").GetRawText(),
-                    Strings(input, "offerer_public_keys"), Strings(input, "responder_public_keys"), digest);
-                Assert.Equal(expected.GetProperty("accepted").GetBoolean(), r.Accepted);
-                Assert.Equal(expected.GetProperty("reason").GetString(), r.Reason);
-                break;
-            }
-            case "boundary_decision":
-            {
-                var options = new DecisionVerifyOptions
                 {
-                    OperatorPublicKeys = Strings(input, "operator_public_keys"),
-                    Now = OfflineVerifier.ParseTimestamp(input.GetProperty("now").GetString()!),
-                    ExpectedPolicies = input.TryGetProperty("expected_policies", out var ps)
-                        ? ps.EnumerateArray().Select(p => p.GetRawText()).ToList() : null,
-                    ExpectedAttestation = input.TryGetProperty("expected_attestation", out var a) ? a.GetRawText() : null,
-                };
-                var r = OfflineVerifier.VerifyBoundaryDecision(input.GetProperty("decision").GetRawText(), options);
-                Assert.Equal(expected.GetProperty("accepted").GetBoolean(), r.Accepted);
-                Assert.Equal(expected.GetProperty("reason").GetString(), r.Reason);
-                Assert.Equal(expected.GetProperty("authorized").GetBoolean(), r.Authorized);
-                break;
-            }
+                    var digest = input.TryGetProperty("expected_graph_digest", out var g) ? g.GetString() : null;
+                    var r = OfflineVerifier.VerifyAgreement(input.GetProperty("agreement").GetRawText(),
+                        Strings(input, "offerer_public_keys"), Strings(input, "responder_public_keys"), digest);
+                    Assert.Equal(expected.GetProperty("accepted").GetBoolean(), r.Accepted);
+                    Assert.Equal(expected.GetProperty("reason").GetString(), r.Reason);
+                    break;
+                }
+            case "boundary_decision":
+                {
+                    var options = new DecisionVerifyOptions
+                    {
+                        OperatorPublicKeys = Strings(input, "operator_public_keys"),
+                        Now = OfflineVerifier.ParseTimestamp(input.GetProperty("now").GetString()!),
+                        ExpectedPolicies = input.TryGetProperty("expected_policies", out var ps)
+                            ? ps.EnumerateArray().Select(p => p.GetRawText()).ToList() : null,
+                        ExpectedAttestation = input.TryGetProperty("expected_attestation", out var a) ? a.GetRawText() : null,
+                    };
+                    var r = OfflineVerifier.VerifyBoundaryDecision(input.GetProperty("decision").GetRawText(), options);
+                    Assert.Equal(expected.GetProperty("accepted").GetBoolean(), r.Accepted);
+                    Assert.Equal(expected.GetProperty("reason").GetString(), r.Reason);
+                    Assert.Equal(expected.GetProperty("authorized").GetBoolean(), r.Authorized);
+                    break;
+                }
             case "data_license_policy":
                 Assert.Equal(expected.GetProperty("valid").GetBoolean(),
                     OfflineVerifier.VerifyDataLicensePolicySignature(input.GetProperty("policy").GetRawText(), Strings(input, "licensor_public_keys")));
                 break;
             case "data_access_intent":
-            {
-                var r = OfflineVerifier.VerifyDataAccessIntent(input.GetProperty("intent").GetRawText(),
-                    input.GetProperty("policy").GetRawText(), Strings(input, "agent_public_keys"),
-                    OfflineVerifier.ParseTimestamp(input.GetProperty("at").GetString()!));
-                Assert.Equal(expected.GetProperty("valid").GetBoolean(), r.Valid);
-                var reason = expected.GetProperty("violation_reason");
-                Assert.Equal(reason.ValueKind == JsonValueKind.Null ? null : reason.GetString(), r.ViolationReason);
-                Assert.Equal(expected.GetProperty("violation_types").EnumerateArray().Select(e => e.GetString()!).ToList(),
-                    r.Violations.Select(x => x.ViolationType).ToList());
-                break;
-            }
+                {
+                    var r = OfflineVerifier.VerifyDataAccessIntent(input.GetProperty("intent").GetRawText(),
+                        input.GetProperty("policy").GetRawText(), Strings(input, "agent_public_keys"),
+                        OfflineVerifier.ParseTimestamp(input.GetProperty("at").GetString()!));
+                    Assert.Equal(expected.GetProperty("valid").GetBoolean(), r.Valid);
+                    var reason = expected.GetProperty("violation_reason");
+                    Assert.Equal(reason.ValueKind == JsonValueKind.Null ? null : reason.GetString(), r.ViolationReason);
+                    Assert.Equal(expected.GetProperty("violation_types").EnumerateArray().Select(e => e.GetString()!).ToList(),
+                        r.Violations.Select(x => x.ViolationType).ToList());
+                    break;
+                }
             default:
                 Assert.Fail($"unknown vector kind {v.GetProperty("kind").GetString()}");
                 break;
