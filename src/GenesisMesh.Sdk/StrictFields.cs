@@ -51,8 +51,18 @@ public static class StrictFields
     /// <summary>The embedded registry as JSON, for the conformance tests.</summary>
     internal static string RegistryJson => Raw.Value;
 
-    /// <summary>A model's canonical rules.</summary>
-    internal static ModelSpec Model(string model) => Models.Value[model];
+    /// <summary>
+    /// A model's canonical rules. A model the registry does not have is refused (1.7.1): before, a misspelt or
+    /// renamed model name read as a model with nothing to check, which turned the strict checks off.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="model"/> is not in the registry.</exception>
+    internal static ModelSpec Model(string model) =>
+        Models.Value.TryGetValue(model, out var spec)
+            ? spec
+            : throw new ArgumentException($"genesismesh: model '{model}' is not in the field registry", nameof(model));
+
+    /// <summary>The names of the models in the embedded registry.</summary>
+    internal static IEnumerable<string> ModelNames => Models.Value.Keys;
 
     private static FrozenDictionary<string, ModelSpec> Parse(string json)
     {
@@ -92,6 +102,9 @@ public static class StrictFields
     /// Only the signed projection is checked (not the signature, not an agreement's unsigned fields);
     /// free-form fields are not inspected; values of the wrong type are left to validation.
     /// </summary>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="model"/> is not in the registry (1.7.1; before, it returned no fields).
+    /// </exception>
     public static IReadOnlyList<string> UnknownFields(string model, string recordJson)
     {
         // v1.3.0: read strictly, as every record is (a duplicate key is refused, not resolved).
@@ -116,7 +129,8 @@ public static class StrictFields
 
     private static void Collect(string model, JsonElement data, string path, bool projection, List<string> found)
     {
-        if (data.ValueKind != JsonValueKind.Object || !Models.Value.TryGetValue(model, out var spec)) return;
+        var spec = Model(model);
+        if (data.ValueKind != JsonValueKind.Object) return;
         foreach (var property in data.EnumerateObject())
         {
             if (projection && OutsideProjection(spec, property.Name)) continue;
@@ -175,7 +189,8 @@ public static class StrictFields
         var found = new List<string>();
         void Walk(string name, JsonElement data, string path, bool projection)
         {
-            if (data.ValueKind != JsonValueKind.Object || !Models.Value.TryGetValue(name, out var spec)) return;
+            var spec = Model(name);
+            if (data.ValueKind != JsonValueKind.Object) return;
             foreach (var property in data.EnumerateObject())
             {
                 if (projection && OutsideProjection(spec, property.Name)) continue;
@@ -219,7 +234,8 @@ public static class StrictFields
         var found = new HashSet<string>(NonCanonicalTimestamps(model, record), StringComparer.Ordinal);
         void Walk(string name, JsonElement data, string path, bool projection)
         {
-            if (data.ValueKind != JsonValueKind.Object || !Models.Value.TryGetValue(name, out var spec)) return;
+            var spec = Model(name);
+            if (data.ValueKind != JsonValueKind.Object) return;
             foreach (var (key, nested) in spec.Fields)
             {
                 if (projection && OutsideProjection(spec, key)) continue;
