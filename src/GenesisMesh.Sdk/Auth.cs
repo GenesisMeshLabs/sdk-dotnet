@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -113,7 +114,7 @@ public static class Auth
     public static AdminHeaders BuildAdminHeaders(
         AdminRequest request, string keyId, byte[] seed, string? timestamp = null, string? nonce = null)
     {
-        timestamp ??= DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fff") + "Z";
+        timestamp ??= DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fff", CultureInfo.InvariantCulture) + "Z";
         nonce     ??= Guid.NewGuid().ToString();
 
         var canonical = AdminSigningPayload(request, keyId, timestamp, nonce);

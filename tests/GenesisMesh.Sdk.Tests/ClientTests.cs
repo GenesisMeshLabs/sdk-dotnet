@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -103,6 +104,35 @@ public class AuthTests
         var seed = Auth.LoadSeed(TestHelpers.ZeroSeedB64);
         var h    = Auth.BuildAdminHeaders(new AdminRequest("POST", "/admin/invite", "TEST", new { }), "k", seed);
         Assert.EndsWith("Z", h.Timestamp);
+    }
+
+    // The timestamp was formatted in the current culture: under a culture with another calendar (th-TH counts
+    // Buddhist years, 2569 for 2026) or another time separator (fi-FI writes 12.30.00), the NA refused every admin
+    // request. It is written in the invariant culture now.
+    [Theory]
+    [InlineData("th-TH")]
+    [InlineData("fi-FI")]
+    [InlineData("ar-SA")]
+    [InlineData("en-US")]
+    public void BuildAdminHeaders_TimestampIsUtcIsoInEveryCulture(string culture)
+    {
+        var seed = Auth.LoadSeed(TestHelpers.ZeroSeedB64);
+        var before = DateTime.UtcNow;
+        var saved = CultureInfo.CurrentCulture;
+        string timestamp;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo(culture);
+            timestamp = Auth.BuildAdminHeaders(new AdminRequest("POST", "/admin/invite", "TEST", new { }), "k", seed).Timestamp;
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = saved;
+        }
+        Assert.Matches(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$", timestamp);
+        var parsed = DateTime.ParseExact(timestamp, "yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+        Assert.InRange(parsed, before.AddSeconds(-1), DateTime.UtcNow.AddSeconds(1));
     }
 }
 
