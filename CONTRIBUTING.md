@@ -53,24 +53,10 @@ there a run that checked nothing fails instead of passing.
 
 ## Project structure
 
-Read [AGENT.md](AGENT.md) for the layer rule before adding or changing
-source files. The short version:
-
-| File | What goes here |
-|------|---------------|
-| `src/GenesisMesh.Sdk/Auth.cs` | Admin signatures: canonical request bytes, Ed25519 signing, admin headers |
-| `src/GenesisMesh.Sdk/Transport.cs` | HTTP transport only: admin/public post/get, strict response reading, error mapping |
-| `src/GenesisMesh.Sdk/Errors.cs` | Typed exception types only |
-| `src/GenesisMesh.Sdk/Models.cs` | Protocol record types only: no methods, no functions |
-| `src/GenesisMesh.Sdk/GenesisMeshClient.cs` | The client, its options and its sub-clients |
-| `src/GenesisMesh.Sdk/Clients/*.cs` | Sub-client: thin wrapper over transport |
-| `src/GenesisMesh.Sdk/OfflineVerifier.cs`, `KeyHistory.cs`, `Grants.cs` | Offline verification of NA-signed records |
-| `src/GenesisMesh.Sdk/StrictJson.cs`, `StrictFields.cs`, `Canonical.cs` | Strict JSON input, the field registry, the canonical form |
-| `src/GenesisMesh.Sdk/canonical_registry.json` | The field registry, generated: `python scripts/sync_canonical_registry.py` |
-| `tests/GenesisMesh.Sdk.Tests/testdata/` | Conformance vectors copied unchanged from the core |
-
-Do not mix layers. A sub-client file must not contain crypto primitives.
-The auth module must not make HTTP calls.
+[docs/architecture.md](docs/architecture.md) maps the modules, the layer
+table that `ArchitectureTests` enforces, and where each common change goes,
+with the test that fails when a step is missed. Read it before adding or
+moving source files.
 
 ---
 
