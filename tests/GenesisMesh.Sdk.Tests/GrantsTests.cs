@@ -24,7 +24,7 @@ public class GrantsTests
         "envelope_parameter", "envelope", "issuance", "use", "verify_export",
     };
 
-    private static IEnumerable<JsonElement> Vectors()
+    private static JsonElement.ArrayEnumerator Vectors()
     {
         var root = JsonDocument.Parse(File.ReadAllText(SuitePath)).RootElement;
         Assert.Equal("grants", root.GetProperty("suite").GetString());

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GenesisMesh;
@@ -70,7 +71,7 @@ public class LiveContractTests
                 BaseUrl = baseUrl, SigningKey = seed, KeyId = keyId, HttpHandler = recorder,
             });
             var now = DateTimeOffset.UtcNow;
-            string Iso(TimeSpan d) => now.Add(d).ToString("yyyy-MM-ddTHH:mm:ssK");
+            string Iso(TimeSpan d) => now.Add(d).ToString("yyyy-MM-ddTHH:mm:ssK", CultureInfo.InvariantCulture);
             static Dictionary<string, object?> D(params (string, object?)[] kv) => kv.ToDictionary(p => p.Item1, p => p.Item2);
             object? Raw(JsonObject response) => JsonSerializer.Deserialize<object>(response.ToJsonString());
 

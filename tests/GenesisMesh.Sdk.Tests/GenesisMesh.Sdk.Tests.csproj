@@ -4,6 +4,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- CA1707: xUnit test names use underscores. CA1861: inline arrays of test data
+         read better than static fields, and tests are not a hot path. -->
+    <NoWarn>$(NoWarn);CA1707;CA1861</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

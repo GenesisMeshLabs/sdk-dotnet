@@ -29,7 +29,7 @@ public class KeyHistoryTests
         "pack", "verify_export", "verify_range", "verify_anchors", "completeness", "registry_keys", "report_cell", "changes_file",
     };
 
-    private static IEnumerable<JsonElement> Vectors() =>
+    private static JsonElement.ArrayEnumerator Vectors() =>
         JsonDocument.Parse(File.ReadAllText(SuitePath)).RootElement.GetProperty("vectors").EnumerateArray();
 
     private static JsonElement Vector(string id) => Vectors().Single(v => v.GetProperty("id").GetString() == id);
@@ -50,7 +50,7 @@ public class KeyHistoryTests
 
     private static string? Iso(DateTimeOffset? t) => t is { } v ? Utc(v) : null;
 
-    private static object KeyDicts(NAKeyHistory? history) => (history?.Keys ?? Array.Empty<NAKey>()).Select(k =>
+    private static List<Dictionary<string, object?>> KeyDicts(NAKeyHistory? history) => (history?.Keys ?? Array.Empty<NAKey>()).Select(k =>
         new Dictionary<string, object?>
         {
             ["key_sequence"] = k.KeySequence, ["key_id"] = k.KeyId, ["public_key"] = k.PublicKey,

@@ -68,7 +68,7 @@ public class CanonicalSuiteTests
                 var r = OfflineVerifier.VerifyDataAccessIntent(input.GetProperty("intent").GetRawText(),
                     input.GetProperty("policy").GetRawText(), Strings(input, "agent_public_keys"),
                     OfflineVerifier.ParseTimestamp(input.GetProperty("at").GetString()!));
-                Assert.Equal(expected.GetProperty("detail").GetString(), r.Violations.FirstOrDefault()?.Detail);
+                Assert.Equal(expected.GetProperty("detail").GetString(), (r.Violations.Count > 0 ? r.Violations[0].Detail : null));
                 break;
             }
             default:
