@@ -139,6 +139,33 @@ public class ErrorParserTests
         var ex = ErrorMapping.Parse(500, "Internal error");
         Assert.IsType<ServerException>(ex);
     }
+
+    // 1.7.1: a 403, 409, 413 or other 4xx was a ServerException ("HTTP 5xx"), so a retry-on-server-error
+    // policy retried a refusal. The codes are ones the core sends (genesis_mesh/na_service/errors.py).
+    [Theory]
+    [InlineData(403, "insufficient_operator_tier", typeof(ForbiddenException))]
+    [InlineData(403, "node_key_revoked", typeof(ForbiddenException))]
+    [InlineData(409, "boundary_policy_required", typeof(ConflictException))]
+    [InlineData(413, "request_entity_too_large", typeof(PayloadTooLargeException))]
+    [InlineData(405, "method_not_allowed", typeof(ClientErrorException))]
+    [InlineData(410, "gone", typeof(ClientErrorException))]
+    [InlineData(400, "bad_request", typeof(BadRequestException))]
+    [InlineData(401, "admin_auth_failed", typeof(UnauthorizedException))]
+    [InlineData(404, "not_found", typeof(NotFoundException))]
+    [InlineData(422, "request_validation_failed", typeof(ValidationException))]
+    [InlineData(429, "rate_limit_exceeded", typeof(RateLimitException))]
+    [InlineData(500, "internal_server_error", typeof(ServerException))]
+    [InlineData(503, "service_unavailable", typeof(ServerException))]
+    [InlineData(302, "", typeof(GenesisMeshException))]
+    public void Parse_MapsEachStatusToItsType(int status, string code, Type expected)
+    {
+        var ex = ErrorMapping.Parse(status, $"{{\"error\":{{\"code\":\"{code}\",\"message\":\"m\",\"details\":{{}},\"request_id\":\"r\"}}}}");
+        Assert.IsType(expected, ex);
+        Assert.Equal(status, ex.Status);
+        Assert.Equal(code, ex.Code);
+        Assert.Equal("m", ex.Detail);
+        Assert.Equal(status >= 500, ex is ServerException);
+    }
 }
 
 // ── Internals published as API (1.7.1: obsolete, internal in 2.0) ───────────
@@ -338,5 +365,26 @@ public class HttpErrorTests
         var ex = await Assert.ThrowsAsync<ValidationException>(() =>
             client.Evidence.Build(new TrustDecision { Verdict = "trusted" }));
         Assert.Equal(422, ex.Status);
+    }
+
+    [Fact]
+    public async Task Forbidden_IsNotAServerError_AndStillAGenesisMeshException()
+    {
+        using var handler = new FuncHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.Forbidden)
+            {
+                Content = new StringContent(
+                    "{\"error\":{\"code\":\"insufficient_operator_tier\",\"message\":\"This operation requires the root operator tier.\",\"details\":{},\"request_id\":\"r-1\"}}",
+                    Encoding.UTF8, "application/json"),
+            });
+        var client = new GenesisMeshClient(new ClientOptions
+        {
+            BaseUrl = "http://localhost", SigningKey = TestHelpers.ZeroSeedB64, Audience = "TEST", KeyId = "test",
+            HttpHandler = handler,
+        });
+        GenesisMeshException ex = await Assert.ThrowsAsync<ForbiddenException>(() =>
+            client.Boundary.Decide(new Dictionary<string, object?> { ["requested_capability"] = "read" }));
+        Assert.Equal(403, ex.Status);
+        Assert.Equal("insufficient_operator_tier", ex.Code);
     }
 }
