@@ -1,0 +1,40 @@
+name: API compatibility
+
+# Package validation (the "Pack (package validation)" step of CI) fails on a
+# removed or changed public member. A break made on purpose is recorded in
+# src/GenesisMesh.Sdk/CompatibilitySuppressions.xml; this check fails a pull
+# request that changes that file unless it carries the label "breaking" and
+# adds a changelog fragment with an "### Upgrading" section. It also fails
+# when a newer release than the validation baseline is on NuGet
+# (scripts/api_compat.py).
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  api-compatibility:
+    name: API compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: The validation baseline is the latest release
+        run: python3 scripts/api_compat.py baseline
+
+      - name: A break accepted on purpose is labelled breaking and has an Upgrading note
+        if: github.event_name == 'pull_request'
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/api_compat.py gate --base "$BASE_SHA" --head "$HEAD_SHA" --labels "$LABELS"

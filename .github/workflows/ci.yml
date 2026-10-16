@@ -61,6 +61,12 @@ jobs:
           --file StrictFields.cs=100 --file OfflineVerifier.cs=92
           --file KeyHistory.cs=94 --file Grants.cs=100 --file Transport.cs=97
 
+      # Package validation: the public API against the baseline release in
+      # the csproj; a removed or changed member fails (see the "API
+      # compatibility" job for accepting a break on purpose).
+      - name: Pack (package validation)
+        run: dotnet pack src/GenesisMesh.Sdk/GenesisMesh.Sdk.csproj --no-build --configuration Release --output artifacts -p:EnablePackageValidation=true
+
   # Every client method against a running Network Authority: each typed
   # result must model the JSON the NA sent (v1.0.2: most of them did not).
   live-contract:
