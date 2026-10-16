@@ -1,0 +1,79 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Fill in as much as you can — it helps us reproduce and fix it faster.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong? One clear sentence.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal code or sequence of calls that triggers the bug.
+      placeholder: |
+        ```csharp
+        using var client = new GenesisMeshClient(new ClientOptions { ... });
+        var evidence = await client.Evidence.Build(new TrustDecision { ... });
+        // throws unexpectedly
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What happened instead? Include the full exception (type, Status, Code, message).
+    validations:
+      required: true
+
+  - type: input
+    id: sdk-version
+    attributes:
+      label: SDK version
+      placeholder: "1.7.0"
+    validations:
+      required: true
+
+  - type: input
+    id: dotnet-version
+    attributes:
+      label: .NET version
+      description: The runtime your application runs on (dotnet --list-runtimes).
+      placeholder: "10.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: na-version
+    attributes:
+      label: NA version (if known)
+      placeholder: "1.7.0"
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that might help — OS, NA error response body.
+    validations:
+      required: false

@@ -7,9 +7,11 @@ the development environment, run tests, and submit changes.
 
 ## Prerequisites
 
-| Tool | Minimum version |
-|------|----------------|
-| .NET | 8.0 |
+| Tool | Version |
+|------|---------|
+| .NET SDK | 10 (it builds every target framework) |
+| .NET runtime | 8, to run the tests on `net8.0` as well |
+| Python | 3.12, only for the live contract test and the scripts in `scripts/` |
 
 ---
 
@@ -24,24 +26,48 @@ dotnet restore
 Verify the build and tests pass before making any changes:
 
 ```sh
-dotnet build
-dotnet test
+dotnet build -c Release                       # warnings are errors
+dotnet test -c Release --filter "Category!=Live"
+python scripts/changelog.py check
 ```
+
+`dotnet test` runs the tests once per target framework of the test project.
+
+### Live contract test
+
+`LiveContractTests` calls every client method against a real, disposable
+Network Authority (`scripts/contract_na.py`) and compares each typed result
+with the JSON the NA sent. It needs a Python with the genesis-mesh core
+installed:
+
+```sh
+pip install -e ../genesismesh
+GM_E2E_PYTHON=python dotnet test -c Release --filter "Category=Live"
+```
+
+Without `GM_E2E_PYTHON` the test returns at once. CI sets
+`GM_E2E_REQUIRED=1`, and checks the TRX results (`scripts/check_trx.py`), so
+there a run that checked nothing fails instead of passing.
 
 ---
 
 ## Project structure
 
-Read [AGENT.md](AGENT.md) for the enforced layer rule before adding or changing
+Read [AGENT.md](AGENT.md) for the layer rule before adding or changing
 source files. The short version:
 
 | File | What goes here |
 |------|---------------|
-| `src/GenesisMesh.Sdk/Auth.cs` | Crypto only — canonical JSON, Ed25519 signing, admin headers |
-| `src/GenesisMesh.Sdk/Transport.cs` | HTTP transport only — admin/public post/get, error mapping |
+| `src/GenesisMesh.Sdk/Auth.cs` | Admin signatures: canonical request bytes, Ed25519 signing, admin headers |
+| `src/GenesisMesh.Sdk/Transport.cs` | HTTP transport only: admin/public post/get, strict response reading, error mapping |
 | `src/GenesisMesh.Sdk/Errors.cs` | Typed exception types only |
-| `src/GenesisMesh.Sdk/Models.cs` | Protocol record types only — no methods, no functions |
-| `src/GenesisMesh.Sdk/Clients/*.cs` | Sub-client — thin wrapper over transport |
+| `src/GenesisMesh.Sdk/Models.cs` | Protocol record types only: no methods, no functions |
+| `src/GenesisMesh.Sdk/GenesisMeshClient.cs` | The client, its options and its sub-clients |
+| `src/GenesisMesh.Sdk/Clients/*.cs` | Sub-client: thin wrapper over transport |
+| `src/GenesisMesh.Sdk/OfflineVerifier.cs`, `KeyHistory.cs`, `Grants.cs` | Offline verification of NA-signed records |
+| `src/GenesisMesh.Sdk/StrictJson.cs`, `StrictFields.cs`, `Canonical.cs` | Strict JSON input, the field registry, the canonical form |
+| `src/GenesisMesh.Sdk/canonical_registry.json` | The field registry, generated: `python scripts/sync_canonical_registry.py` |
+| `tests/GenesisMesh.Sdk.Tests/testdata/` | Conformance vectors copied unchanged from the core |
 
 Do not mix layers. A sub-client file must not contain crypto primitives.
 The auth module must not make HTTP calls.
@@ -71,9 +97,9 @@ docs(readme): correct evidence verdict values
 test(consensus): add negative test for threshold below vote count
 ```
 
-Scope is the primary area: `auth`, `transport`, `models`, `agreement`,
-`boundary`, `evidence`, `attestation`, `disclosure`, `consensus`,
-`data-usage`, `sdk`, `ci`, `docs`.
+Scope is the primary area: `auth`, `transport`, `errors`, `models`,
+`verify`, `strict`, `agreement`, `boundary`, `evidence`, `attestation`,
+`disclosure`, `consensus`, `data-usage`, `sdk`, `ci`, `docs`.
 
 ### Code style
 
@@ -84,12 +110,22 @@ Scope is the primary area: `auth`, `transport`, `models`, `agreement`,
 
 ### Tests
 
-Every public method needs tests in `tests/GenesisMesh.Sdk.Tests/ClientTests.cs`:
+Tests live in `tests/GenesisMesh.Sdk.Tests/`, one file per area
+(`AgreementTests.cs`, `BoundaryTests.cs`, `KeyHistoryTests.cs`, ...;
+`ClientTests.cs` holds the shared helpers and the auth, error and transport
+tests). Every public client method needs:
 
 1. Happy-path — `FuncHandler` returns the correct shape
 2. URL — method calls the correct route path
 3. Auth — admin methods throw `InvalidOperationException` without a signing key
 4. Error — NA 4xx → typed SDK exception with correct `.Code`
+5. A `Check(...)` call in `LiveContractTests.cs`
+
+A bug fix comes with the test that fails without it. The `Regression test`
+check fails a pull request titled `fix: ...` that changes source files
+(deletions included) but adds or modifies no C# test file (`tests/**/*.cs`;
+deleted tests, the test project and test data do not count), unless the
+Maintainer adds the label `no-test-needed`.
 
 Use `FuncHandler` from the test project (no third-party mocking library):
 
@@ -111,6 +147,14 @@ var client = new GenesisMeshClient(new ClientOptions
 });
 ```
 
+### Changelog
+
+Do not edit `CHANGELOG.md`. Add a fragment
+`changelog.d/<version>/<short-name>.md` (see
+[changelog.d/README.md](changelog.d/README.md)); a change callers must act on
+gets an `### Upgrading` section. Only a `release/<version>` pull request folds
+the fragments into `CHANGELOG.md`.
+
 ---
 
 ## NA protocol constraints
@@ -128,8 +172,11 @@ Before adding a new sub-client method, check the constraints table in
 ## Pull requests
 
 - Keep PRs focused — one feature or fix per PR
-- Include a test for every changed behaviour
-- Ensure `dotnet build` and `dotnet test` pass locally before opening the PR
+- Fill in the pull request template: how it was tested, the regression test,
+  the changelog fragment, any Upgrading note
+- Changes to the paths the template flags (public API, vectors, signing and
+  verification, workflows, `SECURITY.md`, packaging) need the Maintainer's
+  review and merge (`.github/CODEOWNERS`)
 
 ---
 

@@ -8,3 +8,15 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+
+  # NuGet packages of the solution (GenesisMesh.sln): the SDK's one runtime
+  # dependency (NSec.Cryptography) on its own, the test packages grouped.
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      test:
+        patterns:
+          - "Microsoft.NET.Test.Sdk"
+          - "xunit*"

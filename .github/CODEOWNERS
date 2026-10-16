@@ -1,1 +1,40 @@
-* @GenesisMeshLabs/core
+# Every path needs a Maintainer's review. Later lines win, so the areas below
+# name the same team explicitly: they are the paths whose changes the
+# Maintainer merges (see .github/pull_request_template.md).
+
+* @GenesisMeshLabs/maintainers
+
+# Security-critical: signing, the transport's strict JSON, the offline verifiers
+/src/GenesisMesh.Sdk/Auth.cs @GenesisMeshLabs/maintainers
+/src/GenesisMesh.Sdk/Transport.cs @GenesisMeshLabs/maintainers
+/src/GenesisMesh.Sdk/StrictJson.cs @GenesisMeshLabs/maintainers
+/src/GenesisMesh.Sdk/StrictFields.cs @GenesisMeshLabs/maintainers
+/src/GenesisMesh.Sdk/Canonical.cs @GenesisMeshLabs/maintainers
+/src/GenesisMesh.Sdk/OfflineVerifier.cs @GenesisMeshLabs/maintainers
+/src/GenesisMesh.Sdk/KeyHistory.cs @GenesisMeshLabs/maintainers
+/src/GenesisMesh.Sdk/Grants.cs @GenesisMeshLabs/maintainers
+/src/GenesisMesh.Sdk/canonical_registry.json @GenesisMeshLabs/maintainers
+/SECURITY.md @GenesisMeshLabs/maintainers
+
+# Conformance vectors (copied from the core) and the contract fixture
+/tests/GenesisMesh.Sdk.Tests/testdata/ @GenesisMeshLabs/maintainers
+/scripts/sync_canonical_registry.py @GenesisMeshLabs/maintainers
+/scripts/contract_na.py @GenesisMeshLabs/maintainers
+
+# Public API surface
+/src/GenesisMesh.Sdk/GenesisMeshClient.cs @GenesisMeshLabs/maintainers
+/src/GenesisMesh.Sdk/Models.cs @GenesisMeshLabs/maintainers
+/src/GenesisMesh.Sdk/Errors.cs @GenesisMeshLabs/maintainers
+/src/GenesisMesh.Sdk/Clients/ @GenesisMeshLabs/maintainers
+
+# Workflows and repository settings in code
+/.github/ @GenesisMeshLabs/maintainers
+
+# Packaging and release: the project files, the version and the release tools
+/src/GenesisMesh.Sdk/GenesisMesh.Sdk.csproj @GenesisMeshLabs/maintainers
+/GenesisMesh.sln @GenesisMeshLabs/maintainers
+/VERSION @GenesisMeshLabs/maintainers
+/CHANGELOG.md @GenesisMeshLabs/maintainers
+/scripts/changelog.py @GenesisMeshLabs/maintainers
+/scripts/check-version.ps1 @GenesisMeshLabs/maintainers
+/scripts/check_trx.py @GenesisMeshLabs/maintainers
