@@ -47,3 +47,4 @@
 /scripts/check_coverage.py @GenesisMeshLabs/maintainers
 /scripts/api_compat.py @GenesisMeshLabs/maintainers
 /.editorconfig @GenesisMeshLabs/maintainers
+/global.json @GenesisMeshLabs/maintainers

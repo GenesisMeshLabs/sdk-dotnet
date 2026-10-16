@@ -18,14 +18,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The package targets net8.0 and net10.0: the .NET 10 SDK builds both,
+      # The package targets net8.0 and net10.0: the .NET 10 SDK builds both
+      # (feature band 10.0.4xx, as global.json pins it),
       # and the tests run on both runtimes.
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: |
             8.0.x
-            10.0.x
+            10.0.4xx
 
       - name: Restore
         run: dotnet restore
@@ -97,7 +98,7 @@ jobs:
         with:
           dotnet-version: |
             8.0.x
-            10.0.x
+            10.0.4xx
       # GM_E2E_REQUIRED=1: the live test fails, rather than passes, when it
       # finds no NA to check against.
       - name: Typed results match a live Network Authority

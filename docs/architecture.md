@@ -163,4 +163,6 @@ warns on pull requests and fails on main.
 - **Property tests:** `PropertyTests.cs` (FsCheck) checks the strict JSON
   reader and the canonical form with generated input.
 - **Format and analyzers:** `dotnet format --verify-no-changes` and
-  `AnalysisLevel` `latest-recommended`, warnings as errors in both projects.
+  `AnalysisLevel` `10.0-recommended`, warnings as errors in both projects; the
+  SDK is pinned to the 10.0.4xx feature band (`global.json`), so a new SDK adds
+  no analyzer findings until the pin is moved.

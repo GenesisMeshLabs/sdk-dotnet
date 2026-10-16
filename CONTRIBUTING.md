@@ -9,7 +9,7 @@ the development environment, run tests, and submit changes.
 
 | Tool | Version |
 |------|---------|
-| .NET SDK | 10 (it builds every target framework) |
+| .NET SDK | 10.0.4xx, as `global.json` pins it (it builds every target framework) |
 | .NET runtime | 8, to run the tests on `net8.0` as well |
 | Python | 3.12, only for the live contract test and the scripts in `scripts/` |
 
