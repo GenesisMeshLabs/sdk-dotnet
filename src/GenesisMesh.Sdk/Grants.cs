@@ -27,7 +27,7 @@ public static partial class OfflineVerifier
     {
         ArgumentNullException.ThrowIfNull(keyHistory);
         const string model = "CapabilityGrant";
-        using var doc = StrictJson.Parse(grantJson);
+        using var doc = StrictJsonReader.Parse(grantJson);
         var g = doc.RootElement;
         if (g.ValueKind != JsonValueKind.Object) throw new ArgumentException("a grant must be a JSON object", nameof(grantJson));
         GrantVerificationResult Result(string reason) => new(reason == "accepted", reason, Str(g, "grant_id"));

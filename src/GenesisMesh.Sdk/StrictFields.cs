@@ -95,7 +95,7 @@ public static class StrictFields
     public static IReadOnlyList<string> UnknownFields(string model, string recordJson)
     {
         // v1.3.0: read strictly, as every record is (a duplicate key is refused, not resolved).
-        using var doc = StrictJson.Parse(recordJson);
+        using var doc = StrictJsonReader.Parse(recordJson);
         return UnknownFields(model, doc.RootElement);
     }
 

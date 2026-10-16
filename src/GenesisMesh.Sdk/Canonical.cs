@@ -17,7 +17,7 @@ public static class Canonical
     public static string FromJson(string json)
     {
         // v1.2.0: JSON every implementation would not read alike is refused (StrictJsonException).
-        using var doc = StrictJson.Parse(json);
+        using var doc = StrictJsonReader.Parse(json);
         return Of(doc.RootElement);
     }
 
@@ -144,10 +144,14 @@ public static class Canonical
 
     /// <summary>An integer literal stays as written (Python int, any size); anything else is a Python float.</summary>
     internal static string NumberLiteral(string raw) =>
-        IsIntegerLiteral(raw) ? raw : PythonFloatRepr(double.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture));
+        IsIntegerLiteral(raw) ? raw : FloatRepr(double.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture));
 
     /// <summary>Python's <c>repr(float)</c>: shortest round-trip digits; positional for exponents -4..15.</summary>
-    public static string PythonFloatRepr(double value)
+    [Obsolete("Canonical.PythonFloatRepr is an implementation detail of this SDK and becomes internal in 2.0. Canonical.Of and Canonical.FromJson write numbers in this form.")]
+    public static string PythonFloatRepr(double value) => FloatRepr(value);
+
+    /// <summary>Python's <c>repr(float)</c>: shortest round-trip digits; positional for exponents -4..15.</summary>
+    internal static string FloatRepr(double value)
     {
         if (double.IsNaN(value) || double.IsInfinity(value))
             throw new ArgumentException("Canonical JSON cannot encode NaN or Infinity.");

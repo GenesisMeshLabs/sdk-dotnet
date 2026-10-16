@@ -116,5 +116,5 @@ public class ConformanceTests
     [InlineData(-0.5, "-0.5")]
     [InlineData(1e15, "1000000000000000.0")]
     public void FloatsUsePythonRepr(double value, string expected) =>
-        Assert.Equal(expected, Canonical.PythonFloatRepr(value));
+        Assert.Equal(expected, Canonical.FloatRepr(value));
 }

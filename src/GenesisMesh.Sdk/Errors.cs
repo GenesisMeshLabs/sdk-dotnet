@@ -44,7 +44,15 @@ public sealed class RateLimitException      : GenesisMeshException { public Rate
 /// <summary>HTTP 5xx — server-side error.</summary>
 public sealed class ServerException         : GenesisMeshException { public ServerException(int s, string c, string d)         : base(s, c, d) { } }
 
+/// <summary>Reads the NA's error response into the typed exception for its HTTP status.</summary>
+[Obsolete("ErrorParser is an implementation detail of this SDK and becomes internal in 2.0. Catch the GenesisMeshException subclasses the client throws instead.")]
 public static class ErrorParser
+{
+    public static GenesisMeshException Parse(int status, string body) => ErrorMapping.Parse(status, body);
+}
+
+/// <summary>The typed exception for an NA error response (<see cref="Transport"/>).</summary>
+internal static class ErrorMapping
 {
     private sealed class ErrorEnvelope
     {
@@ -59,7 +67,7 @@ public static class ErrorParser
         [JsonPropertyName("request_id")]public string? RequestId { get; set; }
     }
 
-    public static GenesisMeshException Parse(int status, string body)
+    internal static GenesisMeshException Parse(int status, string body)
     {
         string code    = "";
         string message = body;

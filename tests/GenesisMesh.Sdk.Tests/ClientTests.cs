@@ -113,7 +113,7 @@ public class ErrorParserTests
     [Fact]
     public void Parse_400_ReturnsBadRequest()
     {
-        var ex = ErrorParser.Parse(400, "{\"error\":{\"message\":\"bad\",\"code\":\"BAD\"}}");
+        var ex = ErrorMapping.Parse(400, "{\"error\":{\"message\":\"bad\",\"code\":\"BAD\"}}");
         Assert.IsType<BadRequestException>(ex);
         Assert.Equal("bad", ex.Detail);
         Assert.Equal("BAD", ex.Code);
@@ -122,23 +122,49 @@ public class ErrorParserTests
     [Fact]
     public void Parse_401_ReturnsUnauthorized()
     {
-        var ex = ErrorParser.Parse(401, "{\"error\":{\"message\":\"auth failed\",\"code\":\"admin_auth_failed\"}}");
+        var ex = ErrorMapping.Parse(401, "{\"error\":{\"message\":\"auth failed\",\"code\":\"admin_auth_failed\"}}");
         Assert.IsType<UnauthorizedException>(ex);
     }
 
     [Fact]
     public void Parse_422_ReturnsValidation()
     {
-        var ex = ErrorParser.Parse(422, "{\"error\":{\"message\":\"invalid\",\"code\":\"VALIDATION\"}}");
+        var ex = ErrorMapping.Parse(422, "{\"error\":{\"message\":\"invalid\",\"code\":\"VALIDATION\"}}");
         Assert.IsType<ValidationException>(ex);
     }
 
     [Fact]
     public void Parse_500_ReturnsServer()
     {
-        var ex = ErrorParser.Parse(500, "Internal error");
+        var ex = ErrorMapping.Parse(500, "Internal error");
         Assert.IsType<ServerException>(ex);
     }
+}
+
+// ── Internals published as API (1.7.1: obsolete, internal in 2.0) ───────────
+
+public class ObsoleteInternalsTests
+{
+#pragma warning disable CS0618 // what these tests are about
+    [Fact]
+    public void Internals_AreMarkedObsolete()
+    {
+        Assert.NotNull(typeof(ErrorParser).GetCustomAttributes(typeof(ObsoleteAttribute), false).SingleOrDefault());
+        Assert.NotNull(typeof(StrictJson).GetCustomAttributes(typeof(ObsoleteAttribute), false).SingleOrDefault());
+        Assert.NotNull(typeof(Canonical).GetMethod(nameof(Canonical.PythonFloatRepr))!
+            .GetCustomAttributes(typeof(ObsoleteAttribute), false).SingleOrDefault());
+    }
+
+    [Fact]
+    public void Internals_StillWorkUntil2_0()
+    {
+        Assert.IsType<BadRequestException>(ErrorParser.Parse(400, "{}"));
+        Assert.Equal("1e-05", Canonical.PythonFloatRepr(1e-5));
+        Assert.Equal("duplicate_key", Assert.Throws<StrictJsonException>(() => StrictJson.Check("{\"a\":1,\"a\":2}")).Reason);
+        using var doc = StrictJson.Parse(StrictJson.DecodeUtf8("{\"a\":1}"u8.ToArray()));
+        Assert.Equal(64, StrictJson.MaxDepth);
+    }
+#pragma warning restore CS0618
 }
 
 // ── Client — no signing key ───────────────────────────────────────────────────

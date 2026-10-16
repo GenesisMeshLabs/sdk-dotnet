@@ -138,9 +138,9 @@ public static partial class OfflineVerifier
     {
         if (string.IsNullOrEmpty(rootPublicKey))
             throw new ArgumentException("the root public key, held out of band, is required", nameof(rootPublicKey));
-        using var genesis = StrictJson.Parse(genesisJson);
+        using var genesis = StrictJsonReader.Parse(genesisJson);
         if (string.IsNullOrWhiteSpace(successionsJson)) return BuildKeyHistory(genesis.RootElement, null, rootPublicKey);
-        using var successions = StrictJson.Parse(successionsJson);
+        using var successions = StrictJsonReader.Parse(successionsJson);
         return BuildKeyHistory(genesis.RootElement, successions.RootElement, rootPublicKey);
     }
 
@@ -153,7 +153,7 @@ public static partial class OfflineVerifier
     {
         if (string.IsNullOrEmpty(rootPublicKey))
             throw new ArgumentException("the root public key, held out of band, is required", nameof(rootPublicKey));
-        using var doc = StrictJson.Parse(responseJson);
+        using var doc = StrictJsonReader.Parse(responseJson);
         var body = doc.RootElement;
         if (body.ValueKind != JsonValueKind.Object) throw new FormatException("the key history must be a JSON object");
         body.TryGetProperty("genesis", out var genesis);
