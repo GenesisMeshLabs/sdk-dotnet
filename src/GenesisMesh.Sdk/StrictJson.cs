@@ -8,7 +8,7 @@ namespace GenesisMesh;
 /// <summary>
 /// JSON refused as input to a signed record (v1.2.0). <see cref="Reason"/> is one of
 /// <c>invalid_json</c> (not JSON, including <c>NaN</c> and <c>Infinity</c>, a byte order mark, text that
-/// is not UTF-8, and arrays or objects nested more than <see cref="StrictJson.MaxDepth"/> deep), <c>duplicate_key</c>,
+/// is not UTF-8, and arrays or objects nested more than 64 deep), <c>duplicate_key</c>,
 /// <c>non_finite_number</c> (<c>1e400</c>), <c>integer_out_of_range</c> (outside
 /// <c>-2**63 .. 2**64 - 1</c>), <c>negative_zero</c> (the integer <c>-0</c>) or <c>lone_surrogate</c>.
 /// A <see cref="JsonException"/>, as malformed JSON was before 1.2.0.
@@ -34,12 +34,29 @@ public sealed class StrictJsonException : JsonException
 /// conformance suite <c>canonical</c>).
 /// </para>
 /// </summary>
+[Obsolete("StrictJson is an implementation detail of this SDK and becomes internal in 2.0. The verifiers and the client read JSON strictly; catch StrictJsonException.")]
 public static class StrictJson
+{
+    /// <summary>How deep arrays and objects may nest; deeper is refused, as in every implementation.</summary>
+    public const int MaxDepth = StrictJsonReader.MaxDepth;
+
+    /// <inheritdoc cref="StrictJsonReader.DecodeUtf8"/>
+    public static string DecodeUtf8(byte[] bytes) => StrictJsonReader.DecodeUtf8(bytes);
+
+    /// <inheritdoc cref="StrictJsonReader.Check"/>
+    public static void Check(string json) => StrictJsonReader.Check(json);
+
+    /// <inheritdoc cref="StrictJsonReader.Parse"/>
+    public static JsonDocument Parse(string json) => StrictJsonReader.Parse(json);
+}
+
+/// <summary>The strict JSON reader (<see cref="StrictJsonException"/>) every verifier and the client use.</summary>
+internal static class StrictJsonReader
 {
     private static readonly BigInteger MinInteger = -BigInteger.Pow(2, 63);
     private static readonly BigInteger MaxInteger = BigInteger.Pow(2, 64) - 1;
     /// <summary>How deep arrays and objects may nest; deeper is refused, as in every implementation.</summary>
-    public const int MaxDepth = 64;
+    internal const int MaxDepth = 64;
     /// <summary>The length of <c>2**64 - 1</c>: a longer integer is out of range whatever its digits (v1.3.1).</summary>
     private const int MaxIntegerDigits = 20;
 
@@ -49,7 +66,7 @@ public static class StrictJson
     /// Decode UTF-8, refusing bytes that are not (<c>invalid_json</c>) rather than replacing them; a byte
     /// order mark is kept, so <see cref="Check"/> refuses it.
     /// </summary>
-    public static string DecodeUtf8(byte[] bytes)
+    internal static string DecodeUtf8(byte[] bytes)
     {
         try
         {
@@ -62,7 +79,7 @@ public static class StrictJson
     }
 
     /// <summary>Throw <see cref="StrictJsonException"/> unless <paramref name="json"/> is JSON every implementation reads alike.</summary>
-    public static void Check(string json)
+    internal static void Check(string json)
     {
         var scanner = new Scanner(json);
         scanner.Value();
@@ -71,7 +88,7 @@ public static class StrictJson
     }
 
     /// <summary>Parse JSON read strictly (<see cref="Check"/>).</summary>
-    public static JsonDocument Parse(string json)
+    internal static JsonDocument Parse(string json)
     {
         Check(json);
         return JsonDocument.Parse(json);

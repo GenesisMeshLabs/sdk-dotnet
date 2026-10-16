@@ -154,7 +154,7 @@ public static partial class OfflineVerifier
     /// <summary>MembershipAttestation.digest(): SHA-256 of the canonical body without signatures.</summary>
     public static string AttestationDigest(string attestationJson)
     {
-        using var doc = StrictJson.Parse(attestationJson);
+        using var doc = StrictJsonReader.Parse(attestationJson);
         return Sha256Hex(Canonical.Of(doc.RootElement, Signatures));
     }
 
@@ -164,7 +164,7 @@ public static partial class OfflineVerifier
     /// </summary>
     public static string PolicyDigest(string policyJson)
     {
-        using var doc = StrictJson.Parse(policyJson);
+        using var doc = StrictJsonReader.Parse(policyJson);
         return PolicyDigestOf(doc.RootElement);
     }
 
@@ -200,7 +200,7 @@ public static partial class OfflineVerifier
         string agreementJson, IReadOnlyList<string> offererPublicKeys, IReadOnlyList<string> responderPublicKeys,
         string? expectedGraphDigest = null)
     {
-        using var doc = StrictJson.Parse(agreementJson);
+        using var doc = StrictJsonReader.Parse(agreementJson);
         var a = doc.RootElement;
         var id = Str(a, "agreement_id");
         var sigs = SignaturesOf(a).ToList();
@@ -234,7 +234,7 @@ public static partial class OfflineVerifier
         ArgumentNullException.ThrowIfNull(offerer);
         ArgumentNullException.ThrowIfNull(responder);
         DateTimeOffset at;
-        using (var doc = StrictJson.Parse(agreementJson))
+        using (var doc = StrictJsonReader.Parse(agreementJson))
             at = ParseTimestamp((IsObject(doc.RootElement, "agreed_terms", out var terms) ? Str(terms, "valid_from") : null)
                 ?? throw new FormatException("the agreement has no agreed_terms.valid_from"));
         var t = now ?? DateTimeOffset.UtcNow;
@@ -249,7 +249,7 @@ public static partial class OfflineVerifier
     {
         if (options.KeyHistory is not null && options.OperatorPublicKeys.Count > 0)
             throw new ArgumentException("pass OperatorPublicKeys or KeyHistory, not both", nameof(options));
-        using var doc = StrictJson.Parse(decisionJson);
+        using var doc = StrictJsonReader.Parse(decisionJson);
         var d = doc.RootElement;
         var authorized = Bool(d, "authorized");
         var decisionId = Str(d, "decision_id");
@@ -311,7 +311,7 @@ public static partial class OfflineVerifier
             var expected = options.ExpectedPolicies
                 .Select(json =>
                 {
-                    using var p = StrictJson.Parse(json);
+                    using var p = StrictJsonReader.Parse(json);
                     var version = p.RootElement.GetProperty("version");
                     return (Id: Str(p.RootElement, "policy_id") ?? "", Version: version.GetRawText(),
                         VersionValue: version.GetInt64(), Digest: PolicyDigestOf(p.RootElement));
@@ -329,7 +329,7 @@ public static partial class OfflineVerifier
         if (options.ExpectedAttestation is not null)
         {
             if (!IsObject(d, "attestation_binding", out var ab)) return Reject("attestation_binding_missing");
-            using var att = StrictJson.Parse(options.ExpectedAttestation);
+            using var att = StrictJsonReader.Parse(options.ExpectedAttestation);
             var e = att.RootElement;
             if (Str(ab, "attestation_id") != Str(e, "attestation_id") || Str(ab, "subject_id") != Str(e, "subject_id")
                 || Str(ab, "issuer_sovereign_id") != Str(e, "issuer_sovereign_id")
@@ -373,7 +373,7 @@ public static partial class OfflineVerifier
     /// <summary>True when the licensor signed the DataLicensePolicy.</summary>
     public static bool VerifyDataLicensePolicySignature(string policyJson, IReadOnlyList<string> licensorPublicKeys)
     {
-        using var doc = StrictJson.Parse(policyJson);
+        using var doc = StrictJsonReader.Parse(policyJson);
         var sig = SignatureOf(doc.RootElement);
         return sig is not null && VerifyEd25519(Canonical.Of(doc.RootElement, Signature), sig, licensorPublicKeys)
             && StrictFields.UnknownFields("DataLicensePolicy", doc.RootElement).Count == 0
@@ -388,8 +388,8 @@ public static partial class OfflineVerifier
     public static DataIntentVerificationResult VerifyDataAccessIntent(
         string intentJson, string policyJson, IReadOnlyList<string> agentPublicKeys, DateTimeOffset? at = null)
     {
-        using var intentDoc = StrictJson.Parse(intentJson);
-        using var policyDoc = StrictJson.Parse(policyJson);
+        using var intentDoc = StrictJsonReader.Parse(intentJson);
+        using var policyDoc = StrictJsonReader.Parse(policyJson);
         var intent = intentDoc.RootElement;
         var policy = policyDoc.RootElement;
         var t = at ?? DateTimeOffset.UtcNow;

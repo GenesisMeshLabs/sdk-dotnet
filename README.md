@@ -2,7 +2,7 @@
 
 .NET SDK for the Genesis Mesh Network Authority HTTP API.
 
-**Target: .NET 8+. One dependency: [`NSec.Cryptography`](https://nsec.rocks/) for Ed25519.**
+**Targets: .NET 8 and .NET 10 (`net8.0`, `net10.0`). One dependency: [`NSec.Cryptography`](https://nsec.rocks/) for Ed25519.**
 
 [![NuGet](https://img.shields.io/nuget/v/genesismesh-sdk-dotnet)](https://www.nuget.org/packages/genesismesh-sdk-dotnet)
 [![CI](https://github.com/GenesisMeshLabs/sdk-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/GenesisMeshLabs/sdk-dotnet/actions/workflows/ci.yml)
@@ -361,6 +361,11 @@ catch (UnauthorizedException ex)
     // bad signing key or stale timestamp
     Console.WriteLine($"Auth failed: {ex.Detail} [{ex.Code}]");
 }
+catch (ForbiddenException ex)
+{
+    // 403: e.g. insufficient_operator_tier; retrying does not help
+    Console.WriteLine($"Forbidden: {ex.Detail} [{ex.Code}]");
+}
 catch (ValidationException ex)
 {
     Console.WriteLine($"Validation: {ex.Detail} [{ex.Code}]");
@@ -369,15 +374,38 @@ catch (RateLimitException)
 {
     // back off and retry
 }
+catch (ServerException)
+{
+    // 5xx only: may succeed later
+}
 catch (NetworkException ex)
 {
     Console.WriteLine($"Connection error: {ex.InnerException?.Message}");
 }
 catch (GenesisMeshException ex)
 {
+    // every other NA error: ConflictException (409), PayloadTooLargeException (413),
+    // ClientErrorException (any other 4xx), ...
     Console.WriteLine($"Error HTTP {ex.Status}: {ex.Detail}");
 }
 ```
+
+| Status | Exception |
+|---|---|
+| 400 | `BadRequestException` |
+| 401 | `UnauthorizedException` |
+| 403 | `ForbiddenException` |
+| 404 | `NotFoundException` |
+| 409 | `ConflictException` |
+| 413 | `PayloadTooLargeException` |
+| 422 | `ValidationException` |
+| 429 | `RateLimitException` |
+| other 4xx | `ClientErrorException` |
+| 5xx | `ServerException` |
+
+All of them derive from `GenesisMeshException` (`Status`, `Code`, `Detail`).
+A connection failure or timeout is a `NetworkException`. Cancelling through
+your own `CancellationToken` throws `OperationCanceledException`.
 
 ## Admin authentication
 

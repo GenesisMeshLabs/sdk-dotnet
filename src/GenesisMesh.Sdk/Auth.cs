@@ -14,11 +14,23 @@ public static class Auth
     /// How this SDK writes request bodies and reads the NA's responses. Keys are matched in their own
     /// case only (v1.3.1): before, <c>{"authorized":false,"Authorized":true}</c> read as authorized,
     /// where every other implementation reads <c>Authorized</c> as a key it does not know.
+    /// <para>
+    /// Read-only (1.7.1): setting a property throws <see cref="InvalidOperationException"/>. Before, any code in
+    /// the process could turn case-insensitive matching back on and undo the 1.3.1 defence for every client.
+    /// To serialize with other settings, copy it: <c>new JsonSerializerOptions(Auth.SerializerOptions)</c>.
+    /// </para>
     /// </summary>
-    public static readonly JsonSerializerOptions SerializerOptions = new()
+    public static readonly JsonSerializerOptions SerializerOptions = ReadOnlyOptions();
+
+    private static JsonSerializerOptions ReadOnlyOptions()
     {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
+        var options = new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        };
+        options.MakeReadOnly(populateMissingResolver: true);
+        return options;
+    }
 
     /// <summary>
     /// Canonical JSON of a .NET value, byte-identical to Python's

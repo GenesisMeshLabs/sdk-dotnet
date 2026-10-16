@@ -113,7 +113,7 @@ public class ErrorParserTests
     [Fact]
     public void Parse_400_ReturnsBadRequest()
     {
-        var ex = ErrorParser.Parse(400, "{\"error\":{\"message\":\"bad\",\"code\":\"BAD\"}}");
+        var ex = ErrorMapping.Parse(400, "{\"error\":{\"message\":\"bad\",\"code\":\"BAD\"}}");
         Assert.IsType<BadRequestException>(ex);
         Assert.Equal("bad", ex.Detail);
         Assert.Equal("BAD", ex.Code);
@@ -122,23 +122,76 @@ public class ErrorParserTests
     [Fact]
     public void Parse_401_ReturnsUnauthorized()
     {
-        var ex = ErrorParser.Parse(401, "{\"error\":{\"message\":\"auth failed\",\"code\":\"admin_auth_failed\"}}");
+        var ex = ErrorMapping.Parse(401, "{\"error\":{\"message\":\"auth failed\",\"code\":\"admin_auth_failed\"}}");
         Assert.IsType<UnauthorizedException>(ex);
     }
 
     [Fact]
     public void Parse_422_ReturnsValidation()
     {
-        var ex = ErrorParser.Parse(422, "{\"error\":{\"message\":\"invalid\",\"code\":\"VALIDATION\"}}");
+        var ex = ErrorMapping.Parse(422, "{\"error\":{\"message\":\"invalid\",\"code\":\"VALIDATION\"}}");
         Assert.IsType<ValidationException>(ex);
     }
 
     [Fact]
     public void Parse_500_ReturnsServer()
     {
-        var ex = ErrorParser.Parse(500, "Internal error");
+        var ex = ErrorMapping.Parse(500, "Internal error");
         Assert.IsType<ServerException>(ex);
     }
+
+    // 1.7.1: a 403, 409, 413 or other 4xx was a ServerException ("HTTP 5xx"), so a retry-on-server-error
+    // policy retried a refusal. The codes are ones the core sends (genesis_mesh/na_service/errors.py).
+    [Theory]
+    [InlineData(403, "insufficient_operator_tier", typeof(ForbiddenException))]
+    [InlineData(403, "node_key_revoked", typeof(ForbiddenException))]
+    [InlineData(409, "boundary_policy_required", typeof(ConflictException))]
+    [InlineData(413, "request_entity_too_large", typeof(PayloadTooLargeException))]
+    [InlineData(405, "method_not_allowed", typeof(ClientErrorException))]
+    [InlineData(410, "gone", typeof(ClientErrorException))]
+    [InlineData(400, "bad_request", typeof(BadRequestException))]
+    [InlineData(401, "admin_auth_failed", typeof(UnauthorizedException))]
+    [InlineData(404, "not_found", typeof(NotFoundException))]
+    [InlineData(422, "request_validation_failed", typeof(ValidationException))]
+    [InlineData(429, "rate_limit_exceeded", typeof(RateLimitException))]
+    [InlineData(500, "internal_server_error", typeof(ServerException))]
+    [InlineData(503, "service_unavailable", typeof(ServerException))]
+    [InlineData(302, "", typeof(GenesisMeshException))]
+    public void Parse_MapsEachStatusToItsType(int status, string code, Type expected)
+    {
+        var ex = ErrorMapping.Parse(status, $"{{\"error\":{{\"code\":\"{code}\",\"message\":\"m\",\"details\":{{}},\"request_id\":\"r\"}}}}");
+        Assert.IsType(expected, ex);
+        Assert.Equal(status, ex.Status);
+        Assert.Equal(code, ex.Code);
+        Assert.Equal("m", ex.Detail);
+        Assert.Equal(status >= 500, ex is ServerException);
+    }
+}
+
+// ── Internals published as API (1.7.1: obsolete, internal in 2.0) ───────────
+
+public class ObsoleteInternalsTests
+{
+#pragma warning disable CS0618 // what these tests are about
+    [Fact]
+    public void Internals_AreMarkedObsolete()
+    {
+        Assert.NotNull(typeof(ErrorParser).GetCustomAttributes(typeof(ObsoleteAttribute), false).SingleOrDefault());
+        Assert.NotNull(typeof(StrictJson).GetCustomAttributes(typeof(ObsoleteAttribute), false).SingleOrDefault());
+        Assert.NotNull(typeof(Canonical).GetMethod(nameof(Canonical.PythonFloatRepr))!
+            .GetCustomAttributes(typeof(ObsoleteAttribute), false).SingleOrDefault());
+    }
+
+    [Fact]
+    public void Internals_StillWorkUntil2_0()
+    {
+        Assert.IsType<BadRequestException>(ErrorParser.Parse(400, "{}"));
+        Assert.Equal("1e-05", Canonical.PythonFloatRepr(1e-5));
+        Assert.Equal("duplicate_key", Assert.Throws<StrictJsonException>(() => StrictJson.Check("{\"a\":1,\"a\":2}")).Reason);
+        using var doc = StrictJson.Parse(StrictJson.DecodeUtf8("{\"a\":1}"u8.ToArray()));
+        Assert.Equal(64, StrictJson.MaxDepth);
+    }
+#pragma warning restore CS0618
 }
 
 // ── Client — no signing key ───────────────────────────────────────────────────
@@ -312,5 +365,74 @@ public class HttpErrorTests
         var ex = await Assert.ThrowsAsync<ValidationException>(() =>
             client.Evidence.Build(new TrustDecision { Verdict = "trusted" }));
         Assert.Equal(422, ex.Status);
+    }
+
+    [Fact]
+    public async Task Forbidden_IsNotAServerError_AndStillAGenesisMeshException()
+    {
+        using var handler = new FuncHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.Forbidden)
+            {
+                Content = new StringContent(
+                    "{\"error\":{\"code\":\"insufficient_operator_tier\",\"message\":\"This operation requires the root operator tier.\",\"details\":{},\"request_id\":\"r-1\"}}",
+                    Encoding.UTF8, "application/json"),
+            });
+        var client = new GenesisMeshClient(new ClientOptions
+        {
+            BaseUrl = "http://localhost", SigningKey = TestHelpers.ZeroSeedB64, Audience = "TEST", KeyId = "test",
+            HttpHandler = handler,
+        });
+        GenesisMeshException ex = await Assert.ThrowsAsync<ForbiddenException>(() =>
+            client.Boundary.Decide(new Dictionary<string, object?> { ["requested_capability"] = "read" }));
+        Assert.Equal(403, ex.Status);
+        Assert.Equal("insufficient_operator_tier", ex.Code);
+    }
+}
+
+// ── Cancellation (1.7.1) ──────────────────────────────────────────────────────
+
+public class CancellationTests
+{
+    /// <summary>Answers only when the request's token is cancelled (or never).</summary>
+    private sealed class HangingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }
+    }
+
+    private static GenesisMeshClient Client(TimeSpan timeout = default) =>
+        new(new ClientOptions { BaseUrl = "http://localhost", HttpHandler = new HangingHandler(), Timeout = timeout });
+
+    private static Dictionary<string, object?> Body() => new() { ["decision"] = new { } };
+
+    // Before 1.7.1 the caller's own cancellation was reported as a NetworkException, so
+    // catch (OperationCanceledException) never saw it.
+    [Fact]
+    public async Task CallerCancellation_BeforeTheCall_IsOperationCanceled()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        using var client = Client();
+        var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.Boundary.Verify(Body(), cts.Token));
+        Assert.Equal(cts.Token, ex.CancellationToken);
+    }
+
+    [Fact]
+    public async Task CallerCancellation_DuringTheCall_IsOperationCanceled()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        using var client = Client();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.Boundary.Verify(Body(), cts.Token));
+    }
+
+    [Fact]
+    public async Task Timeout_IsStillANetworkError()
+    {
+        using var client = Client(TimeSpan.FromMilliseconds(50));
+        var ex = await Assert.ThrowsAsync<NetworkException>(() => client.Boundary.Verify(Body(), CancellationToken.None));
+        Assert.IsAssignableFrom<OperationCanceledException>(ex.InnerException);
     }
 }

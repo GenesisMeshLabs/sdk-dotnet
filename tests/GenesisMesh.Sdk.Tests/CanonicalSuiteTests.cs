@@ -90,17 +90,17 @@ public class CanonicalSuiteTests
     [Fact]
     public void BytesMustBeUtf8AndAByteOrderMarkIsRefused()
     {
-        Assert.Equal("invalid_json", Assert.Throws<StrictJsonException>(() => StrictJson.DecodeUtf8(new byte[] { 0x7b, 0xff, 0x7d })).Reason);
-        var withMark = StrictJson.DecodeUtf8(new byte[] { 0xef, 0xbb, 0xbf, 0x7b, 0x7d });
+        Assert.Equal("invalid_json", Assert.Throws<StrictJsonException>(() => StrictJsonReader.DecodeUtf8(new byte[] { 0x7b, 0xff, 0x7d })).Reason);
+        var withMark = StrictJsonReader.DecodeUtf8(new byte[] { 0xef, 0xbb, 0xbf, 0x7b, 0x7d });
         Assert.Equal("\ufeff{}", withMark);
-        Assert.Equal("invalid_json", Assert.Throws<StrictJsonException>(() => StrictJson.Check(withMark)).Reason);
+        Assert.Equal("invalid_json", Assert.Throws<StrictJsonException>(() => StrictJsonReader.Check(withMark)).Reason);
     }
 
     private static string Reason(string json)
     {
         try
         {
-            StrictJson.Check(json);
+            StrictJsonReader.Check(json);
             return "ok";
         }
         catch (StrictJsonException e)
@@ -161,7 +161,7 @@ public class CanonicalSuiteTests
     [Fact]
     public void ARefusalIsAJsonException()
     {
-        JsonException e = Assert.Throws<StrictJsonException>(() => StrictJson.Check("{\"a\":1,\"a\":2}"));
+        JsonException e = Assert.Throws<StrictJsonException>(() => StrictJsonReader.Check("{\"a\":1,\"a\":2}"));
         Assert.Equal("duplicate_key", ((StrictJsonException)e).Reason);
     }
 }

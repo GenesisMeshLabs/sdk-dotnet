@@ -117,6 +117,10 @@ internal sealed class Transport : IDisposable
         {
             resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // 1.7.1: the caller cancelled; not a network error
+        }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             throw new NetworkException(ex);
@@ -127,14 +131,14 @@ internal sealed class Transport : IDisposable
             // The bytes, so a body that is not UTF-8 is refused rather than repaired.
             var bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
-                throw ErrorParser.Parse((int)resp.StatusCode, Encoding.UTF8.GetString(bytes));
-            var raw = StrictJson.DecodeUtf8(bytes);
+                throw ErrorMapping.Parse((int)resp.StatusCode, Encoding.UTF8.GetString(bytes));
+            var raw = StrictJsonReader.DecodeUtf8(bytes);
 
             if (typeof(T) == typeof(object) || string.IsNullOrWhiteSpace(raw))
                 return default!;
 
             // v1.2.0: refuse JSON every implementation would not read alike.
-            StrictJson.Check(raw);
+            StrictJsonReader.Check(raw);
             return JsonSerializer.Deserialize<T>(raw, Auth.SerializerOptions)
                 ?? throw new InvalidOperationException("genesismesh: empty response");
         }
