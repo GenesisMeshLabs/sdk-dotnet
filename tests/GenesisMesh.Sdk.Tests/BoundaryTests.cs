@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Reflection;
+using System.Runtime.Loader;
 using System.Text;
 using System.Text.Json;
 using GenesisMesh;
@@ -93,10 +95,36 @@ public class BoundaryTests
     }
 
     [Fact]
+    public void SerializerOptions_AreReadOnlyBeforeAnyUse()
+    {
+        // 1.7.1: System.Text.Json also locks options on their first use, so in this process (where other
+        // tests may already have serialized with them) IsReadOnly would hold without the fix. A fresh copy
+        // of the SDK assembly, in its own load context, has static state no serialization has touched:
+        // its options must be read-only from the start, before code in the process can change them.
+        var context = new AssemblyLoadContext("fresh-sdk", isCollectible: true);
+        try
+        {
+            var sdk = context.LoadFromAssemblyPath(typeof(Auth).Assembly.Location);
+            Assert.NotSame(typeof(Auth).Assembly, sdk);
+            var field = sdk.GetType("GenesisMesh.Auth", throwOnError: true)!
+                .GetField(nameof(Auth.SerializerOptions), BindingFlags.Public | BindingFlags.Static)!;
+            var fresh = (JsonSerializerOptions)field.GetValue(null)!;
+            Assert.NotSame(Auth.SerializerOptions, fresh);
+            Assert.True(fresh.IsReadOnly, "Auth.SerializerOptions is mutable until its first use");
+            Assert.Throws<InvalidOperationException>(() => fresh.PropertyNameCaseInsensitive = true);
+        }
+        finally
+        {
+            context.Unload();
+        }
+    }
+
+    [Fact]
     public async Task SerializerOptions_CannotBeChangedToFoldCaseAgain()
     {
         // 1.7.1: the options were public and mutable, so any code in the process could turn
         // case-insensitive matching back on, and this response then verified as accepted.
+        // (Order-independent proof of the eager freeze: SerializerOptions_AreReadOnlyBeforeAnyUse.)
         var options = Auth.SerializerOptions;
         try
         {
