@@ -122,9 +122,10 @@ tests). Every public client method needs:
 5. A `Check(...)` call in `LiveContractTests.cs`
 
 A bug fix comes with the test that fails without it. The `Regression test`
-check fails a pull request titled `fix: ...` that changes source files but no
-file under `tests/` (test data does not count), unless the Maintainer adds
-the label `no-test-needed`.
+check fails a pull request titled `fix: ...` that changes source files
+(deletions included) but adds or modifies no C# test file (`tests/**/*.cs`;
+deleted tests, the test project and test data do not count), unless the
+Maintainer adds the label `no-test-needed`.
 
 Use `FuncHandler` from the test project (no third-party mocking library):
 

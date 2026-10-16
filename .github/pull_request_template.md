@@ -14,8 +14,8 @@ the live contract test if you changed a client method (see CONTRIBUTING.md). -->
 Bug fix: the test that fails without this change is ___
 
 <!-- Name the test and say how you saw it fail without the fix. A pull request
-titled "fix: ..." that changes source files must change a test file, or carry
-the label no-test-needed, which only the Maintainer adds. Write "not a bug
+titled "fix: ..." that changes source files must add or modify a C# test file
+(tests/**/*.cs, not test data), or carry the label no-test-needed, which only the Maintainer adds. Write "not a bug
 fix" otherwise. -->
 
 ## Changelog

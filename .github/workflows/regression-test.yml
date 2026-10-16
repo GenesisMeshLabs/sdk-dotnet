@@ -2,8 +2,9 @@ name: Regression test
 
 # A bug fix carries the test that fails without it. A pull request titled
 # "fix: ..." or "fix(scope): ..." that changes source files fails this check
-# unless it also changes a test file (under tests/, not test data) or carries
-# the label "no-test-needed". Other pull requests and the merge queue pass.
+# unless it also adds or modifies a C# test file (tests/**/*.cs, not test
+# data; a deleted test or a project file does not count) or carries the label
+# "no-test-needed". Other pull requests and the merge queue pass.
 
 on:
   pull_request:
@@ -45,13 +46,17 @@ jobs:
             echo "Labelled no-test-needed: no regression test required."
             exit 0
           fi
-          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+          # Every change, deletions included (a deleted source file is a source
+          # change); renames as a deletion plus an addition.
+          changed="$(git diff --name-only --no-renames "$BASE_SHA...$HEAD_SHA")"
           echo "Changed files:"
           echo "$changed" | sed 's/^/  /'
           # Source: anything but docs, CI and repository files, changelog
-          # fragments, test data (the vectors copied from the core) and tests.
+          # fragments and everything under tests/ (tests, test data, the test project).
           source="$(echo "$changed" | grep -Ev '(^|/)[^/]*\.md$|^\.github/|^changelog\.d/|^tests/|^(LICENSE|VERSION|\.gitignore|\.gitattributes)$' || true)"
-          tests="$(echo "$changed" | grep -E '^tests/' | grep -Ev '^tests/[^/]+/testdata/' || true)"
+          # Tests: C# files under tests/ that were added or modified, not deleted,
+          # and not test data (fixtures under a testdata/ directory).
+          tests="$(git diff --name-only --no-renames --diff-filter=AM "$BASE_SHA...$HEAD_SHA" | grep -E '^tests/.+\.cs$' | grep -Ev '(^|/)testdata/' || true)"
           if [ -z "$source" ]; then
             echo "No source file changed: no regression test required."
             exit 0
@@ -61,7 +66,7 @@ jobs:
             echo "$tests" | sed 's/^/  /'
             exit 0
           fi
-          echo "::error::A fix pull request changes source files but no test (under tests/). Add the test that fails without the fix, or, when no test can show it, ask the Maintainer for the label no-test-needed."
+          echo "::error::A fix pull request changes source files but adds or modifies no C# test (tests/**/*.cs). Add the test that fails without the fix, or, when no test can show it, ask the Maintainer for the label no-test-needed."
           echo "Source files changed:"
           echo "$source" | sed 's/^/  /'
           exit 1
