@@ -26,10 +26,17 @@ dotnet restore
 Verify the build and tests pass before making any changes:
 
 ```sh
-dotnet build -c Release                       # warnings are errors
+dotnet format --verify-no-changes             # CI checks the formatting
+dotnet build -c Release                       # warnings are errors (recommended analyzers)
 dotnet test -c Release --filter "Category!=Live"
+dotnet pack src/GenesisMesh.Sdk -c Release    # package validation against the last release
 python scripts/changelog.py check
 ```
+
+A change that removes or changes a public member fails package validation.
+If the break is intended, see "A breaking change" in
+[docs/architecture.md](docs/architecture.md): a suppression file, an
+`### Upgrading` note and the label `breaking`.
 
 `dotnet test` runs the tests once per target framework of the test project.
 
