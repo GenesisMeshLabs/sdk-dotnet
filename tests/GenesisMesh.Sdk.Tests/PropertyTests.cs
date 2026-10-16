@@ -5,6 +5,7 @@ using System.Text.Json;
 using FsCheck;
 using FsCheck.Fluent;
 using GenesisMesh;
+using Microsoft.FSharp.Core;
 using Xunit;
 
 namespace GenesisMesh.Sdk.Tests;
@@ -13,15 +14,31 @@ namespace GenesisMesh.Sdk.Tests;
 /// Property tests (FsCheck) of the strict JSON reader and the canonical form, with generated input: any JSON
 /// value, written in any of the ways JSON allows, reads back from its canonical form; a duplicate key is refused
 /// wherever it is; number lexemes are accepted or refused by the reference's rules; strings of any UTF-16 code
-/// units and any bytes are read exactly or refused by reason. A failure prints the counterexample and the seed
-/// that replays it (<c>Config.WithReplay</c>).
+/// units and any bytes are read exactly or refused by reason. A failure prints the counterexample.
+/// <para>
+/// The inputs come from a fixed seed, so every run (and CI's coverage) checks the same cases. To explore, set
+/// <c>GM_PROPERTY_SEED</c> to another number, or to <c>random</c> for a new seed each run (FsCheck prints the
+/// seed of a failure): <c>GM_PROPERTY_SEED=random dotnet test --filter PropertyTests</c>.
+/// </para>
 /// </summary>
 public class PropertyTests
 {
     private const int Runs = 300;
 
+    /// <summary>The seed every property starts from unless <c>GM_PROPERTY_SEED</c> names another.</summary>
+    private const ulong FixedSeed = 20261016;
+
+    private static Config Settings(int runs)
+    {
+        var config = Config.QuickThrowOnFailure.WithMaxTest(runs);
+        var seed = Environment.GetEnvironmentVariable("GM_PROPERTY_SEED");
+        if (seed == "random") return config;
+        var value = string.IsNullOrEmpty(seed) ? FixedSeed : ulong.Parse(seed, CultureInfo.InvariantCulture);
+        return config.WithReplay(FSharpOption<Replay>.Some(new Replay(new Rnd(value), FSharpOption<int>.None)));
+    }
+
     private static void Holds<T>(Arbitrary<T> input, Action<T> property, int runs = Runs) =>
-        Check.One(Config.QuickThrowOnFailure.WithMaxTest(runs), Prop.ForAll(input, property));
+        Check.One(Settings(runs), Prop.ForAll(input, property));
 
     private static Gen<(TA, TB, TC)> Zip<TA, TB, TC>(Gen<TA> a, Gen<TB> b, Gen<TC> c) =>
         Gen.Zip(Gen.Zip(a, b), c, (ab, x) => (ab.Item1, ab.Item2, x));
