@@ -93,6 +93,32 @@ public class BoundaryTests
     }
 
     [Fact]
+    public async Task SerializerOptions_CannotBeChangedToFoldCaseAgain()
+    {
+        // 1.7.1: the options were public and mutable, so any code in the process could turn
+        // case-insensitive matching back on, and this response then verified as accepted.
+        var options = Auth.SerializerOptions;
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() => options.PropertyNameCaseInsensitive = true);
+            using var handler = RawResponse("{\"valid\":false,\"accepted\":false,\"Valid\":true,\"Accepted\":true}");
+            var result = await PublicClient(handler).Boundary.Verify(
+                new Dictionary<string, object?> { ["decision"] = new { } });
+            Assert.False(result.Valid);
+            Assert.False(result.Accepted);
+        }
+        finally
+        {
+            if (!options.IsReadOnly) options.PropertyNameCaseInsensitive = false;
+        }
+        Assert.True(options.IsReadOnly);
+        // A copy is the caller's own to change.
+        var copy = new JsonSerializerOptions(options) { PropertyNameCaseInsensitive = true };
+        Assert.True(copy.PropertyNameCaseInsensitive);
+        Assert.False(options.PropertyNameCaseInsensitive);
+    }
+
+    [Fact]
     public async Task Decide_SendsAdminKeyIdHeader()
     {
         string? capturedKeyId = null;
