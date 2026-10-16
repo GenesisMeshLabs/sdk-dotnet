@@ -5,6 +5,8 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  # The merge queue runs the required checks on the merged result.
+  merge_group:
 
 permissions:
   contents: read
@@ -16,10 +18,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The package targets net8.0 and net10.0: the .NET 10 SDK builds both,
+      # and the tests run on both runtimes.
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: |
+            8.0.x
+            10.0.x
 
       - name: Restore
         run: dotnet restore
@@ -32,7 +38,13 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test --no-build --configuration Release --filter "Category!=Live" --logger "console;verbosity=normal"
+        run: dotnet test --no-build --configuration Release --filter "Category!=Live" --logger "console;verbosity=normal" --logger trx --results-directory TestResults/unit
+
+      # dotnet test passes when a filter matches nothing and when tests are
+      # skipped: every target framework must have run its tests, all passed.
+      - name: Every target framework ran and passed its tests
+        if: always()
+        run: python3 scripts/check_trx.py TestResults/unit --project tests/GenesisMesh.Sdk.Tests/GenesisMesh.Sdk.Tests.csproj --min-tests 100
 
   # Every client method against a running Network Authority: each typed
   # result must model the JSON the NA sent (v1.0.2: most of them did not).
@@ -62,11 +74,19 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      # GM_E2E_REQUIRED=1: the live test fails, rather than passes, when it
+      # finds no NA to check against.
       - name: Typed results match a live Network Authority
-        run: dotnet test tests/GenesisMesh.Sdk.Tests --configuration Release --filter "Category=Live" --logger "console;verbosity=normal"
+        run: dotnet test tests/GenesisMesh.Sdk.Tests --configuration Release --filter "Category=Live" --logger "console;verbosity=normal" --logger trx --results-directory TestResults/live
         env:
           GM_E2E_PYTHON: python
+          GM_E2E_REQUIRED: "1"
+      - name: The live test ran and passed on every target framework
+        if: always()
+        run: python3 scripts/check_trx.py TestResults/live --project tests/GenesisMesh.Sdk.Tests/GenesisMesh.Sdk.Tests.csproj --only-test EveryCallReturnsWhatTheNASent
 
   release-train:
     runs-on: ubuntu-latest
