@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  id-token: write  # required for NuGet Trusted Publishing (OIDC)
+  id-token: write  # NuGet trusted publishing: NuGet/login exchanges the OIDC token
   contents: write
 
 jobs:
@@ -46,20 +46,29 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: |
+            8.0.x
+            10.0.x
 
       - name: Restore
         run: dotnet restore
 
       - name: Verify release tag matches package version
         shell: pwsh
-        run: ./scripts/check-version.ps1 -ReleaseTag "${{ github.ref_name }}"
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: ./scripts/check-version.ps1 -ReleaseTag "$env:RELEASE_TAG"
 
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
+      # The live contract test needs a Network Authority; CI's "Live contract"
+      # job runs it. Here it would have nothing to check against.
       - name: Test
-        run: dotnet test --no-build --configuration Release --logger "console;verbosity=normal"
+        run: dotnet test --no-build --configuration Release --filter "Category!=Live" --logger "console;verbosity=normal" --logger trx --results-directory TestResults/unit
+
+      - name: Every target framework ran and passed its tests
+        run: python3 scripts/check_trx.py TestResults/unit --project tests/GenesisMesh.Sdk.Tests/GenesisMesh.Sdk.Tests.csproj --min-tests 100
 
       - name: Pack
         run: dotnet pack src/GenesisMesh.Sdk/GenesisMesh.Sdk.csproj --no-build --configuration Release --output ./artifacts
@@ -71,25 +80,37 @@ jobs:
           path: ./artifacts/*.nupkg
           retention-days: 7
 
-      - name: Obtain GitHub OIDC token (audience api.nuget.org)
-        id: oidc
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      # Trusted publishing: NuGet/login exchanges this run's GitHub OIDC token
+      # for a short-lived API key, under the trusted publishing policy on
+      # nuget.org for this repository and this workflow file (see AGENT.md,
+      # "Release process"). It runs when the repository variable NUGET_USER
+      # names the nuget.org account that owns the policy. NUGET_API_KEY is
+      # only the fallback until that works; then delete the secret and the
+      # fallback below.
+      - name: NuGet login (trusted publishing)
+        id: nuget-login
+        if: vars.NUGET_USER != ''
+        continue-on-error: true
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with:
-          script: |
-            const token = await core.getIDToken('api.nuget.org');
-            core.setSecret(token);
-            core.setOutput('token', token);
+          user: ${{ vars.NUGET_USER }}
 
-      # Keep NUGET_API_KEY: NuGet.org does not take a GitHub OIDC token as an
-      # API key. Trusted publishing first exchanges it for a short-lived key
-      # (the NuGet/login action, with a trusted publishing policy on
-      # NuGet.org); until that is set up, the OIDC fallback below cannot push.
       - name: Push to NuGet
         env:
-          NUGET_OIDC: ${{ steps.oidc.outputs.token }}
+          TRUSTED_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
-          KEY="${NUGET_API_KEY:-$NUGET_OIDC}"
+          set -euo pipefail
+          if [ -n "$TRUSTED_KEY" ]; then
+            KEY="$TRUSTED_KEY"
+            echo "Publishing with a short-lived trusted publishing key."
+          elif [ -n "$NUGET_API_KEY" ]; then
+            KEY="$NUGET_API_KEY"
+            echo "::warning::Trusted publishing gave no key (repository variable NUGET_USER and the nuget.org policy); publishing with the NUGET_API_KEY fallback."
+          else
+            echo "::error::No NuGet key: configure trusted publishing (repository variable NUGET_USER and the nuget.org policy) or the NUGET_API_KEY secret."
+            exit 1
+          fi
           dotnet nuget push ./artifacts/*.nupkg \
             --source https://api.nuget.org/v3/index.json \
             --api-key "$KEY" \
