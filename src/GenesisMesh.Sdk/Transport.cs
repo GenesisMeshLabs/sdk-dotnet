@@ -117,6 +117,10 @@ internal sealed class Transport : IDisposable
         {
             resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // 1.7.1: the caller cancelled; not a network error
+        }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             throw new NetworkException(ex);

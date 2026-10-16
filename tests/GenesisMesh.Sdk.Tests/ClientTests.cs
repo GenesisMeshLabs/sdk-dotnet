@@ -388,3 +388,51 @@ public class HttpErrorTests
         Assert.Equal("insufficient_operator_tier", ex.Code);
     }
 }
+
+// ── Cancellation (1.7.1) ──────────────────────────────────────────────────────
+
+public class CancellationTests
+{
+    /// <summary>Answers only when the request's token is cancelled (or never).</summary>
+    private sealed class HangingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }
+    }
+
+    private static GenesisMeshClient Client(TimeSpan timeout = default) =>
+        new(new ClientOptions { BaseUrl = "http://localhost", HttpHandler = new HangingHandler(), Timeout = timeout });
+
+    private static Dictionary<string, object?> Body() => new() { ["decision"] = new { } };
+
+    // Before 1.7.1 the caller's own cancellation was reported as a NetworkException, so
+    // catch (OperationCanceledException) never saw it.
+    [Fact]
+    public async Task CallerCancellation_BeforeTheCall_IsOperationCanceled()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        using var client = Client();
+        var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.Boundary.Verify(Body(), cts.Token));
+        Assert.Equal(cts.Token, ex.CancellationToken);
+    }
+
+    [Fact]
+    public async Task CallerCancellation_DuringTheCall_IsOperationCanceled()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        using var client = Client();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.Boundary.Verify(Body(), cts.Token));
+    }
+
+    [Fact]
+    public async Task Timeout_IsStillANetworkError()
+    {
+        using var client = Client(TimeSpan.FromMilliseconds(50));
+        var ex = await Assert.ThrowsAsync<NetworkException>(() => client.Boundary.Verify(Body(), CancellationToken.None));
+        Assert.IsAssignableFrom<OperationCanceledException>(ex.InnerException);
+    }
+}
