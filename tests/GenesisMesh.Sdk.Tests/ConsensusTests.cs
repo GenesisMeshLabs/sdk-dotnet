@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using GenesisMesh;
+using GenesisMesh.Sdk.Tests;
 using Xunit;
 
 namespace GenesisMesh.Tests;
@@ -125,19 +126,37 @@ public class ConsensusTests
         Assert.Equal("con-1", result.ConsensusId);
     }
 
-    /// <summary>
-    /// A real Python-signed ConsensusProof deserializes into the typed models and serializes
-    /// back to the same canonical JSON: no field is lost or renamed, so votes and proofs can be
-    /// passed back to the NA and their signatures still verify.
-    /// </summary>
-    [Fact]
-    public void Types_RoundTrip_A_Python_Signed_Proof()
+    private static readonly string SuitePath =
+        Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "consensus.json");
+
+    public static IEnumerable<object[]> VectorIds()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "consensus.json");
-        using var suite = JsonDocument.Parse(File.ReadAllText(path));
-        var original = suite.RootElement.GetProperty("vectors")[0].GetProperty("input").GetProperty("proof");
+        using var doc = JsonDocument.Parse(File.ReadAllText(SuitePath));
+        foreach (var v in doc.RootElement.GetProperty("vectors").EnumerateArray())
+            yield return new object[] { v.GetProperty("id").GetString()! };
+    }
+
+    internal static ConformanceReceipt Receipt() => ConformanceReceipts.For(
+        "consensus", typeof(ConsensusTests), nameof(Types_RoundTrip_A_Python_Signed_Proof), VectorIds(),
+        [ConformanceReceipts.NoKind]);
+
+    [Fact]
+    public void EveryKindIsRunOrListedAsNotRun() => ConformanceReceipts.Record(Receipt());
+
+    /// <summary>
+    /// Every Python-signed ConsensusProof of the suite deserializes into the typed models, with all
+    /// its votes, and serializes back to the same canonical JSON: no field is lost or renamed, so
+    /// votes and proofs can be passed back to the NA and their signatures still verify.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(VectorIds))]
+    public void Types_RoundTrip_A_Python_Signed_Proof(string id)
+    {
+        using var suite = JsonDocument.Parse(File.ReadAllText(SuitePath));
+        var vector = suite.RootElement.GetProperty("vectors").EnumerateArray().Single(v => v.GetProperty("id").GetString() == id);
+        var original = vector.GetProperty("input").GetProperty("proof");
         var proof = original.Deserialize<ConsensusProof>()!;
-        Assert.NotEmpty(proof.Votes);
+        Assert.Equal(vector.GetProperty("expected").GetProperty("vote_count").GetInt32(), proof.Votes.Count);
         Assert.All(proof.Votes, v =>
         {
             Assert.NotNull(v.ContextDigest);

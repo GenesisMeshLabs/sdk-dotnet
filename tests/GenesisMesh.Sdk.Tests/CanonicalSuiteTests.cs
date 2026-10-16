@@ -21,6 +21,13 @@ public class CanonicalSuiteTests
     public static IEnumerable<object[]> VectorIds() =>
         Suite().GetProperty("vectors").EnumerateArray().Select(v => new object[] { v.GetProperty("id").GetString()! });
 
+    internal static ConformanceReceipt Receipt() => ConformanceReceipts.For(
+        "canonical", typeof(CanonicalSuiteTests), nameof(ReproducesTheReferenceOutcome), VectorIds(),
+        ["json", "timestamp", "verify_decision", "verify_agreement", "verify_intent"]);
+
+    [Fact]
+    public void EveryKindIsRunOrListedAsNotRun() => ConformanceReceipts.Record(Receipt());
+
     private static List<string> Strings(JsonElement input, string key) =>
         input.GetProperty(key).EnumerateArray().Select(e => e.GetString()!).ToList();
 

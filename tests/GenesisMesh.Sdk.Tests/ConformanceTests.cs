@@ -88,14 +88,13 @@ public class ConformanceTests
         }
     }
 
+    internal static ConformanceReceipt Receipt() => ConformanceReceipts.For(
+        "interop", typeof(ConformanceTests), nameof(ReproducesTheReferenceOutcome), VectorIds(),
+        ["canonical_json", "agreement", "boundary_decision", "data_license_policy", "data_access_intent"]);
+
+    /// <summary>Every artifact kind is in the suite and run.</summary>
     [Fact]
-    public void CoversEveryArtifactKind()
-    {
-        using var doc = JsonDocument.Parse(File.ReadAllText(VectorsPath));
-        var kinds = doc.RootElement.GetProperty("vectors").EnumerateArray().Select(v => v.GetProperty("kind").GetString()).ToHashSet();
-        foreach (var k in new[] { "canonical_json", "agreement", "boundary_decision", "data_license_policy", "data_access_intent" })
-            Assert.Contains(k, kinds);
-    }
+    public void EveryKindIsRunOrListedAsNotRun() => ConformanceReceipts.Record(Receipt());
 
     [Fact]
     public void AdminBodiesCanonicalizeLikePython()

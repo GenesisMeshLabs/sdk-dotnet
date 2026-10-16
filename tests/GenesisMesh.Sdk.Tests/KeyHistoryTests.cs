@@ -62,13 +62,11 @@ public class KeyHistoryTests
             ["valid_to_enforced"] = k.ValidToEnforced,
         }).ToList();
 
+    internal static ConformanceReceipt Receipt() => ConformanceReceipts.For(
+        "audit", typeof(KeyHistoryTests), nameof(ReproducesTheReferenceOutcome), VectorIds(), KindsRun, KindsNotRun);
+
     [Fact]
-    public void EveryKindIsRunOrListedAsNotRun()
-    {
-        var kinds = Vectors().Select(v => v.GetProperty("kind").GetString()!).ToHashSet();
-        Assert.All(kinds, k => Assert.True(KindsRun.Contains(k) || KindsNotRun.Contains(k), k));
-        Assert.All(KindsRun, k => Assert.Contains(k, kinds));
-    }
+    public void EveryKindIsRunOrListedAsNotRun() => ConformanceReceipts.Record(Receipt());
 
     [Theory]
     [MemberData(nameof(VectorIds))]

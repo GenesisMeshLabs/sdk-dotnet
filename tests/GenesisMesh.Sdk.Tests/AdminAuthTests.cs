@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using GenesisMesh;
+using GenesisMesh.Sdk.Tests;
 using NSec.Cryptography;
 using Xunit;
 
@@ -23,6 +24,13 @@ public class AdminAuthTests
         foreach (var v in doc.RootElement.GetProperty("vectors").EnumerateArray())
             yield return new object[] { v.GetProperty("id").GetString()! };
     }
+
+    internal static ConformanceReceipt Receipt() => ConformanceReceipts.For(
+        "admin_auth", typeof(AdminAuthTests), nameof(ReproducesTheReferencePayloadAndSignature), VectorIds(),
+        [ConformanceReceipts.NoKind]);
+
+    [Fact]
+    public void EveryKindIsRunOrListedAsNotRun() => ConformanceReceipts.Record(Receipt());
 
     [Theory]
     [MemberData(nameof(VectorIds))]

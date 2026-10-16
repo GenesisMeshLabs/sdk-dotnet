@@ -16,14 +16,26 @@ public class FieldRegistryConformanceTests
 {
     private static readonly string SuitePath = Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "field_registry.json");
     private static readonly string InteropPath = Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "interop.json");
+    private static readonly HashSet<string> KindsRun = new() { "unknown_fields", "verify_decision", "verify_agreement" };
+
+    /// <summary>Entry kinds and evidence exports: this SDK has no evidence export verifier.</summary>
+    private static readonly HashSet<string> KindsNotRun = new() { "entry_kind", "export" };
 
     private static JsonElement Suite() => JsonDocument.Parse(File.ReadAllText(SuitePath)).RootElement;
 
     private static JsonElement Vector(string id) =>
         Suite().GetProperty("vectors").EnumerateArray().Single(x => x.GetProperty("id").GetString() == id);
 
-    public static IEnumerable<object[]> VectorIds() =>
-        Suite().GetProperty("vectors").EnumerateArray().Select(v => new object[] { v.GetProperty("id").GetString()! });
+    public static IEnumerable<object[]> VectorIds() => Suite().GetProperty("vectors").EnumerateArray()
+        .Where(v => !KindsNotRun.Contains(v.GetProperty("kind").GetString()!))
+        .Select(v => new object[] { v.GetProperty("id").GetString()! });
+
+    internal static ConformanceReceipt Receipt() => ConformanceReceipts.For(
+        "field_registry", typeof(FieldRegistryConformanceTests), nameof(ReproducesTheReferenceOutcome), VectorIds(),
+        KindsRun, KindsNotRun);
+
+    [Fact]
+    public void EveryKindIsRunOrListedAsNotRun() => ConformanceReceipts.Record(Receipt());
 
     [Fact]
     public void EmbedsTheRegistryOfTheSuite()
@@ -103,7 +115,7 @@ public class FieldRegistryConformanceTests
     }
 
     [Fact]
-    public void HasEnoughVectors() => Assert.True(VectorIds().Count() >= 70);
+    public void HasEnoughVectors() => Assert.True(Suite().GetProperty("vectors").GetArrayLength() >= 70);
 
     [Theory]
     [MemberData(nameof(VectorIds))]
@@ -136,13 +148,8 @@ public class FieldRegistryConformanceTests
                     Assert.Equal((expected.GetProperty("accepted").GetBoolean(), expected.GetProperty("reason").GetString()), (r.Accepted, r.Reason));
                     break;
                 }
-            case "entry_kind":
-            case "export":
-                // This SDK has no evidence export verifier.
-                break;
             default:
-                Assert.Fail($"unknown kind {v.GetProperty("kind").GetString()}");
-                break;
+                throw new InvalidOperationException($"vector kind {v.GetProperty("kind").GetString()} is not run");
         }
     }
 
