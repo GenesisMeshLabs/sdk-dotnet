@@ -11,7 +11,8 @@ namespace GenesisMesh.Tests;
 /// typed result compared with the JSON the NA sent. Runs when GM_E2E_PYTHON names a Python
 /// with the genesis-mesh core installed (scripts/contract_na.py starts a disposable NA):
 /// <code>GM_E2E_PYTHON=python dotnet test --filter Category=Live</code>
-/// CI runs it in its own job, against the core branch of the same name or main.
+/// CI runs it in its own job, against the core branch of the same name or main, with
+/// <c>GM_E2E_REQUIRED=1</c>: then a run without <c>GM_E2E_PYTHON</c> fails rather than passes.
 /// </summary>
 [Trait("Category", "Live")]
 public class LiveContractTests
@@ -45,7 +46,14 @@ public class LiveContractTests
     public async Task EveryCallReturnsWhatTheNASent()
     {
         var python = Environment.GetEnvironmentVariable("GM_E2E_PYTHON");
-        if (string.IsNullOrEmpty(python)) return; // not configured here; CI runs it in its own job
+        if (string.IsNullOrEmpty(python))
+        {
+            // 1.7.1: where the live check is required (CI sets GM_E2E_REQUIRED=1), an unconfigured run fails
+            // instead of passing green without an NA.
+            if (Environment.GetEnvironmentVariable("GM_E2E_REQUIRED") == "1")
+                throw new InvalidOperationException("GM_E2E_REQUIRED=1 but GM_E2E_PYTHON is not set: no NA to check against");
+            return; // not configured here; CI runs it in its own job
+        }
 
         using var na = Process.Start(new ProcessStartInfo(python, ContractScript()) { RedirectStandardOutput = true })!;
         try
