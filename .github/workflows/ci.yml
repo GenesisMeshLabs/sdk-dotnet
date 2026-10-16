@@ -30,6 +30,10 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      # The code is formatted as dotnet format writes it (.editorconfig).
+      - name: Format
+        run: dotnet format GenesisMesh.sln --verify-no-changes --no-restore
+
       - name: Verify release version
         shell: pwsh
         run: ./scripts/check-version.ps1
@@ -38,13 +42,24 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test --no-build --configuration Release --filter "Category!=Live" --logger "console;verbosity=normal" --logger trx --results-directory TestResults/unit
+        run: dotnet test --no-build --configuration Release --filter "Category!=Live" --logger "console;verbosity=normal" --logger trx --results-directory TestResults/unit --collect "XPlat Code Coverage"
 
       # dotnet test passes when a filter matches nothing and when tests are
       # skipped: every target framework must have run its tests, all passed.
       - name: Every target framework ran and passed its tests
         if: always()
         run: python3 scripts/check_trx.py TestResults/unit --project tests/GenesisMesh.Sdk.Tests/GenesisMesh.Sdk.Tests.csproj --min-tests 100
+
+      # Coverage (coverlet) may not fall: the floors are the coverage when
+      # they were set, rounded down. Raise them when coverage rises.
+      - name: Coverage floor
+        run: >-
+          python3 scripts/check_coverage.py TestResults/unit
+          --project tests/GenesisMesh.Sdk.Tests/GenesisMesh.Sdk.Tests.csproj
+          --line 96 --branch 84
+          --file Auth.cs=98 --file Canonical.cs=97 --file StrictJson.cs=97
+          --file StrictFields.cs=100 --file OfflineVerifier.cs=92
+          --file KeyHistory.cs=94 --file Grants.cs=100 --file Transport.cs=97
 
   # Every client method against a running Network Authority: each typed
   # result must model the JSON the NA sent (v1.0.2: most of them did not).
