@@ -37,13 +37,11 @@ public class GrantsTests
         .Where(v => !KindsNotRun.Contains(v.GetProperty("kind").GetString()!))
         .Select(v => new object[] { v.GetProperty("id").GetString()! });
 
+    internal static ConformanceReceipt Receipt() => ConformanceReceipts.For(
+        "grants", typeof(GrantsTests), nameof(ReproducesTheReferenceOutcome), VectorIds(), KindsRun, KindsNotRun);
+
     [Fact]
-    public void EveryKindIsRunOrListedAsNotRun()
-    {
-        var kinds = Vectors().Select(v => v.GetProperty("kind").GetString()!).ToHashSet();
-        Assert.All(kinds, k => Assert.True(KindsRun.Contains(k) || KindsNotRun.Contains(k), k));
-        Assert.All(KindsRun, k => Assert.Contains(k, kinds));
-    }
+    public void EveryKindIsRunOrListedAsNotRun() => ConformanceReceipts.Record(Receipt());
 
     [Theory]
     [MemberData(nameof(VectorIds))]
