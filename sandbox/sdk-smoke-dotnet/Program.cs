@@ -18,9 +18,9 @@ using GenesisMesh;
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const string NaUrl      = "http://127.0.0.1:9443";
-const string Network    = "001-NA";
-const string KeyId      = "operator-local";
+const string NaUrl = "http://127.0.0.1:9443";
+const string Network = "001-NA";
+const string KeyId = "operator-local";
 
 static string SandboxPath(string rel)
 {
@@ -37,7 +37,7 @@ static string SandboxPath(string rel)
     return rel;
 }
 
-var keyFile     = SandboxPath(Path.Combine("001-na", "keys", "operator.key"));
+var keyFile = SandboxPath(Path.Combine("001-na", "keys", "operator.key"));
 var genesisFile = SandboxPath(Path.Combine("001-na", "genesis.signed.json"));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -97,15 +97,15 @@ async Task<Dictionary<string, JsonElement>> AdminPostRaw(
     string path, object body, byte[] seed)
 {
     var headers = Auth.BuildAdminHeaders(new AdminRequest("POST", path, audience, body), KeyId, seed);
-    var json    = JsonSerializer.Serialize(body, Auth.SerializerOptions);
+    var json = JsonSerializer.Serialize(body, Auth.SerializerOptions);
     using var req = new HttpRequestMessage(HttpMethod.Post, NaUrl + path)
     {
         Content = new StringContent(json, Encoding.UTF8, new MediaTypeHeaderValue("application/json")),
     };
-    req.Headers.Add("X-Admin-Key-Id",    headers.KeyId);
+    req.Headers.Add("X-Admin-Key-Id", headers.KeyId);
     req.Headers.Add("X-Admin-Signature", headers.Signature);
     req.Headers.Add("X-Admin-Timestamp", headers.Timestamp);
-    req.Headers.Add("X-Admin-Nonce",     headers.Nonce);
+    req.Headers.Add("X-Admin-Nonce", headers.Nonce);
     using var resp = await _http.SendAsync(req);
     var raw = await resp.Content.ReadAsStringAsync();
     if (!resp.IsSuccessStatusCode)
@@ -117,15 +117,15 @@ async Task<Dictionary<string, JsonElement>> AdminPostRaw(
 async Task AdminPost(string path, object body, byte[] seed)
 {
     var headers = Auth.BuildAdminHeaders(new AdminRequest("POST", path, audience, body), KeyId, seed);
-    var json    = JsonSerializer.Serialize(body, Auth.SerializerOptions);
+    var json = JsonSerializer.Serialize(body, Auth.SerializerOptions);
     using var req = new HttpRequestMessage(HttpMethod.Post, NaUrl + path)
     {
         Content = new StringContent(json, Encoding.UTF8, new MediaTypeHeaderValue("application/json")),
     };
-    req.Headers.Add("X-Admin-Key-Id",    headers.KeyId);
+    req.Headers.Add("X-Admin-Key-Id", headers.KeyId);
     req.Headers.Add("X-Admin-Signature", headers.Signature);
     req.Headers.Add("X-Admin-Timestamp", headers.Timestamp);
-    req.Headers.Add("X-Admin-Nonce",     headers.Nonce);
+    req.Headers.Add("X-Admin-Nonce", headers.Nonce);
     using var resp = await _http.SendAsync(req);
     var raw = await resp.Content.ReadAsStringAsync();
     if (!resp.IsSuccessStatusCode)
@@ -143,11 +143,11 @@ async Task AdminPost(string path, object body, byte[] seed)
 Console.WriteLine("Genesis Mesh .NET SDK Smoke Test");
 Console.WriteLine($"NA: {NaUrl}  network: {Network}");
 
-var seed      = Auth.LoadSeed(LoadSeed(keyFile));
-var naPubKey  = LoadNaPublicKey(genesisFile);
-audience      = naPubKey;
-var now       = DateTime.UtcNow;
-var oneYear   = now.AddDays(365);
+var seed = Auth.LoadSeed(LoadSeed(keyFile));
+var naPubKey = LoadNaPublicKey(genesisFile);
+audience = naPubKey;
+var now = DateTime.UtcNow;
+var oneYear = now.AddDays(365);
 string Ts(DateTime d) => d.ToString("yyyy-MM-ddTHH:mm:ss.fff") + "Z";
 
 // 0. Health
@@ -169,10 +169,10 @@ catch
 
 var client = new GenesisMeshClient(new ClientOptions
 {
-    BaseUrl    = NaUrl,
-    SigningKey  = LoadSeed(keyFile),
-    KeyId       = KeyId,
-    Timeout     = TimeSpan.FromSeconds(15),
+    BaseUrl = NaUrl,
+    SigningKey = LoadSeed(keyFile),
+    KeyId = KeyId,
+    Timeout = TimeSpan.FromSeconds(15),
 });
 
 // 1. Attestation
@@ -182,10 +182,10 @@ try
 {
     var att = await client.Attestation.Issue(new Dictionary<string, object?>
     {
-        ["subject_id"]     = "sdk-smoke-dotnet-001",
-        ["roles"]          = new[] { "role:client", "role:anchor" },
+        ["subject_id"] = "sdk-smoke-dotnet-001",
+        ["roles"] = new[] { "role:client", "role:anchor" },
         ["validity_hours"] = 1,
-        ["claims"]         = new Dictionary<string, object?> { ["smoke_test"] = true },
+        ["claims"] = new Dictionary<string, object?> { ["smoke_test"] = true },
     });
     attestationId = att.AttestationId;
     Ok("issue attestation", $"id={Shorten(att.AttestationId)} roles={string.Join(",", att.Roles)}");
@@ -211,9 +211,9 @@ try
     await AdminPost("/admin/recognition-treaties", new
     {
         subject_sovereign_id = "SMOKE-BETA",
-        subject_public_keys  = new[] { naPubKey },
-        scope                = new { allowed_roles = new[] { "role:client" } },
-        validity_hours       = 1,
+        subject_public_keys = new[] { naPubKey },
+        scope = new { allowed_roles = new[] { "role:client" } },
+        validity_hours = 1,
     }, seed);
     Ok("issue recognition treaty for SMOKE-BETA (raw admin call)");
 }
@@ -224,11 +224,11 @@ try
     var rawOffer = await AdminPostRaw("/admin/agreements/offer", new
     {
         responder_sovereign_id = "SMOKE-BETA",
-        capabilities           = new[] { "read:data", "write:log" },
-        roles                  = new[] { "role:client" },
-        valid_from             = Ts(now),
-        valid_until            = Ts(oneYear),
-        expires_at             = Ts(now.AddDays(7)),
+        capabilities = new[] { "read:data", "write:log" },
+        roles = new[] { "role:client" },
+        valid_from = Ts(now),
+        valid_until = Ts(oneYear),
+        expires_at = Ts(now.AddDays(7)),
     }, seed);
 
     var oid = rawOffer.TryGetValue("offer_id", out var oEl) ? oEl.GetString()! : "";
@@ -236,8 +236,8 @@ try
 
     var rawAgr = await AdminPostRaw("/admin/agreements/accept",
         new Dictionary<string, object?> { ["offer"] = rawOffer }, seed);
-    var aid    = rawAgr.TryGetValue("agreement_id", out var aEl) ? aEl.GetString()! : "";
-    var status = rawAgr.TryGetValue("status",       out var sEl) ? sEl.GetString()! : "";
+    var aid = rawAgr.TryGetValue("agreement_id", out var aEl) ? aEl.GetString()! : "";
+    var status = rawAgr.TryGetValue("status", out var sEl) ? sEl.GetString()! : "";
     Ok("accept offer → agreement", $"id={Shorten(aid)} status={status}");
     rawAgrMap = rawAgr;
 }
@@ -262,9 +262,9 @@ if (rawAgrMap is not null)
     {
         var rawDec = await AdminPostRaw("/admin/boundary/decide", new Dictionary<string, object?>
         {
-            ["agreement"]            = rawAgrMap,
+            ["agreement"] = rawAgrMap,
             ["requested_capability"] = "read:data",
-            ["context"]              = new Dictionary<string, object?> { ["smoke_session"] = "dotnet-001" },
+            ["context"] = new Dictionary<string, object?> { ["smoke_session"] = "dotnet-001" },
         }, seed);
         var allowed = rawDec.TryGetValue("allowed", out var aEl2) && aEl2.GetBoolean();
         Ok("boundary decide", $"allowed={allowed}");
@@ -287,13 +287,13 @@ try
         {
             source_sovereign_id = "SMOKE-ALPHA",
             target_sovereign_id = Network,
-            verdict             = "allow",
-            reason              = "smoke test validation",
-            signals             = Array.Empty<object>(),
+            verdict = "allow",
+            reason = "smoke test validation",
+            signals = Array.Empty<object>(),
         }
     }, seed);
-    var eid     = rawEv.TryGetValue("evidence_id", out var eEl) ? eEl.GetString()! : "";
-    var verdict = rawEv.TryGetValue("verdict",     out var vEl) ? vEl.GetString()! : "";
+    var eid = rawEv.TryGetValue("evidence_id", out var eEl) ? eEl.GetString()! : "";
+    var verdict = rawEv.TryGetValue("verdict", out var vEl) ? vEl.GetString()! : "";
     Ok("build trust evidence", $"id={Shorten(eid)} verdict={verdict}");
 
     var ev = await client.Evidence.Verify(
@@ -310,7 +310,7 @@ try
     {
         ["recognition_policy"] = new Dictionary<string, object?>
         {
-            ["local_sovereign_id"]  = Network,
+            ["local_sovereign_id"] = Network,
             ["recognized_issuers"] = Array.Empty<object>(),
         }
     });
@@ -325,10 +325,10 @@ try
     var policy = await client.DataUsage.CreatePolicy(new Dictionary<string, object?>
     {
         ["licensee_sovereign_id"] = "SMOKE-BETA",
-        ["allowed_source_ids"]    = new[] { "db-smoke" },
-        ["allowed_access_types"]  = new[] { "read" },
-        ["valid_from"]            = now.ToString("o"),
-        ["valid_until"]           = oneYear.ToString("o"),
+        ["allowed_source_ids"] = new[] { "db-smoke" },
+        ["allowed_access_types"] = new[] { "read" },
+        ["valid_from"] = now.ToString("o"),
+        ["valid_until"] = oneYear.ToString("o"),
     });
     Ok("create data license policy", $"id={Shorten(policy.PolicyId)}");
 
@@ -354,10 +354,10 @@ try
     var rawPolicy2 = await AdminPostRaw("/admin/data-usage/policy", new
     {
         licensee_sovereign_id = "SMOKE-BETA",
-        allowed_source_ids    = new[] { "db-smoke" },
-        allowed_access_types  = new[] { "read" },
-        valid_from            = now.ToString("o"),
-        valid_until           = oneYear.ToString("o"),
+        allowed_source_ids = new[] { "db-smoke" },
+        allowed_access_types = new[] { "read" },
+        valid_from = now.ToString("o"),
+        valid_until = oneYear.ToString("o"),
     }, seed);
 
     var dv = await client.DataUsage.Verify(new Dictionary<string, object?>

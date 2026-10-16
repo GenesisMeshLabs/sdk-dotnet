@@ -24,7 +24,7 @@ public class GrantsTests
         "envelope_parameter", "envelope", "issuance", "use", "verify_export",
     };
 
-    private static IEnumerable<JsonElement> Vectors()
+    private static JsonElement.ArrayEnumerator Vectors()
     {
         var root = JsonDocument.Parse(File.ReadAllText(SuitePath)).RootElement;
         Assert.Equal("grants", root.GetProperty("suite").GetString());
@@ -56,15 +56,15 @@ public class GrantsTests
         switch (v.GetProperty("kind").GetString())
         {
             case "canonical_form":
-            {
-                var body = OfflineVerifier.ReceivedCanonical(model, record);
-                got = new Dictionary<string, object>
                 {
-                    ["canonical"] = body,
-                    ["digest"] = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(body))).ToLowerInvariant(),
-                };
-                break;
-            }
+                    var body = OfflineVerifier.ReceivedCanonical(model, record);
+                    got = new Dictionary<string, object>
+                    {
+                        ["canonical"] = body,
+                        ["digest"] = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(body))).ToLowerInvariant(),
+                    };
+                    break;
+                }
             case "verify_record":
                 got = new Dictionary<string, object>
                 {
@@ -112,7 +112,8 @@ public class GrantsTests
         var body = Encoding.UTF8.GetBytes(OfflineVerifier.ReceivedCanonical("CapabilityGrant", doc.RootElement));
         grant["signature"] = new JsonObject
         {
-            ["key_id"] = "na-key", ["sig"] = Convert.ToBase64String(SignatureAlgorithm.Ed25519.Sign(key, body)),
+            ["key_id"] = "na-key",
+            ["sig"] = Convert.ToBase64String(SignatureAlgorithm.Ed25519.Sign(key, body)),
         };
         return grant.ToJsonString();
     }

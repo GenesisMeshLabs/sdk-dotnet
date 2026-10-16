@@ -18,36 +18,36 @@ public sealed class GenesisMeshClient : IDisposable
     private readonly Transport _transport;
 
     /// <summary>Agreement lifecycle — offer, counter, accept, verify.</summary>
-    public AgreementClient   Agreement   { get; }
+    public AgreementClient Agreement { get; }
 
     /// <summary>Membership attestations — issue, revoke, recognition policy.</summary>
     public AttestationClient Attestation { get; }
 
     /// <summary>Capability boundary decisions — decide, verify.</summary>
-    public BoundaryClient    Boundary    { get; }
+    public BoundaryClient Boundary { get; }
 
     /// <summary>Consensus voting and proofs — vote, proof, verify.</summary>
-    public ConsensusClient   Consensus   { get; }
+    public ConsensusClient Consensus { get; }
 
     /// <summary>Data usage licensing — policy, intent, verify.</summary>
-    public DataUsageClient   DataUsage   { get; }
+    public DataUsageClient DataUsage { get; }
 
     /// <summary>Selective capability disclosure — commit, nullifier, prove, verify.</summary>
-    public DisclosureClient  Disclosure  { get; }
+    public DisclosureClient Disclosure { get; }
 
     /// <summary>Trust evidence — build and verify.</summary>
-    public EvidenceClient    Evidence    { get; }
+    public EvidenceClient Evidence { get; }
 
     public GenesisMeshClient(ClientOptions opts)
     {
-        _transport  = new Transport(opts);
-        Agreement   = new AgreementClient(_transport);
+        _transport = new Transport(opts);
+        Agreement = new AgreementClient(_transport);
         Attestation = new AttestationClient(_transport);
-        Boundary    = new BoundaryClient(_transport);
-        Consensus   = new ConsensusClient(_transport);
-        DataUsage   = new DataUsageClient(_transport);
-        Disclosure  = new DisclosureClient(_transport);
-        Evidence    = new EvidenceClient(_transport);
+        Boundary = new BoundaryClient(_transport);
+        Consensus = new ConsensusClient(_transport);
+        DataUsage = new DataUsageClient(_transport);
+        Disclosure = new DisclosureClient(_transport);
+        Evidence = new EvidenceClient(_transport);
     }
 
     public void Dispose() => _transport.Dispose();
@@ -57,23 +57,23 @@ public sealed class GenesisMeshClient : IDisposable
 public sealed class ClientOptions
 {
     /// <summary>NA base URL, e.g. "http://127.0.0.1:9443".</summary>
-    public string BaseUrl    { get; set; } = "";
+    public string BaseUrl { get; set; } = "";
 
     /// <summary>Base64-encoded 32-byte Ed25519 seed (required for admin routes).</summary>
     public string? SigningKey { get; set; }
 
     /// <summary>Key identifier sent in X-Admin-Key-Id (required for admin routes).</summary>
-    public string? KeyId      { get; set; }
+    public string? KeyId { get; set; }
 
     /// <summary>
     /// The NA's public key, which admin signatures name as their audience
     /// (signature version 2). When unset it is read once from /sovereign.json
     /// (network_authority.public_key).
     /// </summary>
-    public string? Audience   { get; set; }
+    public string? Audience { get; set; }
 
     /// <summary>HTTP request timeout. Defaults to 10 s.</summary>
-    public TimeSpan Timeout   { get; set; }
+    public TimeSpan Timeout { get; set; }
 
     /// <summary>Custom HTTP message handler, primarily for unit testing.</summary>
     public HttpMessageHandler? HttpHandler { get; set; }

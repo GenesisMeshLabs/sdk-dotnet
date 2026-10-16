@@ -12,17 +12,17 @@ public class AgreementTests
     private static GenesisMeshClient AdminClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
-            SigningKey   = TestHelpers.ZeroSeedB64,
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
             Audience = "TEST",
-            KeyId        = "test-key",
-            HttpHandler  = h,
+            KeyId = "test-key",
+            HttpHandler = h,
         });
 
     private static GenesisMeshClient PublicClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
+            BaseUrl = "http://localhost",
             HttpHandler = h,
         });
 
@@ -44,10 +44,10 @@ public class AgreementTests
         {
             ResponderSovereignId = "NA-B",
             Capabilities = ["read"],
-            Roles        = ["role:client"],
-            ValidFrom    = "2026-01-01T00:00:00.000Z",
-            ValidUntil   = "2027-01-01T00:00:00.000Z",
-            ExpiresAt    = "2026-01-08T00:00:00.000Z",
+            Roles = ["role:client"],
+            ValidFrom = "2026-01-01T00:00:00.000Z",
+            ValidUntil = "2027-01-01T00:00:00.000Z",
+            ExpiresAt = "2026-01-08T00:00:00.000Z",
         });
         Assert.Equal("off-42", rec.OfferId);
         Assert.Equal("NA-B", rec.ResponderSovereignId);
@@ -70,10 +70,10 @@ public class AgreementTests
         {
             ResponderSovereignId = "NA-B",
             Capabilities = ["read"],
-            Roles        = ["role:client"],
-            ValidFrom    = "2026-01-01T00:00:00.000Z",
-            ValidUntil   = "2027-01-01T00:00:00.000Z",
-            ExpiresAt    = "2026-01-08T00:00:00.000Z",
+            Roles = ["role:client"],
+            ValidFrom = "2026-01-01T00:00:00.000Z",
+            ValidUntil = "2027-01-01T00:00:00.000Z",
+            ExpiresAt = "2026-01-08T00:00:00.000Z",
         });
         Assert.Equal("test-key", capturedKeyId);
     }
@@ -105,8 +105,8 @@ public class AgreementTests
             var json = JsonSerializer.Serialize(
                 new
                 {
-                    agreement_id   = "agr-1",
-                    agreed_terms   = new { capabilities = new[] { "read" } },
+                    agreement_id = "agr-1",
+                    agreed_terms = new { capabilities = new[] { "read" } },
                     established_at = "2026-07-01T12:00:00+00:00",
                 },
                 Auth.SerializerOptions);
@@ -116,7 +116,7 @@ public class AgreementTests
             };
         });
         var offer = new OfferRecord { OfferId = "off-1" };
-        var agr   = await AdminClient(handler).Agreement.Accept(offer);
+        var agr = await AdminClient(handler).Agreement.Accept(offer);
         Assert.Equal("agr-1", agr.AgreementId);
         Assert.Equal("2026-07-01T12:00:00+00:00", agr.EstablishedAt);
 #pragma warning disable CS0618 // the obsolete names are filled from the NA's fields
@@ -158,10 +158,10 @@ public class AgreementTests
             {
                 ResponderSovereignId = "NA-B",
                 Capabilities = ["read"],
-                Roles        = ["role:client"],
-                ValidFrom    = "2026-01-01T00:00:00.000Z",
-                ValidUntil   = "2027-01-01T00:00:00.000Z",
-                ExpiresAt    = "2026-01-08T00:00:00.000Z",
+                Roles = ["role:client"],
+                ValidFrom = "2026-01-01T00:00:00.000Z",
+                ValidUntil = "2027-01-01T00:00:00.000Z",
+                ExpiresAt = "2026-01-08T00:00:00.000Z",
             }));
     }
 }

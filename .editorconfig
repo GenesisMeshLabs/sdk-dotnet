@@ -1,0 +1,7 @@
+# dotnet format --verify-no-changes (CI) checks the C# files against these
+# settings and the .NET defaults.
+root = true
+
+[*.cs]
+indent_style = space
+indent_size = 4

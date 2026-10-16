@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -150,6 +151,8 @@ public static class Canonical
     [Obsolete("Canonical.PythonFloatRepr is an implementation detail of this SDK and becomes internal in 2.0. Canonical.Of and Canonical.FromJson write numbers in this form.")]
     public static string PythonFloatRepr(double value) => FloatRepr(value);
 
+    private static readonly SearchValues<char> ExponentLetters = SearchValues.Create("Ee");
+
     /// <summary>Python's <c>repr(float)</c>: shortest round-trip digits; positional for exponents -4..15.</summary>
     internal static string FloatRepr(double value)
     {
@@ -160,7 +163,7 @@ public static class Canonical
         var negative = r.StartsWith('-');
         if (negative) r = r[1..];
         var exp10 = 0;
-        var ePos = r.IndexOfAny(new[] { 'E', 'e' });
+        var ePos = r.AsSpan().IndexOfAny(ExponentLetters);
         if (ePos >= 0)
         {
             exp10 = int.Parse(r[(ePos + 1)..], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);

@@ -12,17 +12,17 @@ public class EvidenceTests
     private static GenesisMeshClient AdminClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
-            SigningKey   = TestHelpers.ZeroSeedB64,
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
             Audience = "TEST",
-            KeyId        = "test-key",
-            HttpHandler  = h,
+            KeyId = "test-key",
+            HttpHandler = h,
         });
 
     private static GenesisMeshClient PublicClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
+            BaseUrl = "http://localhost",
             HttpHandler = h,
         });
 
@@ -44,8 +44,8 @@ public class EvidenceTests
         {
             SourceSovereignId = "NA-A",
             TargetSovereignId = "NA-B",
-            Verdict           = "allow",
-            Reason            = "all checks passed",
+            Verdict = "allow",
+            Reason = "all checks passed",
         });
         Assert.Equal("ev-1", ev.EvidenceId);
         Assert.Equal("allow", ev.Verdict);
@@ -69,7 +69,7 @@ public class EvidenceTests
         await AdminClient(handler).Evidence.Build(new TrustDecision
         {
             Verdict = "block",
-            Reason  = "policy violation",
+            Reason = "policy violation",
         });
         Assert.NotNull(bodyJson);
         Assert.Contains("\"decision\"", bodyJson);

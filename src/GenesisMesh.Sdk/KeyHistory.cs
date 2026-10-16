@@ -196,15 +196,18 @@ public static partial class OfflineVerifier
         return new(true, null, null, new NAKeyHistory(sovereign, root, keys));
     }
 
+    private static readonly string[] GenesisStrings = ["network_name", "network_version", "root_public_key"];
+    private static readonly string[] GenesisAuthorityTimes = ["valid_from", "valid_to"];
+
     /// <summary>True when a genesis block has the fields the reference requires, of the types it reads.</summary>
     private static bool ValidGenesis(JsonElement g)
     {
         static bool IsString(JsonElement obj, string key) => obj.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String;
         static bool ListOf(JsonElement obj, string key, Func<JsonElement, bool> item) =>
             !obj.TryGetProperty(key, out var v) || (v.ValueKind == JsonValueKind.Array && v.EnumerateArray().All(item));
-        if (!new[] { "network_name", "network_version", "root_public_key" }.All(k => IsString(g, k))) return false;
+        if (!GenesisStrings.All(k => IsString(g, k))) return false;
         if (!IsObject(g, "network_authority", out var na) || !IsString(na, "public_key")) return false;
-        if (!new[] { "valid_from", "valid_to" }.All(k => TryParseTimestamp(Str(na, k) ?? "", out _))) return false;
+        if (!GenesisAuthorityTimes.All(k => TryParseTimestamp(Str(na, k) ?? "", out _))) return false;
         if (!IsObject(g, "policy_manifest", out var manifest) || !IsString(manifest, "hash")) return false;
         if (manifest.TryGetProperty("url", out var url) && url.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)) return false;
         return ListOf(g, "allowed_crypto_suites", e => e.ValueKind == JsonValueKind.String)

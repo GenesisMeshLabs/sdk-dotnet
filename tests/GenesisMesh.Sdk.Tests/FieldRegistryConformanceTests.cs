@@ -118,24 +118,24 @@ public class FieldRegistryConformanceTests
                 Assert.Equal(want, StrictFields.UnknownFields(v.GetProperty("model").GetString()!, v.GetProperty("record")));
                 break;
             case "verify_decision":
-            {
-                var input = v.GetProperty("input");
-                var r = OfflineVerifier.VerifyBoundaryDecision(input.GetProperty("decision").GetRawText(), new DecisionVerifyOptions
                 {
-                    OperatorPublicKeys = Strings(input, "operator_public_keys"),
-                    Now = OfflineVerifier.ParseTimestamp(input.GetProperty("now").GetString()!),
-                });
-                Assert.Equal((expected.GetProperty("accepted").GetBoolean(), expected.GetProperty("reason").GetString()), (r.Accepted, r.Reason));
-                break;
-            }
+                    var input = v.GetProperty("input");
+                    var r = OfflineVerifier.VerifyBoundaryDecision(input.GetProperty("decision").GetRawText(), new DecisionVerifyOptions
+                    {
+                        OperatorPublicKeys = Strings(input, "operator_public_keys"),
+                        Now = OfflineVerifier.ParseTimestamp(input.GetProperty("now").GetString()!),
+                    });
+                    Assert.Equal((expected.GetProperty("accepted").GetBoolean(), expected.GetProperty("reason").GetString()), (r.Accepted, r.Reason));
+                    break;
+                }
             case "verify_agreement":
-            {
-                var input = v.GetProperty("input");
-                var r = OfflineVerifier.VerifyAgreement(input.GetProperty("agreement").GetRawText(),
-                    Strings(input, "offerer_public_keys"), Strings(input, "responder_public_keys"));
-                Assert.Equal((expected.GetProperty("accepted").GetBoolean(), expected.GetProperty("reason").GetString()), (r.Accepted, r.Reason));
-                break;
-            }
+                {
+                    var input = v.GetProperty("input");
+                    var r = OfflineVerifier.VerifyAgreement(input.GetProperty("agreement").GetRawText(),
+                        Strings(input, "offerer_public_keys"), Strings(input, "responder_public_keys"));
+                    Assert.Equal((expected.GetProperty("accepted").GetBoolean(), expected.GetProperty("reason").GetString()), (r.Accepted, r.Reason));
+                    break;
+                }
             case "entry_kind":
             case "export":
                 // This SDK has no evidence export verifier.

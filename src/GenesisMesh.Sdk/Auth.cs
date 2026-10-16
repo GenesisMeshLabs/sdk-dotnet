@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -88,15 +89,15 @@ public static class Auth
 
         var payload = new Dictionary<string, object?>
         {
-            ["v"]         = AdminSignatureVersion,
-            ["method"]    = request.Method.ToUpperInvariant(),
-            ["path"]      = request.Path,
-            ["query"]     = query,
-            ["audience"]  = request.Audience,
-            ["body"]      = request.Body ?? new Dictionary<string, object?>(),
-            ["key_id"]    = keyId,
+            ["v"] = AdminSignatureVersion,
+            ["method"] = request.Method.ToUpperInvariant(),
+            ["path"] = request.Path,
+            ["query"] = query,
+            ["audience"] = request.Audience,
+            ["body"] = request.Body ?? new Dictionary<string, object?>(),
+            ["key_id"] = keyId,
             ["timestamp"] = timestamp,
-            ["nonce"]     = nonce,
+            ["nonce"] = nonce,
         };
         return CanonicalJson(payload);
     }
@@ -113,20 +114,20 @@ public static class Auth
     public static AdminHeaders BuildAdminHeaders(
         AdminRequest request, string keyId, byte[] seed, string? timestamp = null, string? nonce = null)
     {
-        timestamp ??= DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fff") + "Z";
-        nonce     ??= Guid.NewGuid().ToString();
+        timestamp ??= DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fff", CultureInfo.InvariantCulture) + "Z";
+        nonce ??= Guid.NewGuid().ToString();
 
         var canonical = AdminSigningPayload(request, keyId, timestamp, nonce);
-        var sig       = SignatureAlgorithm.Ed25519.Sign(
+        var sig = SignatureAlgorithm.Ed25519.Sign(
             Key.Import(SignatureAlgorithm.Ed25519, seed, KeyBlobFormat.RawPrivateKey),
             canonical);
 
         return new AdminHeaders
         {
-            KeyId     = keyId,
+            KeyId = keyId,
             Signature = Convert.ToBase64String(sig),
             Timestamp = timestamp,
-            Nonce     = nonce,
+            Nonce = nonce,
         };
     }
 }
@@ -147,8 +148,8 @@ public sealed record AdminRequest(
 /// <summary>The four X-Admin-* headers used to authenticate admin API requests.</summary>
 public sealed class AdminHeaders
 {
-    public string KeyId     { get; init; } = "";
+    public string KeyId { get; init; } = "";
     public string Signature { get; init; } = "";
     public string Timestamp { get; init; } = "";
-    public string Nonce     { get; init; } = "";
+    public string Nonce { get; init; } = "";
 }

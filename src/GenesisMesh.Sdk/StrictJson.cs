@@ -232,71 +232,71 @@ internal static class StrictJsonReader
             switch (Peek)
             {
                 case '{':
-                {
-                    if (++_depth > MaxDepth) throw Refuse("invalid_json", $"arrays or objects nested more than {MaxDepth} deep");
-                    At++;
-                    Space();
-                    if (Peek == '}')
                     {
+                        if (++_depth > MaxDepth) throw Refuse("invalid_json", $"arrays or objects nested more than {MaxDepth} deep");
                         At++;
-                        _depth--;
-                        return;
-                    }
-                    var keys = new HashSet<string>(StringComparer.Ordinal);
-                    while (true)
-                    {
                         Space();
-                        if (Peek != '"') throw Refuse("invalid_json", "expected a key");
-                        var key = String(true);
-                        if (!keys.Add(key)) throw Refuse("duplicate_key", $"key \"{key}\" appears twice");
-                        Space();
-                        if (Peek != ':') throw Refuse("invalid_json", "expected \":\"");
-                        At++;
-                        Value();
-                        Space();
-                        if (Peek == ',')
-                        {
-                            At++;
-                            continue;
-                        }
                         if (Peek == '}')
                         {
                             At++;
                             _depth--;
                             return;
                         }
-                        throw Refuse("invalid_json", "expected \",\" or \"}\"");
-                    }
-                }
-                case '[':
-                {
-                    if (++_depth > MaxDepth) throw Refuse("invalid_json", $"arrays or objects nested more than {MaxDepth} deep");
-                    At++;
-                    Space();
-                    if (Peek == ']')
-                    {
-                        At++;
-                        _depth--;
-                        return;
-                    }
-                    while (true)
-                    {
-                        Value();
-                        Space();
-                        if (Peek == ',')
+                        var keys = new HashSet<string>(StringComparer.Ordinal);
+                        while (true)
                         {
+                            Space();
+                            if (Peek != '"') throw Refuse("invalid_json", "expected a key");
+                            var key = String(true);
+                            if (!keys.Add(key)) throw Refuse("duplicate_key", $"key \"{key}\" appears twice");
+                            Space();
+                            if (Peek != ':') throw Refuse("invalid_json", "expected \":\"");
                             At++;
-                            continue;
+                            Value();
+                            Space();
+                            if (Peek == ',')
+                            {
+                                At++;
+                                continue;
+                            }
+                            if (Peek == '}')
+                            {
+                                At++;
+                                _depth--;
+                                return;
+                            }
+                            throw Refuse("invalid_json", "expected \",\" or \"}\"");
                         }
+                    }
+                case '[':
+                    {
+                        if (++_depth > MaxDepth) throw Refuse("invalid_json", $"arrays or objects nested more than {MaxDepth} deep");
+                        At++;
+                        Space();
                         if (Peek == ']')
                         {
                             At++;
                             _depth--;
                             return;
                         }
-                        throw Refuse("invalid_json", "expected \",\" or \"]\"");
+                        while (true)
+                        {
+                            Value();
+                            Space();
+                            if (Peek == ',')
+                            {
+                                At++;
+                                continue;
+                            }
+                            if (Peek == ']')
+                            {
+                                At++;
+                                _depth--;
+                                return;
+                            }
+                            throw Refuse("invalid_json", "expected \",\" or \"]\"");
+                        }
                     }
-                }
                 case '"':
                     String(false);
                     return;

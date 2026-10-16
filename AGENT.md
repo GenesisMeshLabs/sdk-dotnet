@@ -111,10 +111,15 @@ CI runs on Linux. Code must work on both.
 Run these before every commit:
 
 ```sh
+dotnet format --verify-no-changes                # formatted as dotnet format writes it
 dotnet build -c Release                          # must exit 0 (warnings are errors)
 dotnet test -c Release --filter "Category!=Live" # all tests must pass
+dotnet pack src/GenesisMesh.Sdk -c Release       # package validation: no public API break
 python scripts/changelog.py check                # fragments are valid
 ```
+
+CI also holds a coverage floor (`scripts/check_coverage.py`) and the layer
+table (`ArchitectureTests`); see docs/architecture.md.
 
 The live contract test: `GM_E2E_PYTHON=python dotnet test -c Release --filter "Category=Live"`
 with the genesis-mesh core installed (see CONTRIBUTING.md).
@@ -160,6 +165,11 @@ Every version shipped must:
 3. Be committed, tagged `vX.Y.Z`, and pushed (the core's `vX.Y.Z` tag first).
 4. The `publish.yml` GitHub Actions workflow triggers automatically on the tag,
    tests, packs and pushes to NuGet.org.
+5. Once the package is on NuGet.org, set `<PackageValidationBaselineVersion>`
+   in `src/GenesisMesh.Sdk/GenesisMesh.Sdk.csproj` to the new version and
+   delete `src/GenesisMesh.Sdk/CompatibilitySuppressions.xml` if it exists.
+   Until then the `API compatibility` check warns on pull requests and
+   fails on main, and package validation compares with the older release.
 
 Publishing uses NuGet trusted publishing when it is configured, and the
 long-lived `NUGET_API_KEY` secret only as a fallback. To configure it:

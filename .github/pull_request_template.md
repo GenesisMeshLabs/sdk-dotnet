@@ -47,6 +47,10 @@ These need the Maintainer's review and merge. Tick any this pull request touches
 - [ ] `SECURITY.md`
 - [ ] Packaging and release: `*.csproj`, `GenesisMesh.sln`, `VERSION`,
       `scripts/check-version.ps1`
+- [ ] Ratchets: `ArchitectureTests.cs` (the layer table and its allowlist,
+      which may only shrink), `CompatibilitySuppressions.xml` (an accepted API
+      break: label `breaking` and an `### Upgrading` note), the coverage
+      floors in `ci.yml`, `.editorconfig`
 
 ## Related issues
 

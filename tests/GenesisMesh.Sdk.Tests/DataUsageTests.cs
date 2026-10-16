@@ -12,17 +12,17 @@ public class DataUsageTests
     private static GenesisMeshClient AdminClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
-            SigningKey   = TestHelpers.ZeroSeedB64,
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
             Audience = "TEST",
-            KeyId        = "test-key",
-            HttpHandler  = h,
+            KeyId = "test-key",
+            HttpHandler = h,
         });
 
     private static GenesisMeshClient PublicClient(HttpMessageHandler h) =>
         new(new ClientOptions
         {
-            BaseUrl     = "http://localhost",
+            BaseUrl = "http://localhost",
             HttpHandler = h,
         });
 
@@ -35,11 +35,11 @@ public class DataUsageTests
             var json = JsonSerializer.Serialize(
                 new
                 {
-                    policy_id             = "pol-1",
+                    policy_id = "pol-1",
                     licensor_sovereign_id = "NA-LOCAL",
                     licensee_sovereign_id = "NA-PARTNER",
-                    allowed_access_types  = new[] { "read", "aggregate" },
-                    valid_from            = "2026-06-30T00:00:00.000Z",
+                    allowed_access_types = new[] { "read", "aggregate" },
+                    valid_from = "2026-06-30T00:00:00.000Z",
                 },
                 Auth.SerializerOptions);
             return new HttpResponseMessage(HttpStatusCode.Created)
@@ -51,10 +51,10 @@ public class DataUsageTests
             new Dictionary<string, object?>
             {
                 ["licensee_sovereign_id"] = "NA-PARTNER",
-                ["allowed_source_ids"]    = new[] { "src-1" },
-                ["allowed_access_types"]  = new[] { "read", "aggregate" },
-                ["valid_from"]            = "2026-06-30T00:00:00.000Z",
-                ["valid_until"]           = "2026-07-30T00:00:00.000Z",
+                ["allowed_source_ids"] = new[] { "src-1" },
+                ["allowed_access_types"] = new[] { "read", "aggregate" },
+                ["valid_from"] = "2026-06-30T00:00:00.000Z",
+                ["valid_until"] = "2026-07-30T00:00:00.000Z",
             });
         Assert.Equal("pol-1", pol.PolicyId);
         Assert.Contains("aggregate", pol.AllowedAccessTypes);
@@ -103,8 +103,8 @@ public class DataUsageTests
             new Dictionary<string, object?>
             {
                 ["agent_sovereign_id"] = "NA-A",
-                ["access_types"]       = new[] { "read" },
-                ["sources"]            = new[]
+                ["access_types"] = new[] { "read" },
+                ["sources"] = new[]
                 {
                     new Dictionary<string, object>
                     {

@@ -91,7 +91,10 @@ public class AdminAuthTests
         });
         var client = new GenesisMeshClient(new ClientOptions
         {
-            BaseUrl = "http://localhost", SigningKey = TestHelpers.ZeroSeedB64, KeyId = "k", HttpHandler = handler,
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
+            KeyId = "k",
+            HttpHandler = handler,
         });
         await client.Disclosure.Commit(new Dictionary<string, object?> { ["capability"] = "read" });
         await client.Disclosure.Commit(new Dictionary<string, object?> { ["capability"] = "read" });

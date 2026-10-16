@@ -17,10 +17,15 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>10.0-recommended</AnalysisLevel>
     <NoWarn>CS1591</NoWarn>
     <Deterministic>true</Deterministic>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <!-- dotnet pack compares the public API with this release and fails on a break
+         (docs/architecture.md, "A breaking change"; scripts/api_compat.py). -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageValidationBaselineVersion>1.7.0</PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <ItemGroup>
