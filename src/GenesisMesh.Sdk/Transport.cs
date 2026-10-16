@@ -28,6 +28,24 @@ internal sealed class Transport : IDisposable
         _audience = string.IsNullOrEmpty(opts.Audience) ? null : opts.Audience;
     }
 
+    /// <summary>
+    /// <paramref name="value"/> as one segment of a request path (1.7.1). A caller's ID goes into the path as given,
+    /// so an ID that is empty, a dot segment, or holds '/', '\', '?', '#', '%' or a control character would sign and
+    /// call another route: it is refused before anything is signed or sent.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="value"/> is not one path segment.</exception>
+    internal static string PathSegment(string value, string paramName)
+    {
+        ArgumentNullException.ThrowIfNull(value, paramName);
+        if (value.Length == 0 || value is "." or ".."
+            || value.Any(c => c is '/' or '\\' or '?' or '#' or '%' || char.IsControl(c)))
+            throw new ArgumentException(
+                $"genesismesh: {paramName} must be one path segment: not empty, \".\" or \"..\", and without '/', '\\', '?', '#', '%' or control characters",
+                paramName);
+        return value;
+    }
+
     /// <summary>The NA's public key for admin signatures, read once from /sovereign.json.</summary>
     private async Task<string> AudienceAsync(CancellationToken ct)
     {
