@@ -2,7 +2,7 @@
 
 .NET SDK for the Genesis Mesh Network Authority HTTP API.
 
-**Target: .NET 8+. One dependency: [`NSec.Cryptography`](https://nsec.rocks/) for Ed25519.**
+**Targets: .NET 8 and .NET 10 (`net8.0`, `net10.0`). One dependency: [`NSec.Cryptography`](https://nsec.rocks/) for Ed25519.**
 
 [![NuGet](https://img.shields.io/nuget/v/genesismesh-sdk-dotnet)](https://www.nuget.org/packages/genesismesh-sdk-dotnet)
 [![CI](https://github.com/GenesisMeshLabs/sdk-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/GenesisMeshLabs/sdk-dotnet/actions/workflows/ci.yml)
