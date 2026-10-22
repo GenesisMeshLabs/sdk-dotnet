@@ -85,6 +85,29 @@ public class ContractTypesTests
             written);
     }
 
+    // Records the caller passes back to the NA (to a verify route, or into the next call) are
+    // checked against their signatures: serializing the typed record must give the canonical
+    // form the NA signed. Before 1.7.1 the data usage records dropped their null fields
+    // (estimated_volume_bytes, max_volume_bytes_per_session), and the NA refused the intent.
+    [Theory]
+    [InlineData("agreement_offer", typeof(OfferRecord))]
+    [InlineData("agreement_counter", typeof(OfferRecord))]
+    [InlineData("agreement_accept", typeof(AgreementRecord))]
+    [InlineData("evidence_build", typeof(TrustEvidence))]
+    [InlineData("disclosure_commit", typeof(CapabilityCommitment))]
+    [InlineData("disclosure_prove", typeof(CapabilityMembershipProof))]
+    [InlineData("data_usage_policy", typeof(DataLicensePolicy))]
+    [InlineData("data_usage_intent", typeof(DataAccessIntent))]
+    [InlineData("consensus_vote", typeof(ConsensusVote))]
+    [InlineData("consensus_proof", typeof(ConsensusProof))]
+    public void PassedBackRecordsKeepTheirSignedForm(string name, Type model)
+    {
+        var raw = Response(name);
+        var value = JsonSerializer.Deserialize(raw.GetRawText(), model, Auth.SerializerOptions)!;
+        Assert.Equal(Canonical.FromJson(raw.GetRawText()),
+            Canonical.FromJson(JsonSerializer.Serialize(value, model, Auth.SerializerOptions)));
+    }
+
     [Theory]
     [InlineData("agreement_verify")]
     [InlineData("boundary_verify")]

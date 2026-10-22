@@ -144,16 +144,20 @@ public class LiveContractTests
             Check("disclosure_verify", proofCheck);
             Accepted("disclosure_verify", proofCheck);
 
-            var rawPolicy = Check("data_usage_policy", await gm.DataUsage.CreatePolicy(D(("licensee_sovereign_id", "sovereign-b"),
+            var policy = await gm.DataUsage.CreatePolicy(D(("licensee_sovereign_id", "sovereign-b"),
                 ("allowed_source_ids", new[] { "src-1" }), ("allowed_access_types", new[] { "read" }),
-                ("valid_from", Iso(TimeSpan.Zero)), ("valid_until", Iso(TimeSpan.FromHours(720))))));
+                ("valid_from", Iso(TimeSpan.Zero)), ("valid_until", Iso(TimeSpan.FromHours(720)))));
+            var rawPolicy = Check("data_usage_policy", policy);
             Check("data_usage_get_policy", await gm.DataUsage.GetPolicy());
-            var rawIntent = Check("data_usage_intent", await gm.DataUsage.CreateIntent(D(("sources", new[] { D(("source_id", "src-1"),
+            var intent = await gm.DataUsage.CreateIntent(D(("sources", new[] { D(("source_id", "src-1"),
                 ("source_type", "public"), ("owner_sovereign_id", network), ("classification_tags", Array.Empty<string>())) }),
-                ("access_types", new[] { "read" }), ("decision_id", "dec-001"))));
+                ("access_types", new[] { "read" }), ("decision_id", "dec-001")));
+            var rawIntent = Check("data_usage_intent", intent);
             var usageCheck = await gm.DataUsage.Verify(D(("intent", Raw(rawIntent)), ("policy", Raw(rawPolicy))));
             Check("data_usage_verify", usageCheck);
             Accepted("data_usage_verify", usageCheck);
+            // 1.7.1: the typed records, passed back as they are, keep the form the NA signed.
+            Accepted("data_usage_verify_typed", await gm.DataUsage.Verify(D(("intent", intent), ("policy", policy))));
 
             var rawVote = Check("consensus_vote",
                 await gm.Consensus.Vote(D(("justification_proof", proofInput), ("vote", true), ("reason", "contract"))));
