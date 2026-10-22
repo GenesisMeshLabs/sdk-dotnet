@@ -106,8 +106,11 @@ public class LiveContractTests
                 ExpiresAt = Iso(TimeSpan.FromHours(1)),
             });
             var rawOffer = Check("agreement_offer", offer);
-            Check("agreement_counter", await gm.Agreement.Counter(D(("offer", Raw(rawOffer)), ("capabilities", new[] { "read" }),
-                ("scope", new Dictionary<string, object?>()), ("valid_from", Iso(TimeSpan.Zero)), ("valid_until", Iso(TimeSpan.FromHours(12))))));
+            var counter = await gm.Agreement.Counter(D(("offer", Raw(rawOffer)), ("capabilities", new[] { "read" }),
+                ("scope", new Dictionary<string, object?>()), ("valid_from", Iso(TimeSpan.Zero)), ("valid_until", Iso(TimeSpan.FromHours(12)))));
+            var rawCounter = Check("agreement_counter", counter);
+            var counterAgreement = Check("agreement_accept_counter", await gm.Agreement.AcceptCounter(Raw(rawCounter)!, Raw(rawOffer)!));
+            Assert.Equal(new JsonArray("read").ToJsonString(), counterAgreement["agreed_terms"]!["capabilities"]!.ToJsonString());
             var rawAgreement = Check("agreement_accept", await gm.Agreement.Accept(offer));
             var agreementCheck = await gm.Agreement.Verify(D(("agreement", Raw(rawAgreement))));
             Check("agreement_verify", agreementCheck);
