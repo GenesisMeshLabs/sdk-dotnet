@@ -11,7 +11,8 @@ public sealed class AttestationClient
     /// POST /admin/attestations
     /// <para>
     /// Roles must use recognised prefixes: role:anchor, role:bridge, role:client,
-    /// role:operator, role:service:&lt;name&gt;. Bare names return HTTP 422.
+    /// role:operator, role:service:&lt;name&gt;. The NA refuses a bare name with 400 invalid_role
+    /// (<see cref="BadRequestException"/>).
     /// </para>
     /// </summary>
     public Task<MembershipAttestation> Issue(IDictionary<string, object?> body, CancellationToken ct = default) =>

@@ -1,8 +1,9 @@
 // Genesis Mesh .NET SDK smoke test.
 //
-// Requires 001-na running on port 9443. Start it from WSL:
+// Requires the 001-na setup of the GenesisMeshLabs/sandbox repository, running on
+// port 9443. SANDBOX is that repository's root. Start it from WSL:
 //
-//   $GM na start --config $SANDBOX/001-na/genesis-mesh.toml
+//   $GM na start --config $SANDBOX/nas/001-na/genesis-mesh.toml
 //
 // Run from this directory:
 //
@@ -37,8 +38,8 @@ static string SandboxPath(string rel)
     return rel;
 }
 
-var keyFile = SandboxPath(Path.Combine("001-na", "keys", "operator.key"));
-var genesisFile = SandboxPath(Path.Combine("001-na", "genesis.signed.json"));
+var keyFile = SandboxPath(Path.Combine("nas", "001-na", "keys", "operator.key"));
+var genesisFile = SandboxPath(Path.Combine("nas", "001-na", "genesis.signed.json"));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

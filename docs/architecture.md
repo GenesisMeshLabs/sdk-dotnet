@@ -86,8 +86,9 @@ when a listed edge is gone and still listed.
 4. The signature is checked with NSec Ed25519; then unknown signed fields
    (`unknown_field`) and non-canonical timestamps (`non_canonical_form`);
    then expiry, the key valid at the record's time and the record's own rules.
-5. The result names a reason code. Every reason and outcome is the Python
-   reference's, as the shared conformance vectors fix them.
+5. The result names a reason code: the Python reference's reasons. The
+   shared conformance vectors check that the outcomes agree on the cases the
+   vectors cover.
 
 ## Where a change goes
 

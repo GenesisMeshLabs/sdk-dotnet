@@ -2,14 +2,14 @@
 
 .NET SDK for the Genesis Mesh Network Authority HTTP API.
 
-**Targets: .NET 8 and .NET 10 (`net8.0`, `net10.0`). One dependency: [`NSec.Cryptography`](https://nsec.rocks/) for Ed25519.**
+**Targets: .NET 8 (`net8.0`); from 1.7.1 also .NET 10 (`net10.0`). One dependency: [`NSec.Cryptography`](https://nsec.rocks/) for Ed25519.**
 
 [![NuGet](https://img.shields.io/nuget/v/genesismesh-sdk-dotnet)](https://www.nuget.org/packages/genesismesh-sdk-dotnet)
 [![CI](https://github.com/GenesisMeshLabs/sdk-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/GenesisMeshLabs/sdk-dotnet/actions/workflows/ci.yml)
 
 ## Scope
 
-This SDK (1.6) covers the Network Authority's trust API: the sub-clients
+This SDK (1.7) covers the Network Authority's trust API: the sub-clients
 below (agreements, boundary decisions, trust evidence, attestations,
 selective disclosure, consensus and data usage), offline verification of
 their signed records, and signed admin calls to any other route. It has no
@@ -28,7 +28,7 @@ From 1.5 it reads the NA's key history (see
 and after a key succession keep verifying. Audit packs, archives and their
 verification are not part of this SDK: they live in the core
 (`genesis-mesh audit pack`, `genesis-mesh audit verify`) and in the Rust
-SDK's independent verifier `genesis-mesh-verify`.
+SDK's standalone verifier `genesis-mesh-verify`.
 
 From 1.6 it checks a pre-issued grant's NA signature (see
 [Pre-issued grants](#pre-issued-grants)). Requesting grants, holding time
@@ -44,75 +44,154 @@ grants, their uses and revocations in an evidence export.
 dotnet add package genesismesh-sdk-dotnet
 ```
 
-## Quick start
-
-```csharp
-using GenesisMesh;
-
-var client = new GenesisMeshClient(new ClientOptions
-{
-    BaseUrl    = "http://127.0.0.1:9443",
-    SigningKey = Environment.GetEnvironmentVariable("OPERATOR_KEY"), // base64 32-byte Ed25519 seed
-    KeyId      = "operator-local",  // must match the NA's registered key
-});
-
-var decision = await client.Boundary.Decide(new Dictionary<string, object?>
-{
-    ["requesting_agent_id"] = "agent-a",
-    ["capability"]          = "transactions.read",
-});
-```
-
 ## Local Network Authority
 
 To develop against a governed Network Authority on your machine (policies
 required, a privileged key for setup and a standard key for your controller),
 see [Develop Against a Local Network Authority](https://docs.genesismesh.org/sdk/local-network-authority.html).
-It needs `genesis-mesh` 1.1.0 or later from PyPI.
+It needs `genesis-mesh` 1.1.0 or later from PyPI. The quick start below uses
+the keys and port that guide sets up.
+
+## Quick start
+
+A controller asks the NA for a decision with one signed call:
+`POST /admin/boundary/evaluate`, which applies the active boundary policies.
+This SDK has no method for that route, so the call is a raw admin call (see
+[Raw admin calls](#raw-admin-calls)). Setup, here issuing an attestation for
+the controller, uses the privileged key `operator-local`; the controller uses
+its standard key `controller`.
+
+```csharp
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using GenesisMesh;
+
+// A key file holds comment lines and the base64 Ed25519 seed.
+static string Seed(string path) =>
+    File.ReadLines(path).Select(l => l.Trim()).First(l => l.Length > 0 && !l.StartsWith('#'));
+
+var baseUrl = "http://127.0.0.1:9443";
+
+// Setup: the privileged key. Create one client and reuse it; dispose it when done.
+using var client = new GenesisMeshClient(new ClientOptions
+{
+    BaseUrl    = baseUrl,
+    SigningKey = Seed("local/.genesis-mesh/keys/operator.key"),
+    KeyId      = "operator-local",
+});
+var attestation = await client.Attestation.Issue(new Dictionary<string, object?>
+{
+    ["subject_id"]     = "my-controller",
+    ["roles"]          = new[] { "role:client" },
+    ["claims"]         = new Dictionary<string, object?> { ["capabilities"] = new[] { "app.invoke" } },
+    ["validity_hours"] = 24,
+});
+
+// Run time: the controller's standard key evaluates a request under the attestation.
+var body = new Dictionary<string, object?>
+{
+    ["attestation_id"]       = attestation.AttestationId,
+    ["requested_capability"] = "app.invoke",
+};
+using var http = new HttpClient { BaseAddress = new Uri(baseUrl) };
+var naKey = (await http.GetFromJsonAsync<JsonElement>("/sovereign.json"))
+    .GetProperty("network_authority").GetProperty("public_key").GetString()!;
+var headers = Auth.BuildAdminHeaders(new AdminRequest("POST", "/admin/boundary/evaluate", naKey, body),
+    "controller", Auth.LoadSeed(Seed("local/.genesis-mesh/keys/controller.key")));
+using var request = new HttpRequestMessage(HttpMethod.Post, "/admin/boundary/evaluate")
+{
+    Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
+};
+request.Headers.Add("X-Admin-Key-Id",    headers.KeyId);
+request.Headers.Add("X-Admin-Signature", headers.Signature);
+request.Headers.Add("X-Admin-Timestamp", headers.Timestamp);
+request.Headers.Add("X-Admin-Nonce",     headers.Nonce);
+using var response = await http.SendAsync(request);
+response.EnsureSuccessStatusCode();
+
+using var result = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+var decision = result.RootElement.GetProperty("decision");
+var justificationProof = result.RootElement.GetProperty("justification_proof");
+Console.WriteLine($"authorized: {decision.GetProperty("authorized").GetBoolean()}");
+```
+
+The decision is signed by the NA: check it offline with
+`OfflineVerifier.VerifyBoundaryDecision` (see
+[Offline verification](#offline-verification)) before acting on it. With no
+active policy the decision rests on the attestation alone; publish and
+activate policies (`POST /admin/boundary-policies`, then
+`/admin/boundary-policies/<id>/activate`, privileged) to add their gates.
 
 ## Sub-clients
 
+The examples below use `client` from the quick start, with the privileged
+key. Counter, Accept, `Attestation.Issue`, `Revoke`, `SavePolicy` and
+`DataUsage.CreatePolicy` need a privileged key; with a standard key the NA
+answers 403 `insufficient_operator_tier`.
+
 ### Agreement
 
+`Accept` needs a recognition treaty for the responder: issue one first with
+`POST /admin/recognition-treaties` (see [Raw admin calls](#raw-admin-calls)).
+The NA names itself as the offerer: it ignores `OfferorSovereignId` and
+`Roles`.
+
 ```csharp
-// Create a capability offer (admin — requires signing key)
+var now = DateTimeOffset.UtcNow;
+static string Iso(DateTimeOffset t) => t.UtcDateTime.ToString("s") + "Z"; // 2026-01-01T00:00:00Z
+
+// Create a capability offer (admin)
 var offer = await client.Agreement.Offer(new CapabilityOffer
 {
-    OfferorSovereignId   = "ALPHA-NA",
     ResponderSovereignId = "BETA-NA",
     Capabilities         = ["read:data", "write:log"],
-    Roles                = ["role:client"],
-    ValidFrom            = "2026-01-01T00:00:00.000Z",
-    ValidUntil           = "2027-01-01T00:00:00.000Z",
-    ExpiresAt            = "2026-01-08T00:00:00.000Z",
+    ValidFrom            = Iso(now),
+    ValidUntil           = Iso(now.AddDays(365)),
+    ExpiresAt            = Iso(now.AddDays(7)),
 });
 
-// Accept an offer (requires the NA to hold a recognition treaty for the responder)
+// Counter it with narrower terms (admin)
+var counter = await client.Agreement.Counter(new Dictionary<string, object?>
+{
+    ["offer"]        = offer,
+    ["capabilities"] = new[] { "read:data" },
+    ["valid_from"]   = Iso(now),
+    ["valid_until"]  = Iso(now.AddDays(180)),
+});
+
+// Accept the offer (admin)
 var agreement = await client.Agreement.Accept(offer);
 
-// Verify agreement signatures (no auth required)
-var result = await client.Agreement.Verify(new Dictionary<string, object?> { ["agreement"] = offer });
+// Verify the agreement's two signatures (no auth required)
+var check = await client.Agreement.Verify(new Dictionary<string, object?> { ["agreement"] = agreement });
+// check.Accepted
 ```
+
+`Accept` sends `{"offer": ...}`. To accept a counter-offer, send
+`{"counter": ..., "original_offer": ...}` to `POST /admin/agreements/accept`
+with a raw admin call.
 
 ### Boundary
 
-```csharp
-// Issue a boundary decision (admin)
-var decision = await client.Boundary.Decide(new Dictionary<string, object?>
-{
-    ["agreement"]            = agreement,
-    ["requested_capability"] = "read:data",
-});
+`Decide` (`POST /admin/boundary/decide`) applies only the built-in gates. A
+Network Authority that requires boundary policies
+(`BOUNDARY_POLICY_ENFORCEMENT=required`, which `genesis-mesh init` sets)
+refuses it with 409 `boundary_policy_required`. Call
+`POST /admin/boundary/evaluate` instead, as in the [quick start](#quick-start);
+this SDK has no method for it.
 
-// Verify a boundary decision (no auth required)
+```csharp
+// Verify a boundary decision, here the one from the quick start (no auth required)
 var v = await client.Boundary.Verify(new Dictionary<string, object?> { ["decision"] = decision });
+// v.Accepted
 ```
 
 ### Evidence
 
 ```csharp
 // Build signed trust evidence (admin)
-// verdict: "allow" | "block" | "escalate" | "warn"
+// verdict: "allow" | "block" | "escalate" | "warn"; any other value gets 400 invalid_verdict
 var evidence = await client.Evidence.Build(new TrustDecision
 {
     SourceSovereignId = "ALPHA",
@@ -120,13 +199,17 @@ var evidence = await client.Evidence.Build(new TrustDecision
     Verdict           = "allow",
     Reason            = "long-standing member",
 });
+
+// Verify it (no auth required)
+var ev = await client.Evidence.Verify(new Dictionary<string, object?> { ["evidence"] = evidence });
 ```
 
 ### Attestation
 
 ```csharp
 // Issue a membership attestation (admin)
-// roles must use a recognised prefix: role:anchor | role:bridge | role:client | role:operator | role:service:<name>
+// roles must use a recognised prefix: role:anchor | role:bridge | role:client | role:operator | role:service:<name>;
+// a bare name gets 400 invalid_role
 var att = await client.Attestation.Issue(new Dictionary<string, object?>
 {
     ["subject_id"]     = "node-xyz",
@@ -136,33 +219,63 @@ var att = await client.Attestation.Issue(new Dictionary<string, object?>
 
 // Revoke an attestation (admin)
 await client.Attestation.Revoke(att.AttestationId, new Dictionary<string, object?> { ["reason"] = "key compromised" });
+
+// Set the recognition policy: the issuers whose attestations this NA recognises (admin)
+await client.Attestation.SavePolicy(new Dictionary<string, object?>
+{
+    ["recognition_policy"] = new Dictionary<string, object?>
+    {
+        ["local_sovereign_id"] = "MY-NA",
+        ["recognized_issuers"] = new[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["sovereign_id"]  = "PARTNER-NA",
+                ["public_keys"]   = new[] { "<base64 Ed25519 public key>" },
+                ["allowed_roles"] = new[] { "role:client" },
+            },
+        },
+    },
+});
 ```
+
+From 1.7.1, `Revoke` refuses an ID that is not one path segment (empty, `.`,
+`..`, or containing `/`, `\`, `?`, `#`, `%` or a control character) before
+anything is signed or sent: it throws `ArgumentException`.
 
 ### Disclosure
 
 ```csharp
-// Commit to a capability set (admin)
+// Commit to a capability set under an agreement (admin)
 var commitment = await client.Disclosure.Commit(new Dictionary<string, object?>
 {
     ["capabilities"] = new[] { "read:data", "write:log" },
+    ["agreement"]    = agreement,
 });
 
-// Generate a Merkle membership proof (no auth required)
+// Prove that one capability is in the committed set (no auth required)
 var proof = await client.Disclosure.Prove(new Dictionary<string, object?>
 {
-    ["commitment_id"] = commitment.CommitmentId,
-    ["capability"]    = "read:data",
+    ["capability"]          = "read:data",
+    ["capabilities"]        = new[] { "read:data", "write:log" },
+    ["commitment"]          = commitment,
+    ["prover_sovereign_id"] = "BETA-NA",
 });
 
-// Verify the proof (no auth required)
-var dv = await client.Disclosure.Verify(new Dictionary<string, object?> { ["proof"] = proof });
+// Verify the proof against the commitment (no auth required)
+var dv = await client.Disclosure.Verify(new Dictionary<string, object?>
+{
+    ["proof"]      = proof,
+    ["commitment"] = commitment,
+});
 ```
 
 ### Consensus
 
 Validators vote on a justification proof: the `justification_proof` returned
-with a decision by `POST /admin/boundary/evaluate` (see Raw admin calls). Pass
-votes and proofs back unchanged; every field is covered by a signature.
+with a decision by `POST /admin/boundary/evaluate` (see the
+[quick start](#quick-start)). Pass votes and proofs back unchanged; every
+field is covered by a signature.
 
 ```csharp
 // Cast a validator vote, signed by the NA as validator (admin)
@@ -182,11 +295,11 @@ var cp = await client.Consensus.Proof(new Dictionary<string, object?>
     ["validator_sovereign_ids"] = new[] { vote.ValidatorSovereignId },
 });
 
-// Verify against the validators' keys (no auth required)
+// Verify against the validators' keys; here the NA is the only validator (no auth required)
 var cv = await client.Consensus.Verify(new Dictionary<string, object?>
 {
     ["proof"]                 = cp,
-    ["validator_public_keys"] = new Dictionary<string, string> { [vote.ValidatorSovereignId] = validatorPublicKey },
+    ["validator_public_keys"] = new Dictionary<string, string> { [vote.ValidatorSovereignId] = naKey },
 });
 // cv.Valid, cv.Reason ("valid", "threshold_not_met", "invalid_vote_signature", ...)
 ```
@@ -200,12 +313,13 @@ var policy = await client.DataUsage.CreatePolicy(new Dictionary<string, object?>
     ["licensee_sovereign_id"] = "BETA",
     ["allowed_source_ids"]    = new[] { "src-a" },
     ["allowed_access_types"]  = new[] { "read", "aggregate" },
-    ["valid_from"]            = "2026-01-01T00:00:00Z",
-    ["valid_until"]           = "2026-12-31T00:00:00Z",
+    ["valid_from"]            = Iso(now),
+    ["valid_until"]           = Iso(now.AddDays(365)),
 });
 
 // Create a data access intent (admin)
-// source_type: "personal" | "proprietary" | "public" | "synthetic"
+// source_type: "personal" | "proprietary" | "public" | "synthetic"; a source without
+// source_id, source_type and owner_sovereign_id gets 400 invalid_source
 var intent = await client.DataUsage.CreateIntent(new Dictionary<string, object?>
 {
     ["sources"] = new object[]
@@ -230,7 +344,8 @@ var dv2 = await client.DataUsage.Verify(new Dictionary<string, object?>
 
 From 0.61.0 the SDK verifies Network Authority records locally, using
 canonical JSON and Ed25519 only, without calling the NA. The reason codes are
-the Python reference's. Pass the JSON text as received.
+the Python reference's. Pass the JSON text as received (for a `JsonElement`,
+its `GetRawText()`).
 
 ```csharp
 var a = OfflineVerifier.VerifyAgreement(agreementJson, new[] { offererKey }, new[] { responderKey });
@@ -244,8 +359,8 @@ var d = OfflineVerifier.VerifyBoundaryDecision(decisionJson, new DecisionVerifyO
 });
 // d.Accepted (verified), d.Authorized (ALLOW or DENY), d.Reason
 
-bool ok = OfflineVerifier.VerifyDataLicensePolicySignature(policyJson, new[] { licensorKey });
-var v = OfflineVerifier.VerifyDataAccessIntent(intentJson, policyJson, new[] { agentKey });
+bool ok = OfflineVerifier.VerifyDataLicensePolicySignature(licensePolicyJson, new[] { licensorKey });
+var v = OfflineVerifier.VerifyDataAccessIntent(intentJson, licensePolicyJson, new[] { agentKey });
 // v.Valid, v.ViolationReason, v.Violations
 ```
 
@@ -253,8 +368,10 @@ An accepted DENY has `Accepted` true and `Authorized` false: the decision
 verified, and it denies. Revocation is not checked offline. `Canonical.FromJson`
 and the `OfflineVerifier` digest helpers reproduce the reference forms. The
 verifiers pass the shared `interop` conformance vectors
-(`tests/GenesisMesh.Sdk.Tests/testdata/conformance/interop.json`), and the
-core's cross-language scenario runs them against a live NA.
+(`tests/GenesisMesh.Sdk.Tests/testdata/conformance/interop.json`). The core's
+cross-language scenario (`interop/`) also has them verify agreements,
+decisions, a license policy and an intent that a live NA signs, on every pull
+request and push to the core's `main`.
 
 ### NA key history
 
@@ -323,17 +440,26 @@ signature vectors of the shared `grants` suite
 
 ## Raw admin calls
 
-For NA routes not yet covered by a sub-client (e.g. `/admin/recognition-treaties`), use `Auth.BuildAdminHeaders` directly:
+For NA routes not covered by a sub-client, such as `/admin/boundary/evaluate`
+(see the [quick start](#quick-start)) or `/admin/recognition-treaties`, use
+`Auth.BuildAdminHeaders` directly. This one issues a recognition treaty for
+`BETA-NA`, which `Agreement.Accept` needs (privileged):
 
 ```csharp
 using System.Text;
 using System.Text.Json;
 using GenesisMesh;
 
-var seed    = Auth.LoadSeed(Environment.GetEnvironmentVariable("OPERATOR_KEY")!);
-var body    = new { subject_sovereign_id = "BETA-NA", validity_hours = 24 };
-// The signature binds method, path, query, the NA's public key and the body.
-var request = new AdminRequest("POST", "/admin/recognition-treaties", "<NA public key from /sovereign.json>", body);
+var seed    = Auth.LoadSeed(Seed("local/.genesis-mesh/keys/operator.key"));
+var body    = new
+{
+    subject_sovereign_id = "BETA-NA",
+    subject_public_keys  = new[] { "<BETA-NA's base64 Ed25519 public key>" },
+    scope                = new { allowed_roles = new[] { "role:client" } },
+    validity_hours       = 24,
+};
+// The signature binds method, path, query, the NA's public key (naKey, from /sovereign.json) and the body.
+var request = new AdminRequest("POST", "/admin/recognition-treaties", naKey, body);
 var headers = Auth.BuildAdminHeaders(request, "operator-local", seed);
 
 using var http = new HttpClient();
@@ -345,9 +471,14 @@ req.Headers.Add("X-Admin-Key-Id",    headers.KeyId);
 req.Headers.Add("X-Admin-Signature", headers.Signature);
 req.Headers.Add("X-Admin-Timestamp", headers.Timestamp);
 req.Headers.Add("X-Admin-Nonce",     headers.Nonce);
+using var resp = await http.SendAsync(req);   // 201 with the signed treaty
 ```
 
 ## Error handling
+
+The exception types for 403, 409, 413 and other 4xx statuses are from 1.7.1.
+In 1.7.0 and earlier, 403, 409, 413 and any other status without its own
+type are `ServerException`.
 
 ```csharp
 using GenesisMesh;
@@ -366,8 +497,14 @@ catch (ForbiddenException ex)
     // 403: e.g. insufficient_operator_tier; retrying does not help
     Console.WriteLine($"Forbidden: {ex.Detail} [{ex.Code}]");
 }
+catch (BadRequestException ex)
+{
+    // 400: a missing or malformed field, such as invalid_role or invalid_verdict
+    Console.WriteLine($"Bad request: {ex.Detail} [{ex.Code}]");
+}
 catch (ValidationException ex)
 {
+    // 422: well-formed but refused, such as accept_rejected
     Console.WriteLine($"Validation: {ex.Detail} [{ex.Code}]");
 }
 catch (RateLimitException)
@@ -404,7 +541,11 @@ catch (GenesisMeshException ex)
 | 5xx | `ServerException` |
 
 All of them derive from `GenesisMeshException` (`Status`, `Code`, `Detail`).
-A connection failure or timeout is a `NetworkException`. Cancelling through
+`Detail` is the NA's message; `Message` is the formatted
+`genesismesh: HTTP <status> <code>: <detail>`.
+A connection failure or timeout is a `NetworkException`. A 2xx response that
+is not strict JSON (duplicate keys, `-0`, lone surrogates, ...) throws
+`StrictJsonException`, a `JsonException`, not a `GenesisMeshException`. Cancelling through
 your own `CancellationToken` throws `OperationCanceledException`.
 
 ## Admin authentication

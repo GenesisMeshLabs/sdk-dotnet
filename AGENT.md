@@ -69,7 +69,7 @@ wire representation is snake_case.
 
 ### 4. Errors fail closed
 
-`ErrorParser.Parse` must handle the NA's nested error format:
+`ErrorMapping.Parse` (`Errors.cs`) must handle the NA's nested error format:
 `{ "error": { "message": "...", "code": "..." } }`. If the format changes,
 **return an error**, do not silently produce a misleading result.
 
@@ -91,10 +91,12 @@ These are non-obvious and not in the HTTP reference. Tests must cover them.
 
 | Constraint | Detail |
 |-----------|--------|
-| Evidence verdict | Must be `"allow"` \| `"block"` \| `"escalate"` \| `"warn"`. The value `"trusted"` is invalid. |
-| Role prefixes | Roles must start with `role:anchor`, `role:bridge`, `role:client`, `role:operator`, or `role:service:<name>`. Bare names return 422. |
+| Evidence verdict | Must be `"allow"` \| `"block"` \| `"escalate"` \| `"warn"`. The NA refuses any other value, such as `"trusted"`, with 400 `invalid_verdict`. |
+| Role prefixes | Roles must start with `role:anchor`, `role:bridge`, `role:client`, `role:operator`, or `role:service:<name>`. The NA refuses a bare name with 400 `invalid_role`. |
 | Agreement accept | Requires the NA to hold an active recognition treaty for the `responder_sovereign_id`. Issue it via `POST /admin/recognition-treaties` first. |
-| `DataSourceDescriptor` | `source_id`, `source_type` (`"personal"` \| `"proprietary"` \| `"public"` \| `"synthetic"`), and `owner_sovereign_id` are all required. Missing any returns HTTP 422. |
+| `DataSourceDescriptor` | `source_id`, `source_type` (`"personal"` \| `"proprietary"` \| `"public"` \| `"synthetic"`), and `owner_sovereign_id` are all required. The NA refuses a source without them with 400 `invalid_source`. |
+| Boundary decide | A Network Authority with `BOUNDARY_POLICY_ENFORCEMENT=required` (what `genesis-mesh init` sets) refuses `POST /admin/boundary/decide` with 409 `boundary_policy_required`; governed callers use `POST /admin/boundary/evaluate`. |
+| Operator tier | Counter, Accept, `Attestation.Issue`, `Revoke`, `SavePolicy` and `DataUsage.CreatePolicy` need a privileged key; a standard key gets 403 `insufficient_operator_tier`. |
 | HTML-escape bug | C#'s default `JsonSerializer` HTML-escapes `>` as `\u003E`. Python does not. Signed bytes always come from `Canonical.Of` (via `Auth.CanonicalJson`), never from `JsonSerializer` output. |
 
 ---
