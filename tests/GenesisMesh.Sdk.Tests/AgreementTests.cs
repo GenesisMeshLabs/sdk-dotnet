@@ -127,6 +127,31 @@ public class AgreementTests
     }
 
     [Fact]
+    public async Task AcceptCounter_SendsCounterAndOriginalOffer()
+    {
+        // The NA accepts a counter-offer only as {"counter", "original_offer"}; Accept sends {"offer"},
+        // which it refuses for a counter (422 accept_rejected).
+        JsonElement? body = null;
+        using var handler = new FuncHandler(req =>
+        {
+            Assert.Equal("/admin/agreements/accept", req.RequestUri!.PathAndQuery);
+            body = JsonDocument.Parse(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult()).RootElement.Clone();
+            var json = JsonSerializer.Serialize(new { agreement_id = "agr-2" }, Auth.SerializerOptions);
+            return new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = new StringContent(json, Encoding.UTF8, new MediaTypeHeaderValue("application/json")),
+            };
+        });
+        var offer = new OfferRecord { OfferId = "off-1" };
+        var counter = new OfferRecord { OfferId = "off-counter" };
+        var agr = await AdminClient(handler).Agreement.AcceptCounter(counter, offer);
+        Assert.Equal("agr-2", agr.AgreementId);
+        Assert.Equal(new[] { "counter", "original_offer" }, body!.Value.EnumerateObject().Select(p => p.Name).Order());
+        Assert.Equal("off-counter", body.Value.GetProperty("counter").GetProperty("offer_id").GetString());
+        Assert.Equal("off-1", body.Value.GetProperty("original_offer").GetProperty("offer_id").GetString());
+    }
+
+    [Fact]
     public async Task Verify_UsesPublicRoute_NoSigningKeyRequired()
     {
         using var handler = new FuncHandler(req =>

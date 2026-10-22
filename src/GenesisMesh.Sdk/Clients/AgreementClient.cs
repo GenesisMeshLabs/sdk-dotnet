@@ -26,11 +26,25 @@ public sealed class AgreementClient
     /// POST /admin/agreements/accept
     /// <para>
     /// The full <paramref name="offer"/> object is sent as {"offer": ...} so the NA can verify its own signature.
+    /// To accept a counter-offer, use <see cref="AcceptCounter"/>: the NA refuses a counter sent as an offer
+    /// (422 accept_rejected).
     /// </para>
     /// </summary>
     public Task<AgreementRecord> Accept(object offer, CancellationToken ct = default) =>
         _t.AdminPostAsync<AgreementRecord>("/admin/agreements/accept",
             new Dictionary<string, object?> { ["offer"] = offer }, ct);
+
+    /// <summary>
+    /// Accepts a counter-offer and returns a signed agreement (1.7.1).
+    /// POST /admin/agreements/accept
+    /// <para>
+    /// Sent as {"counter": ..., "original_offer": ...}: the <paramref name="counter"/> returned by
+    /// <see cref="Counter"/> and the <paramref name="originalOffer"/> it answers, both as received.
+    /// </para>
+    /// </summary>
+    public Task<AgreementRecord> AcceptCounter(object counter, object originalOffer, CancellationToken ct = default) =>
+        _t.AdminPostAsync<AgreementRecord>("/admin/agreements/accept",
+            new Dictionary<string, object?> { ["counter"] = counter, ["original_offer"] = originalOffer }, ct);
 
     /// <summary>
     /// Verifies agreement signatures (public route).
