@@ -175,10 +175,23 @@ Before adding a new sub-client method, check the constraints table in
 
 ## Smoke testing against a live NA
 
+The [live contract test](#live-contract-test) needs only the genesis-mesh
+core in a Python environment: it starts a disposable NA itself.
+
+The smoke program in `sandbox/sdk-smoke-dotnet` runs against the `001-na`
+setup of the [GenesisMeshLabs/sandbox](https://github.com/GenesisMeshLabs/sandbox)
+repository: its operator key, its signed genesis block and the network name
+`001-NA`. Set `SANDBOX` to that repository's root, start the NA as its README
+says, then run the program:
+
 ```sh
+genesis-mesh na start --config $SANDBOX/nas/001-na/genesis-mesh.toml
 cd sandbox/sdk-smoke-dotnet
-dotnet run   # requires NA on http://127.0.0.1:9443
+dotnet run   # the NA on http://127.0.0.1:9443
 ```
+
+Without `SANDBOX`, the program looks for the sandbox checkout next to this
+one.
 
 ---
 

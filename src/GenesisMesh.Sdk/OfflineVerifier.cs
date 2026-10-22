@@ -51,8 +51,8 @@ public sealed class DecisionVerifyOptions
 
 /// <summary>
 /// Offline verification (v0.61): checks signed Genesis Mesh artifacts without calling the
-/// Network Authority. Each method is a port of the Python reference and returns the same
-/// reason codes (checked by the shared conformance vectors).
+/// Network Authority. Each method is a port of the Python reference and returns its reason
+/// codes. The shared conformance vectors check that they agree on the cases the vectors cover.
 /// <para>
 /// Pass artifacts as the JSON received from the NA or the signer: signatures cover the canonical
 /// form of exactly what was signed, and re-serializing a typed model can change it.
@@ -194,7 +194,8 @@ public static partial class OfflineVerifier
     /// <summary>
     /// Verify an AgreementRecord's dual signatures and optional graph binding.
     /// Reasons: accepted, missing_offerer_signature, invalid_offerer_signature,
-    /// missing_responder_signature, invalid_responder_signature, graph_digest_mismatch.
+    /// missing_responder_signature, invalid_responder_signature, graph_digest_mismatch,
+    /// then unknown_field and non_canonical_form (v1.2.0).
     /// </summary>
     public static AgreementVerificationResult VerifyAgreement(
         string agreementJson, IReadOnlyList<string> offererPublicKeys, IReadOnlyList<string> responderPublicKeys,

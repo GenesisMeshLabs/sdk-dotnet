@@ -43,8 +43,10 @@ Use GitHub's private vulnerability reporting:
 2. Click **Report a vulnerability**
 3. Fill in the report form
 
-You will receive a response within 72 hours. We aim to release a fix within
-14 days for critical issues and 30 days for moderate issues.
+You should receive acknowledgement within **5 business days**. Expect a
+remediation plan within **30 days** for confirmed issues, longer for
+cryptographic findings that require a redesign. These are the Genesis Mesh
+core's response times.
 
 Please include:
 
