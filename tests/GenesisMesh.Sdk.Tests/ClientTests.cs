@@ -170,7 +170,7 @@ public class ErrorParserTests
         Assert.IsType<ServerException>(ex);
     }
 
-    // 1.7.1: a 403, 409, 413 or other 4xx was a ServerException ("HTTP 5xx"), so a retry-on-server-error
+    // 1.8.0: a 403, 409, 413 or other 4xx was a ServerException ("HTTP 5xx"), so a retry-on-server-error
     // policy retried a refusal. The codes are ones the core sends (genesis_mesh/na_service/errors.py).
     [Theory]
     [InlineData(403, "insufficient_operator_tier", typeof(ForbiddenException))]
@@ -198,7 +198,7 @@ public class ErrorParserTests
     }
 }
 
-// ── Internals published as API (1.7.1: obsolete, internal in 2.0) ───────────
+// ── Internals published as API (1.8.0: obsolete, internal in 2.0) ───────────
 
 public class ObsoleteInternalsTests
 {
@@ -422,7 +422,7 @@ public class HttpErrorTests
     }
 }
 
-// ── Cancellation (1.7.1) ──────────────────────────────────────────────────────
+// ── Cancellation (1.8.0) ──────────────────────────────────────────────────────
 
 public class CancellationTests
 {
@@ -441,7 +441,7 @@ public class CancellationTests
 
     private static Dictionary<string, object?> Body() => new() { ["decision"] = new { } };
 
-    // Before 1.7.1 the caller's own cancellation was reported as a NetworkException, so
+    // Before 1.8.0 the caller's own cancellation was reported as a NetworkException, so
     // catch (OperationCanceledException) never saw it.
     [Fact]
     public async Task CallerCancellation_BeforeTheCall_IsOperationCanceled()

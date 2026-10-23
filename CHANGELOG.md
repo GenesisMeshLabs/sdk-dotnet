@@ -7,6 +7,106 @@ Versions align with the [Genesis Mesh release sequence](https://github.com/Genes
 
 ---
 
+## [1.8.0] - 2026-10-23
+
+### Security
+
+- **An attestation ID can no longer reach another admin route.**
+  `Attestation.Revoke` put the ID into the request path as given, so an ID
+  such as `x/../../recognition-policy?` signed and sent
+  `POST /admin/recognition-policy`. An ID that is not one path segment
+  (empty, `.` or `..`, or holding `/`, `\`, `?`, `#`, `%` or a control
+  character) now throws before anything is signed or sent.
+- **`Auth.SerializerOptions` is read-only.** The options this SDK reads the
+  NA's responses with were public and mutable, so any code in the process (a
+  host application, a plugin, a test helper) could set
+  `PropertyNameCaseInsensitive = true` and undo the 1.3.1 defence: a
+  `Boundary.Verify` response of
+  `{"valid":false,"accepted":false,"Valid":true,"Accepted":true}` then read
+  as valid and accepted. The options are now frozen when the SDK loads.
+
+### Added
+
+- **`ForbiddenException` (403), `ConflictException` (409),
+  `PayloadTooLargeException` (413) and `ClientErrorException` (any other
+  4xx).** All derive from `GenesisMeshException`.
+- **A `net10.0` build.** The package targets `net8.0` and `net10.0`, and CI
+  tests both. .NET 8 support ends on 2026-11-10; applications on .NET 10 now
+  get a build compiled and tested for it.
+
+### Deprecated
+
+- **`ErrorParser`, `StrictJson` and `Canonical.PythonFloatRepr` are
+  obsolete** and become internal in 2.0. They are how the SDK reads error
+  responses and JSON and writes numbers, not API for callers: catch the
+  `GenesisMeshException` subclasses and `StrictJsonException` the client and
+  the verifiers throw, and use `Canonical.Of` or `Canonical.FromJson` for the
+  canonical form. They work as before until then; code that uses them now
+  gets warning CS0618 (an error under `TreatWarningsAsErrors`).
+
+### Fixed
+
+- **A counter-offer can be accepted.** `Agreement.Accept` sends
+  `{"offer": ...}`, which the Network Authority refuses for a counter-offer
+  (422 `accept_rejected`), so the SDK had no way to accept one. The new
+  `Agreement.AcceptCounter(counter, originalOffer)` sends
+  `{"counter": ..., "original_offer": ...}`, the form the NA accepts.
+- **Admin requests work under every culture.** The SDK wrote the signed
+  `X-Admin-Timestamp` in the current culture: under a culture with another
+  calendar (`th-TH`, `ar-SA`) the year was 2569 or 1448, and under one with
+  another time separator (`fi-FI`) the time read `16.27.41`, so the NA refused
+  every admin request. The timestamp is written in the invariant culture.
+- **Cancelling a call throws `OperationCanceledException`.** When the
+  `CancellationToken` passed to a client method was cancelled, the SDK
+  reported it as a `NetworkException`, so
+  `catch (OperationCanceledException)` never saw the caller's own
+  cancellation. A timeout (`ClientOptions.Timeout`) is still a
+  `NetworkException`.
+- **A data usage intent and policy can be passed back to `DataUsage.Verify`
+  as returned.** The typed `DataAccessIntent` and `DataLicensePolicy` left out
+  `estimated_volume_bytes` and `max_volume_bytes_per_session` when they were
+  null, but the Network Authority signs them as null: it refused the intent
+  ("Invalid intent signature", `intent_exceeds_license`). Both fields are now
+  written as null.
+- **A 4xx is no longer a `ServerException`.** The NA's 403 (such as
+  `insufficient_operator_tier`), 409 (such as `boundary_policy_required`),
+  413 and every other 4xx without its own type were thrown as
+  `ServerException`, documented as "HTTP 5xx", so a policy that retries
+  server errors retried requests the NA had refused. `ServerException` is now
+  thrown for 5xx only.
+- **A model name the field registry lacks is refused.** The verifiers name
+  the record models they check by string; a name the embedded registry did
+  not have (a typo, or a model the core renamed) read as a model with no
+  fields, so the `unknown_field` and `non_canonical_form` checks were
+  silently off for that verifier. Such a name now throws
+  `ArgumentException`, and a test checks every model named in the source
+  against the registry.
+
+### Upgrading
+
+- **Cancellation.** Code that caught `NetworkException` to handle its own
+  cancellation must catch `OperationCanceledException` (or
+  `TaskCanceledException`) instead.
+- **HTTP 4xx exceptions.** A 403, 409 or 413 now throws `ForbiddenException`,
+  `ConflictException` or `PayloadTooLargeException`, and any other 4xx
+  without its own type (such as 405) throws `ClientErrorException`, where
+  1.7.0 threw `ServerException`. `catch (GenesisMeshException)` catches them
+  as before; a `catch (ServerException)` meant for these statuses must catch
+  the new types (or `GenesisMeshException`). A non-error status this SDK does
+  not know (such as an unfollowed redirect) throws `GenesisMeshException`
+  itself.
+- **`Attestation.Revoke` validates its ID.** It throws
+  `ArgumentNullException` for a null ID and `ArgumentException`
+  (`ParamName` `attestationId`) for an ID that is not one path segment, where
+  it used to send the request. IDs the Network Authority issues are not
+  affected.
+- Setting any property of `Auth.SerializerOptions` now throws
+  `InvalidOperationException`. To serialize with other settings, copy the
+  options first: `new JsonSerializerOptions(Auth.SerializerOptions) { ... }`.
+- **`StrictFields.UnknownFields`.** Called with a model the registry does
+  not have, it throws `ArgumentException`; 1.7.0 returned an empty list,
+  which read as "no unknown fields".
+
 ## [1.7.0] - 2026-10-15
 
 ### Changed

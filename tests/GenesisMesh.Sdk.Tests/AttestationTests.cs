@@ -83,7 +83,7 @@ public class AttestationTests
         Assert.Equal("/admin/attestations/att-99/revoke", capturedPath);
     }
 
-    // 1.7.1: the ID went into the path as given, so "x/../../recognition-policy?" signed and sent a request to
+    // 1.8.0: the ID went into the path as given, so "x/../../recognition-policy?" signed and sent a request to
     // POST /admin/recognition-policy (the HTTP client resolves the dot segments). An ID that is not one path
     // segment is refused before anything is signed or sent.
     [Theory]

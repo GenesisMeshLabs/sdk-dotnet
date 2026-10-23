@@ -29,7 +29,7 @@ internal sealed class Transport : IDisposable
     }
 
     /// <summary>
-    /// <paramref name="value"/> as one segment of a request path (1.7.1). A caller's ID goes into the path as given,
+    /// <paramref name="value"/> as one segment of a request path (1.8.0). A caller's ID goes into the path as given,
     /// so an ID that is empty, a dot segment, or holds '/', '\', '?', '#', '%' or a control character would sign and
     /// call another route: it is refused before anything is signed or sent.
     /// </summary>
@@ -137,7 +137,7 @@ internal sealed class Transport : IDisposable
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            throw; // 1.7.1: the caller cancelled; not a network error
+            throw; // 1.8.0: the caller cancelled; not a network error
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {

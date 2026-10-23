@@ -6,7 +6,7 @@ using Xunit;
 namespace GenesisMesh.Tests;
 
 /// <summary>
-/// Model names fail closed (1.7.1). The verifiers name the record models they check as string literals; a model the
+/// Model names fail closed (1.8.0). The verifiers name the record models they check as string literals; a model the
 /// embedded registry lacks used to read as a model with no fields, so a typo or a core rename silently turned the
 /// unknown-field and canonical-form checks off for that verifier.
 /// </summary>

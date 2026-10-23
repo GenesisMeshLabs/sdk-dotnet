@@ -87,7 +87,7 @@ public class ContractTypesTests
 
     // Records the caller passes back to the NA (to a verify route, or into the next call) are
     // checked against their signatures: serializing the typed record must give the canonical
-    // form the NA signed. Before 1.7.1 the data usage records dropped their null fields
+    // form the NA signed. Before 1.8.0 the data usage records dropped their null fields
     // (estimated_volume_bytes, max_volume_bytes_per_session), and the NA refused the intent.
     [Theory]
     [InlineData("agreement_offer", typeof(OfferRecord))]

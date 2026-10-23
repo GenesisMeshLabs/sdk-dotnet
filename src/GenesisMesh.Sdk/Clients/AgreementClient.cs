@@ -35,7 +35,7 @@ public sealed class AgreementClient
             new Dictionary<string, object?> { ["offer"] = offer }, ct);
 
     /// <summary>
-    /// Accepts a counter-offer and returns a signed agreement (1.7.1).
+    /// Accepts a counter-offer and returns a signed agreement (1.8.0).
     /// POST /admin/agreements/accept
     /// <para>
     /// Sent as {"counter": ..., "original_offer": ...}: the <paramref name="counter"/> returned by

@@ -49,7 +49,7 @@ public class LiveContractTests
         var python = Environment.GetEnvironmentVariable("GM_E2E_PYTHON");
         if (string.IsNullOrEmpty(python))
         {
-            // 1.7.1: where the live check is required (CI sets GM_E2E_REQUIRED=1), an unconfigured run fails
+            // 1.8.0: where the live check is required (CI sets GM_E2E_REQUIRED=1), an unconfigured run fails
             // instead of passing green without an NA.
             if (Environment.GetEnvironmentVariable("GM_E2E_REQUIRED") == "1")
                 throw new InvalidOperationException("GM_E2E_REQUIRED=1 but GM_E2E_PYTHON is not set: no NA to check against");
@@ -159,7 +159,7 @@ public class LiveContractTests
             var usageCheck = await gm.DataUsage.Verify(D(("intent", Raw(rawIntent)), ("policy", Raw(rawPolicy))));
             Check("data_usage_verify", usageCheck);
             Accepted("data_usage_verify", usageCheck);
-            // 1.7.1: the typed records, passed back as they are, keep the form the NA signed.
+            // 1.8.0: the typed records, passed back as they are, keep the form the NA signed.
             Accepted("data_usage_verify_typed", await gm.DataUsage.Verify(D(("intent", intent), ("policy", policy))));
 
             var rawVote = Check("consensus_vote",
