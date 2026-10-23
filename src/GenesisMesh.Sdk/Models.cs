@@ -654,7 +654,7 @@ public sealed class DataLicensePolicy : IJsonOnDeserialized
     [JsonPropertyName("prohibited_classification_tags")]
     public IList<string> ProhibitedClassificationTags { get; set; } = [];
 
-    // Written even when null (1.7.1): the NA signs the field as null, and a record passed
+    // Written even when null (1.8.0): the NA signs the field as null, and a record passed
     // back without it fails its signature.
     [JsonPropertyName("max_volume_bytes_per_session")]
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
@@ -708,7 +708,7 @@ public sealed class DataAccessIntent : IJsonOnDeserialized
     [JsonPropertyName("declared_access_types")]
     public IList<string> DeclaredAccessTypes { get; set; } = [];
 
-    // Written even when null (1.7.1): the NA signs the field as null, and a record passed
+    // Written even when null (1.8.0): the NA signs the field as null, and a record passed
     // back without it fails its signature.
     [JsonPropertyName("estimated_volume_bytes")]
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]

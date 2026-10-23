@@ -16,7 +16,7 @@ public static class Auth
     /// case only (v1.3.1): before, <c>{"authorized":false,"Authorized":true}</c> read as authorized,
     /// where every other implementation reads <c>Authorized</c> as a key it does not know.
     /// <para>
-    /// Read-only (1.7.1): setting a property throws <see cref="InvalidOperationException"/>. Before, any code in
+    /// Read-only (1.8.0): setting a property throws <see cref="InvalidOperationException"/>. Before, any code in
     /// the process could turn case-insensitive matching back on and undo the 1.3.1 defence for every client.
     /// To serialize with other settings, copy it: <c>new JsonSerializerOptions(Auth.SerializerOptions)</c>.
     /// </para>

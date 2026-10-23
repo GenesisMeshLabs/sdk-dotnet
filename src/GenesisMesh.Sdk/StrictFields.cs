@@ -52,7 +52,7 @@ public static class StrictFields
     internal static string RegistryJson => Raw.Value;
 
     /// <summary>
-    /// A model's canonical rules. A model the registry does not have is refused (1.7.1): before, a misspelt or
+    /// A model's canonical rules. A model the registry does not have is refused (1.8.0): before, a misspelt or
     /// renamed model name read as a model with nothing to check, which turned the strict checks off.
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="model"/> is not in the registry.</exception>
@@ -103,7 +103,7 @@ public static class StrictFields
     /// free-form fields are not inspected; values of the wrong type are left to validation.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// <paramref name="model"/> is not in the registry (1.7.1; before, it returned no fields).
+    /// <paramref name="model"/> is not in the registry (1.8.0; before, it returned no fields).
     /// </exception>
     public static IReadOnlyList<string> UnknownFields(string model, string recordJson)
     {

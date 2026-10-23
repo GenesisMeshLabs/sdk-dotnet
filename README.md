@@ -2,14 +2,14 @@
 
 .NET SDK for the Genesis Mesh Network Authority HTTP API.
 
-**Targets: .NET 8 (`net8.0`); from 1.7.1 also .NET 10 (`net10.0`). One dependency: [`NSec.Cryptography`](https://nsec.rocks/) for Ed25519.**
+**Targets: .NET 8 (`net8.0`); from 1.8.0 also .NET 10 (`net10.0`). One dependency: [`NSec.Cryptography`](https://nsec.rocks/) for Ed25519.**
 
 [![NuGet](https://img.shields.io/nuget/v/genesismesh-sdk-dotnet)](https://www.nuget.org/packages/genesismesh-sdk-dotnet)
 [![CI](https://github.com/GenesisMeshLabs/sdk-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/GenesisMeshLabs/sdk-dotnet/actions/workflows/ci.yml)
 
 ## Scope
 
-This SDK (1.7) covers the Network Authority's trust API: the sub-clients
+This SDK (1.8) covers the Network Authority's trust API: the sub-clients
 below (agreements, boundary decisions, trust evidence, attestations,
 selective disclosure, consensus and data usage), offline verification of
 their signed records, and signed admin calls to any other route. It has no
@@ -239,7 +239,7 @@ await client.Attestation.SavePolicy(new Dictionary<string, object?>
 });
 ```
 
-From 1.7.1, `Revoke` refuses an ID that is not one path segment (empty, `.`,
+From 1.8.0, `Revoke` refuses an ID that is not one path segment (empty, `.`,
 `..`, or containing `/`, `\`, `?`, `#`, `%` or a control character) before
 anything is signed or sent: it throws `ArgumentException`.
 
@@ -476,7 +476,7 @@ using var resp = await http.SendAsync(req);   // 201 with the signed treaty
 
 ## Error handling
 
-The exception types for 403, 409, 413 and other 4xx statuses are from 1.7.1.
+The exception types for 403, 409, 413 and other 4xx statuses are from 1.8.0.
 In 1.7.0 and earlier, 403, 409, 413 and any other status without its own
 type are `ServerException`.
 

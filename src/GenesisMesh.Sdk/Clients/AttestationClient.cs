@@ -24,7 +24,7 @@ public sealed class AttestationClient
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="attestationId"/> is null.</exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="attestationId"/> is not one path segment (1.7.1): empty, "." or "..", or holding '/', '\',
+    /// <paramref name="attestationId"/> is not one path segment (1.8.0): empty, "." or "..", or holding '/', '\',
     /// '?', '#', '%' or a control character. Nothing is signed or sent.
     /// </exception>
     public Task Revoke(string attestationId, IDictionary<string, object?> body, CancellationToken ct = default) =>

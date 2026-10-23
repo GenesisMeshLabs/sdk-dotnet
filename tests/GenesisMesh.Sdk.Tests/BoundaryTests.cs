@@ -97,7 +97,7 @@ public class BoundaryTests
     [Fact]
     public void SerializerOptions_AreReadOnlyBeforeAnyUse()
     {
-        // 1.7.1: System.Text.Json also locks options on their first use, so in this process (where other
+        // 1.8.0: System.Text.Json also locks options on their first use, so in this process (where other
         // tests may already have serialized with them) IsReadOnly would hold without the fix. A fresh copy
         // of the SDK assembly, in its own load context, has static state no serialization has touched:
         // its options must be read-only from the start, before code in the process can change them.
@@ -122,7 +122,7 @@ public class BoundaryTests
     [Fact]
     public async Task SerializerOptions_CannotBeChangedToFoldCaseAgain()
     {
-        // 1.7.1: the options were public and mutable, so any code in the process could turn
+        // 1.8.0: the options were public and mutable, so any code in the process could turn
         // case-insensitive matching back on, and this response then verified as accepted.
         // (Order-independent proof of the eager freeze: SerializerOptions_AreReadOnlyBeforeAnyUse.)
         var options = Auth.SerializerOptions;
