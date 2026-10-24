@@ -19,6 +19,13 @@ public sealed record NAKey(
         !(ValidFrom is { } start && at < start)
         && !(SucceededAt is { } succeeded && at >= succeeded + NAKeyHistory.SuccessionHandover)
         && !(ValidToEnforced && ValidTo is { } end && at >= end);
+
+    /// <summary>
+    /// The key's end (1.8.0): the earlier of its succession and its enforced <c>ValidTo</c>; null for a key with
+    /// neither.
+    /// </summary>
+    public DateTimeOffset? End =>
+        new[] { SucceededAt, ValidToEnforced ? ValidTo : null }.OfType<DateTimeOffset>().Cast<DateTimeOffset?>().Min();
 }
 
 /// <summary>
@@ -39,6 +46,13 @@ public sealed class NAKeyHistory
     /// succeeded key cannot mint a long-lived decision dated inside its window.
     /// </summary>
     public static readonly TimeSpan MaxDecisionLifetime = TimeSpan.FromSeconds(300);
+
+    /// <summary>
+    /// The vouching horizon's grace (1.8.0): how long past its end and the hand-over a record of a key that has
+    /// ended still vouches for the present. Also the most a verifier allows: <see cref="WithVouchingGrace"/> only
+    /// shortens it.
+    /// </summary>
+    public static readonly TimeSpan SuccessionVouchingGrace = TimeSpan.FromHours(24);
 
     /// <summary>
     /// The field giving the time an NA-signed record read alone is placed at in the key history (from v1.6.0 also a
@@ -66,15 +80,59 @@ public sealed class NAKeyHistory
     };
 
     public NAKeyHistory(string sovereignId, string? rootPublicKey, IReadOnlyList<NAKey> keys)
+        : this(sovereignId, rootPublicKey, keys, SuccessionVouchingGrace)
     {
+    }
+
+    /// <summary>A history with the vouching horizon's grace <paramref name="vouchingGrace"/> (1.8.0, 0 to 24 hours).</summary>
+    public NAKeyHistory(string sovereignId, string? rootPublicKey, IReadOnlyList<NAKey> keys, TimeSpan vouchingGrace)
+    {
+        var grace = vouchingGrace;
+        if (grace < TimeSpan.Zero || grace > SuccessionVouchingGrace)
+            throw new ArgumentOutOfRangeException(nameof(vouchingGrace), "the vouching grace must be 0 to 24 hours");
         SovereignId = sovereignId;
         RootPublicKey = rootPublicKey;
         Keys = keys;
+        VouchingGrace = grace;
     }
 
     public string SovereignId { get; }
     public string? RootPublicKey { get; }
     public IReadOnlyList<NAKey> Keys { get; }
+
+    /// <summary>The vouching horizon's grace of this history (1.8.0): 0 to <see cref="SuccessionVouchingGrace"/>.</summary>
+    public TimeSpan VouchingGrace { get; }
+
+    /// <summary>
+    /// This history with a shorter grace (1.8.0): a negative grace is 0, and one longer than the current grace keeps
+    /// it. Use it for the NA's unsigned <c>vouching_grace_seconds</c>, which may only shorten the grace.
+    /// </summary>
+    public NAKeyHistory WithVouchingGrace(TimeSpan grace)
+    {
+        if (grace < TimeSpan.Zero) grace = TimeSpan.Zero;
+        if (grace > VouchingGrace) grace = VouchingGrace;
+        return new NAKeyHistory(SovereignId, RootPublicKey, Keys, grace);
+    }
+
+    /// <summary>
+    /// Until when a record signed by <paramref name="publicKey"/> vouches for the present (1.8.0): its key's end, the
+    /// hand-over and the grace. Null for a key with no end, or not in this history.
+    /// </summary>
+    public DateTimeOffset? VouchesUntil(string publicKey) =>
+        Keys.FirstOrDefault(k => k.PublicKey == publicKey)?.End is { } end ? end + SuccessionHandover + VouchingGrace : null;
+
+    /// <summary>
+    /// True when a record signed by <paramref name="publicKey"/> no longer vouches for the present at
+    /// <paramref name="now"/> (1.8.0): its key ended more than the hand-over and the grace ago.
+    /// </summary>
+    public bool RecordOutlivesKey(string publicKey, DateTimeOffset now) => VouchesUntil(publicKey) is { } until && now >= until;
+
+    /// <summary>
+    /// The public keys a record dated <paramref name="at"/> may be signed with and that still vouch at
+    /// <paramref name="now"/> (1.8.0): <see cref="KeysAt"/> without the keys whose horizon has passed.
+    /// </summary>
+    public IReadOnlyList<string> KeysVouchingAt(DateTimeOffset at, DateTimeOffset now) =>
+        KeysAt(at).Where(k => !RecordOutlivesKey(k, now)).ToList();
 
     /// <summary>
     /// Keys valid at every time: what a list of NA keys meant before 1.5.0 (for a party whose history the
@@ -96,9 +154,7 @@ public sealed class NAKeyHistory
     internal bool DecisionOutlivesKey(string publicKey, DateTimeOffset validUntil)
     {
         var key = Keys.FirstOrDefault(k => k.PublicKey == publicKey);
-        if (key is null) return false;
-        var ends = new[] { key.SucceededAt, key.ValidToEnforced ? key.ValidTo : null }.OfType<DateTimeOffset>().ToList();
-        return ends.Count > 0 && validUntil > ends.Min() + SuccessionHandover + MaxDecisionLifetime;
+        return key?.End is { } end && validUntil > end + SuccessionHandover + MaxDecisionLifetime;
     }
 }
 
@@ -147,7 +203,8 @@ public static partial class OfflineVerifier
     /// <summary>
     /// Verify the genesis block and successions of a <c>GET /na/key-history</c> response body
     /// (<see cref="VerifyKeyHistory(string, string?, string)"/>). The response's own keys and root key are not
-    /// trusted: the history is rebuilt from <paramref name="rootPublicKey"/>.
+    /// trusted: the history is rebuilt from <paramref name="rootPublicKey"/>. From 1.8.0 the response's
+    /// <c>vouching_grace_seconds</c>, which is unsigned, is taken only to shorten the grace.
     /// </summary>
     public static KeyHistoryVerificationResult VerifyKeyHistoryResponse(string responseJson, string rootPublicKey)
     {
@@ -158,7 +215,11 @@ public static partial class OfflineVerifier
         if (body.ValueKind != JsonValueKind.Object) throw new FormatException("the key history must be a JSON object");
         body.TryGetProperty("genesis", out var genesis);
         body.TryGetProperty("successions", out var successions);
-        return BuildKeyHistory(genesis, successions.ValueKind == JsonValueKind.Undefined ? null : successions, rootPublicKey);
+        var result = BuildKeyHistory(genesis, successions.ValueKind == JsonValueKind.Undefined ? null : successions, rootPublicKey);
+        if (result.History is { } history && body.TryGetProperty("vouching_grace_seconds", out var hint)
+            && hint.ValueKind == JsonValueKind.Number && hint.TryGetDouble(out var seconds) && seconds >= 0)
+            result = result with { History = history.WithVouchingGrace(TimeSpan.FromSeconds(Math.Min(seconds, 86_400))) };
+        return result;
     }
 
     private static KeyHistoryVerificationResult BuildKeyHistory(JsonElement block, JsonElement? successions, string root)

@@ -28,6 +28,7 @@ public partial class ArchitectureTests
         ("OfflineVerifier.cs", "verify"),
         ("KeyHistory.cs", "verify"),
         ("Grants.cs", "verify"),
+        ("Vouching.cs", "verify"),
         ("Models.cs", "models"),
         ("Errors.cs", "errors"),
         ("Auth.cs", "auth"),

@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace GenesisMesh;
 
 /// <summary>
-/// Outcome of <see cref="OfflineVerifier.VerifyCapabilityGrant"/>. <c>Valid</c> means the grant is the NA's
+/// Outcome of <see cref="OfflineVerifier.VerifyCapabilityGrant(string, NAKeyHistory)"/>. <c>Valid</c> means the grant is the NA's
 /// (<c>Reason</c> <c>accepted</c>); otherwise <c>Reason</c> names why not.
 /// </summary>
 public sealed record GrantVerificationResult(bool Valid, string Reason, string? GrantId);
@@ -23,7 +23,18 @@ public static partial class OfflineVerifier
     /// valid at the grant's <c>issued_at</c>). The grant's limits (validity, budget, envelope) and its revocation are
     /// not checked here: they are the NA's and the holder's.
     /// </summary>
-    public static GrantVerificationResult VerifyCapabilityGrant(string grantJson, NAKeyHistory keyHistory)
+    public static GrantVerificationResult VerifyCapabilityGrant(string grantJson, NAKeyHistory keyHistory) =>
+        VerifyCapabilityGrant(grantJson, keyHistory, null);
+
+    /// <summary>
+    /// 1.8.0: <see cref="VerifyCapabilityGrant(string, NAKeyHistory)"/> judged for the present: after its checks, a
+    /// grant whose signing key has passed its vouching horizon at <paramref name="now"/> is refused as
+    /// <c>outlives_key</c> (<see cref="NAKeyHistory.RecordOutlivesKey"/>).
+    /// </summary>
+    public static GrantVerificationResult VerifyCapabilityGrant(string grantJson, NAKeyHistory keyHistory, DateTimeOffset now) =>
+        VerifyCapabilityGrant(grantJson, keyHistory, (DateTimeOffset?)now);
+
+    private static GrantVerificationResult VerifyCapabilityGrant(string grantJson, NAKeyHistory keyHistory, DateTimeOffset? now)
     {
         ArgumentNullException.ThrowIfNull(keyHistory);
         const string model = "CapabilityGrant";
@@ -38,6 +49,8 @@ public static partial class OfflineVerifier
         if (StrictFields.NonCanonicalFields(model, g).Count > 0) return Result("non_canonical_form");
         var issuedAt = ParseTimestamp(Str(g, NAKeyHistory.RecordTimeFields[model]) ?? "");
         if (!SignedAsReceived(model, g, keyHistory.KeysAt(issuedAt))) return Result("na_key_not_valid_at_time");
+        if (now is { } judged && !SignedAsReceived(model, g, keyHistory.KeysVouchingAt(issuedAt, judged)))
+            return Result("outlives_key");
         return Result("accepted");
     }
 }
