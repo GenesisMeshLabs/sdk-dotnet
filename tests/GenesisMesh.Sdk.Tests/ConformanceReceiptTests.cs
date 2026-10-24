@@ -24,6 +24,7 @@ public class ConformanceReceiptTests
         ["field_registry"] = ["unknown_fields", "verify_decision", "verify_agreement"],
         ["audit"] = ["canonical_form", "key_history", "key_at", "decision_at_record_time", "record_time"],
         ["grants"] = ["canonical_form", "verify_record"],
+        ["vouching"] = null,
     };
 
     private static ConformanceReceipt[] Receipts() =>
@@ -35,6 +36,7 @@ public class ConformanceReceiptTests
         ConformanceTests.Receipt(),
         KeyHistoryTests.Receipt(),
         GrantsTests.Receipt(),
+        VouchingTests.Receipt(),
     ];
 
     private static int Get(JsonElement counts, string kind) =>

@@ -416,6 +416,31 @@ key's, the new key's (proof that it is held) and the outgoing key's. The SDK run
 history vectors of the shared `audit` suite
 (`tests/GenesisMesh.Sdk.Tests/testdata/conformance/audit.json`).
 
+#### The vouching horizon (1.8.0)
+
+Judged at its own time, a record names the key that signed it. But whoever
+kept a succeeded key could still sign a record dated inside that key's
+window. So, judged **for the present**, a record of a key that has ended
+vouches only until that key's horizon: its end, the 300-second hand-over and
+a grace of at most 24 hours (`NAKeyHistory.SuccessionVouchingGrace`). The NA
+re-issues what is still valid under the new key.
+
+```csharp
+h.History!.RecordOutlivesKey(publicKey, DateTimeOffset.UtcNow);  // past its horizon?
+h.History!.KeysVouchingAt(issuedAt, DateTimeOffset.UtcNow);      // KeysAt without the keys past their horizon
+var reason = OfflineVerifier.NARecordRefusal("MembershipAttestation", recordJson, h.History!, DateTimeOffset.UtcNow);
+// null when it vouches; otherwise "outlives_key", "record_malformed", "na_key_not_valid_at_time",
+// "invalid_signature", "unknown_field" or "non_canonical_form".
+```
+
+`VerifyKeyHistoryResponse` takes the NA's `vouching_grace_seconds` only to
+shorten the grace; `WithVouchingGrace` does the same for a history you hold.
+`NARecordRefusal` covers attestations, treaties, revocation feeds and grants,
+and passes the shared `vouching` suite
+(`tests/GenesisMesh.Sdk.Tests/testdata/conformance/vouching.json`). Upgrade
+the NA to 1.8.0 first and let it re-issue (`reissue_pending: false` on its
+`/readyz`) before judging records for the present.
+
 ### Pre-issued grants
 
 From 1.6.0 the NA can issue a `CapabilityGrant` before the bearer acts, so
@@ -429,6 +454,8 @@ every signed field known and in canonical form.
 var g = OfflineVerifier.VerifyCapabilityGrant(grantJson, h.History!); // or NAKeyHistory.ValidAlways(new[] { naKey })
 // g.Valid; otherwise g.Reason: "missing_signature", "invalid_signature", "unknown_field",
 // "non_canonical_form" or "na_key_not_valid_at_time".
+g = OfflineVerifier.VerifyCapabilityGrant(grantJson, h.History!, DateTimeOffset.UtcNow);
+// 1.8.0: also "outlives_key" once the grant's key has passed its vouching horizon.
 ```
 
 It does not check the grant's validity, budget, parameter envelope or
