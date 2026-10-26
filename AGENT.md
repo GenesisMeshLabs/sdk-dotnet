@@ -167,9 +167,11 @@ Every version shipped must:
 3. Be committed, tagged `vX.Y.Z`, and pushed (the core's `vX.Y.Z` tag first).
 4. The `publish.yml` GitHub Actions workflow triggers automatically on the tag,
    tests, packs and pushes to NuGet.org.
-5. Once the package is on NuGet.org, set `<PackageValidationBaselineVersion>`
-   in `src/GenesisMesh.Sdk/GenesisMesh.Sdk.csproj` to the new version and
-   delete `src/GenesisMesh.Sdk/CompatibilitySuppressions.xml` if it exists.
+5. Once the package is on NuGet.org, Renovate opens an "Update Genesis Mesh"
+   pull request that sets `<PackageValidationBaselineVersion>` in
+   `src/GenesisMesh.Sdk/GenesisMesh.Sdk.csproj` to the new version
+   (`renovate.json`); delete `src/GenesisMesh.Sdk/CompatibilitySuppressions.xml`
+   in that pull request if it exists, and merge it.
    Until then the `API compatibility` check warns on pull requests and
    fails on main, and package validation compares with the older release.
 

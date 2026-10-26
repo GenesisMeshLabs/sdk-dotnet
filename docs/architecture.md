@@ -152,10 +152,11 @@ changed public member (`CP0001`, `CP0002`, ...). To make the break on purpose:
 
 `VERSION` and `<Version>` in the csproj must match (`scripts/check-version.ps1`,
 run by CI); the `release/<version>` pull request folds the fragments
-(`python scripts/changelog.py release`). After the package is on NuGet, set
-`<PackageValidationBaselineVersion>` to it and delete
-`CompatibilitySuppressions.xml`; until then the `API compatibility` check
-warns on pull requests and fails on main.
+(`python scripts/changelog.py release`). Once the package is on NuGet,
+Renovate opens an "Update Genesis Mesh" pull request that sets
+`<PackageValidationBaselineVersion>` to it (`renovate.json`); delete
+`CompatibilitySuppressions.xml` in that pull request if it exists. Until it
+merges, the `API compatibility` check warns on pull requests and fails on main.
 
 ## Other checks
 
