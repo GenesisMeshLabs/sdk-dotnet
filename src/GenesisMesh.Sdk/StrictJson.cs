@@ -18,6 +18,9 @@ public sealed class StrictJsonException : JsonException
     /// <summary>Why the input was refused, as every implementation names it.</summary>
     public string Reason { get; }
 
+    /// <summary>Input refused for <paramref name="reason"/>.</summary>
+    /// <param name="reason">The reason code, one of those listed on the class.</param>
+    /// <param name="detail">What in the input was refused, for the message.</param>
     public StrictJsonException(string reason, string detail) : base($"JSON refused ({reason}): {detail}")
     {
         Reason = reason;

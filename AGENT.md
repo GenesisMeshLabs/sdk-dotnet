@@ -148,7 +148,9 @@ Every public method must have:
 - No `Console.WriteLine` in `src/GenesisMesh.Sdk/` source. Return exceptions, never log.
 - Do not add comments explaining what the code does. Only add comments for
   non-obvious invariants.
-- All exported symbols must have XML doc comments.
+- All exported symbols must have XML doc comments: a summary that says what the
+  member means on the wire or to the caller, not what its name already says. The
+  build fails on a missing one (CS1591 is not suppressed, and warnings are errors).
 
 ---
 
