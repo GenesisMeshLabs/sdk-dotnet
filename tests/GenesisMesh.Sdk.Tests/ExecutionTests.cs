@@ -33,10 +33,10 @@ public class ExecutionTests
     {
         Decision = Decision(),
         ExecutedCapability = "partner-secret.rotate",
-        Outcome = ExecutionOutcome.Success,
+        Outcome = ExecutionOutcomes.Success,
         ExecutionParameters = new Dictionary<string, object?> { ["app_id"] = "app-1", ["lifetime_days"] = 90, ["ratio"] = 0.5, ["note"] = "café" },
         ResourceId = "partner:app-1/secret",
-        ResourceAction = ResourceAction.Rotate,
+        ResourceAction = ResourceActions.Rotate,
         ExecutedAt = new DateTimeOffset(2026, 10, 30, 12, 0, 0, TimeSpan.Zero).AddTicks(1_234_560),
         EvidenceId = "00000000-0000-4000-8000-000000000001",
     });
@@ -67,11 +67,11 @@ public class ExecutionTests
         {
             Decision = Decision(),
             ExecutedCapability = "partner-secret.rotate",
-            Outcome = ExecutionOutcome.Partial,
+            Outcome = ExecutionOutcomes.Partial,
             OutcomeDetail = "old credential kept for overlap",
             PriorRecord = first,
             ResourceId = "partner:app-1/secret",
-            ResourceAction = ResourceAction.Rotate,
+            ResourceAction = ResourceActions.Rotate,
             PriorResource = ExecutionRecorder.HeadOf(first),
             ExecutedAt = new DateTimeOffset(2026, 10, 30, 12, 0, 1, TimeSpan.Zero),
             EvidenceId = "00000000-0000-4000-8000-000000000002",
@@ -89,7 +89,7 @@ public class ExecutionTests
         {
             Decision = Decision("dec-2", "ctx-2"),
             ExecutedCapability = "partner-secret.create",
-            Outcome = ExecutionOutcome.Failure,
+            Outcome = ExecutionOutcomes.Failure,
             OutcomeDetail = "graph_unavailable",
             ExecutionParameters = new Dictionary<string, object?> { ["app_id"] = "app-2" },
             ExecutedAt = new DateTimeOffset(2026, 10, 30, 12, 0, 2, 500, TimeSpan.Zero),
@@ -103,7 +103,8 @@ public class ExecutionTests
         Assert.True(sent.ContainsKey("prev_evidence_digest") && sent["prev_evidence_digest"] is null);
         using var doc = JsonDocument.Parse(Json(plain));
         Assert.Equal(PlainCanonical, Canonical.Of(doc.RootElement, ["signature"]));
-        Assert.Equal(0, ExecutionRecorder.HeadOf(plain).ResourceSequence);
+        // A record without a resource is no resource's head: a record linked to it would be refused.
+        Assert.Throws<ArgumentException>(() => ExecutionRecorder.HeadOf(plain));
     }
 
     [Fact]
@@ -126,7 +127,7 @@ public class ExecutionTests
         {
             Decision = Decision(madeAt: madeAt),
             ExecutedCapability = "partner-secret.create",
-            Outcome = ExecutionOutcome.Success,
+            Outcome = ExecutionOutcomes.Success,
         });
         Assert.Equal(madeAt, record.ExecutedAt);
         Assert.True(Guid.TryParse(record.EvidenceId, out _));
@@ -137,7 +138,7 @@ public class ExecutionTests
         {
             Decision = Decision(madeAt: "2026-01-01T00:00:00Z"),
             ExecutedCapability = "partner-secret.create",
-            Outcome = ExecutionOutcome.Success,
+            Outcome = ExecutionOutcomes.Success,
         });
         Assert.InRange(OfflineVerifier.ParseTimestamp(now.ExecutedAt), before, DateTimeOffset.UtcNow);
         Assert.True(StrictFields.CanonicalTimestamp(now.ExecutedAt));
@@ -146,7 +147,7 @@ public class ExecutionTests
         {
             Decision = Decision(madeAt: "not a time"),
             ExecutedCapability = "partner-secret.create",
-            Outcome = ExecutionOutcome.Success,
+            Outcome = ExecutionOutcomes.Success,
         });
         Assert.InRange(OfflineVerifier.ParseTimestamp(unparsed.ExecutedAt), before, DateTimeOffset.UtcNow);
     }
@@ -162,7 +163,7 @@ public class ExecutionTests
         {
             Decision = Decision(),
             ExecutedCapability = "partner-secret.rotate",
-            Outcome = ExecutionOutcome.Success,
+            Outcome = ExecutionOutcomes.Success,
             ExecutionParameters = parameters,
             OutcomeDetail = detail,
         };
@@ -184,7 +185,7 @@ public class ExecutionTests
         {
             Decision = Decision(),
             ExecutedCapability = "partner-secret.rotate",
-            Outcome = ExecutionOutcome.Success,
+            Outcome = ExecutionOutcomes.Success,
             ExecutionParameters = new Dictionary<string, object?> { ["setting"] = value },
         };
         var nan = await Assert.ThrowsAsync<StrictJsonException>(() => Recorder(signer).Record(With(double.NaN)));
@@ -196,19 +197,38 @@ public class ExecutionTests
     }
 
     [Fact]
-    public async Task Record_WritesALoneSurrogateAsTheReplacementCharacter()
+    public async Task Record_RefusesALoneSurrogate_AsTheTypeScriptSdkDoes()
     {
-        // System.Text.Json writes an unpaired surrogate as U+FFFD, as in every body this SDK sends: the record holds
-        // valid JSON and is signed over what is sent.
-        var record = await Recorder().Record(new RecordExecutionRequest
+        // The serializer would read an unpaired surrogate back as U+FFFD and sign another value than the caller's.
+        var signer = new CountingSigner();
+        RecordExecutionRequest With(string parameter = "ok", string? detail = null, string? resourceId = null) => new()
         {
             Decision = Decision(),
             ExecutedCapability = "partner-secret.rotate",
-            Outcome = ExecutionOutcome.Success,
-            ExecutionParameters = new Dictionary<string, object?> { ["setting"] = "\ud800" },
-        });
-        Assert.Equal("�", record.ExecutionParameters.GetProperty("setting").GetString());
-        Assert.True(OfflineVerifier.VerifyExecutionSignature(Json(record), ExecutorPublicKey));
+            Outcome = ExecutionOutcomes.Success,
+            ExecutionParameters = new Dictionary<string, object?> { ["setting"] = parameter },
+            OutcomeDetail = detail,
+            ResourceId = resourceId,
+            ResourceAction = resourceId is null ? null : ResourceActions.Rotate,
+        };
+        foreach (var request in new[] { With("\ud800"), With(detail: "a\udc00"), With(resourceId: "partner:\ud800") })
+        {
+            var refused = await Assert.ThrowsAsync<StrictJsonException>(() => Recorder(signer).Record(request));
+            Assert.Equal("lone_surrogate", refused.Reason);
+        }
+        var key = await Assert.ThrowsAsync<StrictJsonException>(() => Recorder(signer).Record(new RecordExecutionRequest
+        {
+            Decision = Decision(),
+            ExecutedCapability = "partner-secret.rotate",
+            Outcome = ExecutionOutcomes.Success,
+            ExecutionParameters = new Dictionary<string, object?> { ["key\ud800"] = 1 },
+        }));
+        Assert.Equal("lone_surrogate", key.Reason);
+        Assert.Equal(0, signer.Calls);
+        // A surrogate pair is a character like any other.
+        var pair = await Recorder().Record(With("😀"));
+        Assert.Equal("😀", pair.ExecutionParameters.GetProperty("setting").GetString());
+        Assert.True(OfflineVerifier.VerifyExecutionSignature(Json(pair), ExecutorPublicKey));
     }
 
     [Fact]
@@ -219,18 +239,18 @@ public class ExecutionTests
         await Assert.ThrowsAsync<ArgumentException>(() => recorder.Record(new RecordExecutionRequest
         {
             ExecutedCapability = "partner-secret.rotate",
-            Outcome = ExecutionOutcome.Success,
+            Outcome = ExecutionOutcomes.Success,
         }));
         await Assert.ThrowsAsync<ArgumentException>(() => recorder.Record(new RecordExecutionRequest
         {
             Decision = Decision(),
-            Outcome = ExecutionOutcome.Success,
+            Outcome = ExecutionOutcomes.Success,
         }));
         var alone = await Assert.ThrowsAsync<ArgumentException>(() => recorder.Record(new RecordExecutionRequest
         {
             Decision = Decision(),
             ExecutedCapability = "partner-secret.rotate",
-            Outcome = ExecutionOutcome.Success,
+            Outcome = ExecutionOutcomes.Success,
             ResourceId = "partner:app-1/secret",
         }));
         Assert.Contains("go together", alone.Message);
@@ -248,7 +268,7 @@ public class ExecutionTests
         {
             Decision = Decision(),
             ExecutedCapability = "partner-secret.rotate",
-            Outcome = ExecutionOutcome.Success,
+            Outcome = ExecutionOutcomes.Success,
         }));
         Assert.Equal("executor-key-1", Recorder().KeyId);
         Assert.Equal("executor-a", Recorder().ExecutorSovereignId);

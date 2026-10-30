@@ -105,13 +105,17 @@ internal sealed class Transport : IDisposable
 
     /// <summary>
     /// A resource ID as the tail of a request path (1.9.0): the NA serves such routes with the whole remaining path,
-    /// so the ID's <c>/</c> separate segments, and each segment must pass <see cref="PathSegment"/>.
+    /// so the ID's <c>/</c> separate segments, and each segment must pass <see cref="PathSegment"/>. An ID that starts
+    /// or ends with white space is refused too: the URI drops white space at the end of the path, so the request would
+    /// sign one path and send another.
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="resourceId"/> is null.</exception>
-    /// <exception cref="ArgumentException">A segment of <paramref name="resourceId"/> is not one path segment.</exception>
+    /// <exception cref="ArgumentException"><paramref name="resourceId"/> cannot be sent as a path.</exception>
     internal static string ResourcePath(string resourceId, string paramName)
     {
         ArgumentNullException.ThrowIfNull(resourceId, paramName);
+        if (resourceId.Length > 0 && (char.IsWhiteSpace(resourceId[0]) || char.IsWhiteSpace(resourceId[^1])))
+            throw new ArgumentException($"genesismesh: {paramName} must not start or end with white space", paramName);
         return string.Join('/', resourceId.Split('/').Select(segment => PathSegment(segment, paramName)));
     }
 

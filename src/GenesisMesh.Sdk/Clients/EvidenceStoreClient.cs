@@ -19,18 +19,27 @@ public sealed class EvidenceStoreClient
     /// operator headers. An identical resubmission returns <c>duplicate</c>, so it is safe to retry.
     /// POST /evidence/execution
     /// </summary>
+    /// <remarks>
+    /// The NA keeps an authentic record it refuses as a quarantine entry: the action it describes happened. Build a new
+    /// record rather than resubmitting a refused one.
+    /// </remarks>
     /// <exception cref="SecretMaterialException">The record carries secret material: nothing is sent.</exception>
+    /// <exception cref="ConflictException">
+    /// <c>evidence_conflict</c>: the record's position is taken. Most often another record was stored on the resource
+    /// after its head was read; read the head again (<see cref="ResourceHead"/>) and record anew.
+    /// </exception>
     /// <exception cref="ValidationException">
     /// The NA refused the record, with its code: for example <c>evidence_out_of_scope</c> for a key limited to other
-    /// resources, <c>evidence_decision_denied</c>, or <c>resource_chain_mismatch</c> when the resource's chain moved on.
+    /// resources, <c>evidence_decision_denied</c>, <c>resource_chain_mismatch</c> for a link to another record than the
+    /// resource's head, or <c>resource_chain_gap</c> for a position past it.
     /// </exception>
-    public Task<EvidenceSubmission> Submit(ExecutionEvidence evidence, CancellationToken ct = default)
+    public async Task<EvidenceSubmission> Submit(ExecutionEvidence evidence, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(evidence);
         if (EvidenceMetadata.CheckMetadataOnly(evidence.ExecutionParameters, evidence.OutcomeDetail) is { } reason)
             throw new SecretMaterialException(reason);
-        return _t.PublicPostAsync<EvidenceSubmission>("/evidence/execution",
-            new Dictionary<string, object?> { ["evidence"] = evidence }, idempotent: true, ct);
+        return await _t.PublicPostAsync<EvidenceSubmission>("/evidence/execution",
+            new Dictionary<string, object?> { ["evidence"] = evidence }, idempotent: true, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -64,17 +73,23 @@ public sealed class EvidenceStoreClient
     /// GET /admin/evidence/resource-heads/&lt;resource_id&gt;
     /// </summary>
     /// <exception cref="NotFoundException">The resource has no history (<c>resource_not_found</c>).</exception>
-    /// <exception cref="ArgumentException">A segment of <paramref name="resourceId"/> is not a path segment.</exception>
-    public Task<StoredResourceHead> StoredResourceHead(string resourceId, CancellationToken ct = default) =>
-        _t.AdminGetAsync<StoredResourceHead>(
-            "/admin/evidence/resource-heads/" + Transport.ResourcePath(resourceId, nameof(resourceId)), null, ct);
+    /// <exception cref="ArgumentException">
+    /// <paramref name="resourceId"/> cannot be sent as a path (see <see cref="ResourceHead"/>): nothing is sent.
+    /// </exception>
+    public async Task<StoredResourceHead> StoredResourceHead(string resourceId, CancellationToken ct = default) =>
+        await _t.AdminGetAsync<StoredResourceHead>(
+            "/admin/evidence/resource-heads/" + Transport.ResourcePath(resourceId, nameof(resourceId)), null, ct)
+            .ConfigureAwait(false);
 
     /// <summary>
     /// Where the next record of a resource must link (<see cref="RecordExecutionRequest.PriorResource"/>), or null for
-    /// a resource with no history. Submission still checks the chain: a head read before another controller's record
-    /// is refused as <c>resource_chain_mismatch</c>.
+    /// a resource with no history. Submission still checks the chain: a record built on a head read before another
+    /// record was stored on the resource is refused as <c>evidence_conflict</c> (<see cref="ConflictException"/>).
     /// </summary>
-    /// <exception cref="ArgumentException">A segment of <paramref name="resourceId"/> is not a path segment.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="resourceId"/> cannot be sent as a path: it is empty, has an empty or dot segment, holds '%', '?',
+    /// '#', '\' or a control character, or starts or ends with white space. Nothing is sent.
+    /// </exception>
     public async Task<ResourceHead?> ResourceHead(string resourceId, CancellationToken ct = default)
     {
         try
@@ -125,7 +140,7 @@ public sealed class EvidenceStoreClient
                 if (execution && state is not null && state.ResourceSequence >= sequence) continue;
                 var action = Text(record, "resource_action");
                 var outcome = Text(record, "outcome") ?? "";
-                var success = outcome == ExecutionOutcome.Success;
+                var success = outcome == ExecutionOutcomes.Success;
                 state = new ResourceState
                 {
                     ResourceId = resourceId,
@@ -153,10 +168,10 @@ public sealed class EvidenceStoreClient
     /// POST /admin/evidence/executor-keys
     /// </summary>
     /// <exception cref="ConflictException">The key ID is already registered (<c>executor_key_exists</c>).</exception>
-    public Task<ExecutorKeyState> RegisterExecutorKey(RegisterExecutorKeyRequest request, CancellationToken ct = default)
+    public async Task<ExecutorKeyState> RegisterExecutorKey(RegisterExecutorKeyRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return _t.AdminPostAsync<ExecutorKeyState>("/admin/evidence/executor-keys", request, ct);
+        return await _t.AdminPostAsync<ExecutorKeyState>("/admin/evidence/executor-keys", request, ct).ConfigureAwait(false);
     }
 
     private static Dictionary<string, string> Query(EvidenceSearchParams? search, long? afterSequence)

@@ -268,13 +268,13 @@ public class LiveContractTests
             {
                 Decision = decision,
                 ExecutedCapability = "contract.read",
-                Outcome = ExecutionOutcome.Success,
+                Outcome = ExecutionOutcomes.Success,
                 ExecutionParameters = new Dictionary<string, object?> { ["app_id"] = "app-1", ["lifetime_days"] = 30 },
                 ResourceId = resourceId,
                 ResourceAction = action,
                 PriorResource = head,
             };
-            var created = await executor.Record(Execution(allowed.Decision, resource, ResourceAction.Create, null));
+            var created = await executor.Record(Execution(allowed.Decision, resource, ResourceActions.Create, null));
             var submission = await gm.EvidenceStore.Submit(created);
             Check("evidence_submit", submission);
             Assert.Equal("recorded", submission.Status);
@@ -285,23 +285,29 @@ public class LiveContractTests
                 (storedHead.ResourceSequence, storedHead.RecordDigest, storedHead.EntryKind, storedHead.RecordId));
 
             var rotateDecision = (await gm.Boundary.Evaluate(Evaluation(60))).Decision;
-            var rotated = await executor.Record(Execution(rotateDecision, resource, ResourceAction.Rotate,
+            var rotated = await executor.Record(Execution(rotateDecision, resource, ResourceActions.Rotate,
                 await gm.EvidenceStore.ResourceHead(resource)));
             Assert.Equal("recorded", (await gm.EvidenceStore.Submit(rotated)).Status);
             Assert.Equal(2, rotated.ResourceSequence);
 
+            // A record built on a head read before the rotation was stored: its position is taken (409).
+            var staleDecision = (await gm.Boundary.Evaluate(Evaluation(45))).Decision;
+            var stale = await Assert.ThrowsAsync<ConflictException>(async () => await gm.EvidenceStore.Submit(
+                await executor.Record(Execution(staleDecision, resource, ResourceActions.Rotate, ExecutionRecorder.HeadOf(created)))));
+            Assert.Equal("evidence_conflict", stale.Code);
+
             // Refused by the NA: a resource outside the key's prefix, and a denied decision.
             var outside = await Assert.ThrowsAsync<ValidationException>(async () => await gm.EvidenceStore.Submit(
-                await executor.Record(Execution(allowed.Decision, "other:app-2/secret", ResourceAction.Create, null))));
+                await executor.Record(Execution(allowed.Decision, "other:app-2/secret", ResourceActions.Create, null))));
             Assert.Equal("evidence_out_of_scope", outside.Code);
             var underDenial = await Assert.ThrowsAsync<ValidationException>(async () => await gm.EvidenceStore.Submit(
-                await executor.Record(Execution(denied.Decision, "contract:app-3/secret", ResourceAction.Create, null))));
+                await executor.Record(Execution(denied.Decision, "contract:app-3/secret", ResourceActions.Create, null))));
             Assert.Equal("evidence_decision_denied", underDenial.Code);
             await Assert.ThrowsAsync<SecretMaterialException>(() => executor.Record(new RecordExecutionRequest
             {
                 Decision = allowed.Decision,
                 ExecutedCapability = "contract.read",
-                Outcome = ExecutionOutcome.Success,
+                Outcome = ExecutionOutcomes.Success,
                 ExecutionParameters = new Dictionary<string, object?> { ["client_secret"] = "x" },
             }));
 

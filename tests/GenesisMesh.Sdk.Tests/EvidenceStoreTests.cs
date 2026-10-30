@@ -90,8 +90,11 @@ public class EvidenceStoreTests
         using var gm = Client(sent, _ => Json(201, "{}"));
         var record = Record(Plain);
         record.ExecutionParameters = JsonDocument.Parse("""{"password":"hunter2"}""").RootElement.Clone();
-        await Assert.ThrowsAsync<SecretMaterialException>(() => gm.EvidenceStore.Submit(record));
-        await Assert.ThrowsAsync<ArgumentNullException>(() => gm.EvidenceStore.Submit(null!));
+        // Thrown from the task, as Boundary.Evaluate throws, not from the call.
+        var refused = gm.EvidenceStore.Submit(record);
+        await Assert.ThrowsAsync<SecretMaterialException>(() => refused);
+        var missing = gm.EvidenceStore.Submit(null!);
+        await Assert.ThrowsAsync<ArgumentNullException>(() => missing);
         Assert.Empty(sent);
     }
 
@@ -205,11 +208,16 @@ public class EvidenceStoreTests
     [InlineData("/kv:vault")]
     [InlineData("kv:vault/a?b")]
     [InlineData("kv:vault/50%")]
+    [InlineData("kv:vault/secret ")]
+    [InlineData(" kv:vault/secret")]
+    [InlineData("kv:vault/secret\t")]
     public async Task ResourceHead_RefusesAnIdThatIsNotPathSegments(string resourceId)
     {
         var sent = new List<Sent>();
         using var gm = Client(sent, _ => Json(200, "{}"));
         await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.ResourceHead(resourceId));
+        var stored = gm.EvidenceStore.StoredResourceHead(resourceId);
+        await Assert.ThrowsAsync<ArgumentException>(() => stored);
         Assert.Empty(sent);
     }
 
@@ -239,6 +247,36 @@ public class EvidenceStoreTests
         Assert.Equal((0L, "", "", "failure", null, "bg-2"),
             (app9.ResourceSequence, app9.RecordDigest, app9.LastDecisionId, app9.LastOutcome, app9.LastSuccessAction, app9.LastBreakGlassId));
         Assert.Equal(JsonValueKind.Undefined, app9.LastSuccessParameters.ValueKind);
+    }
+
+    [Fact]
+    public async Task ResourceStates_FollowTheResourceChain_WhenTheClockDisagrees()
+    {
+        // The second record on the resource carries an earlier executed_at than the first (a host whose clock is
+        // behind): ordered by time, the first comes last, and must not move the head back.
+        var early = JsonNode.Parse(Second)!.AsObject();
+        early["executed_at"] = "2026-10-30T11:59:00Z";
+        var earlyJson = early.ToJsonString();
+        using var gm = Client([], req => Json(200, req.RequestUri!.Query.Contains("entry_kind=break_glass")
+            ? Page(null)
+            : Page(null, (4, "execution", First), (5, "execution", earlyJson))));
+        var state = (await gm.EvidenceStore.ResourceStates())["partner:app-1/secret"];
+        Assert.Equal((2L, OfflineVerifier.ExecutionDigest(earlyJson), "partial", "2026-10-30T11:59:00Z"),
+            (state.ResourceSequence, state.RecordDigest, state.LastOutcome, state.LastExecutedAt));
+    }
+
+    [Fact]
+    public async Task ResourceStates_OrdersChangesMadeAtOnceByStoreSequence()
+    {
+        // Two break-glass changes stamped with the same time: the one stored later is the latest.
+        var later = JsonNode.Parse(BreakGlassOnly)!.AsObject();
+        later["break_glass_id"] = "bg-3";
+        later["outcome"] = "success";
+        using var gm = Client([], req => Json(200, req.RequestUri!.Query.Contains("entry_kind=break_glass")
+            ? Page(null, (8, "break_glass", later.ToJsonString()), (7, "break_glass", BreakGlassOnly))
+            : Page(null)));
+        var state = (await gm.EvidenceStore.ResourceStates())["partner:app-9/secret"];
+        Assert.Equal(("bg-3", "success", "rotate"), (state.LastBreakGlassId, state.LastOutcome, state.LastSuccessAction));
     }
 
     [Fact]
@@ -276,6 +314,7 @@ public class EvidenceStoreTests
         var body = JsonNode.Parse(request.Body!)!.AsObject();
         Assert.Equal("partner:", body["resource_prefix"]!.GetValue<string>());
         Assert.False(body.ContainsKey("role"));
-        await Assert.ThrowsAsync<ArgumentNullException>(() => gm.EvidenceStore.RegisterExecutorKey(null!));
+        var missing = gm.EvidenceStore.RegisterExecutorKey(null!);
+        await Assert.ThrowsAsync<ArgumentNullException>(() => missing);
     }
 }

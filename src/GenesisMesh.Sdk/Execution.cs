@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace GenesisMesh;
 
@@ -12,7 +13,7 @@ public sealed class RecordExecutionRequest
     /// <summary>The capability executed, such as <c>partner-secret.rotate</c>. Required.</summary>
     public string ExecutedCapability { get; init; } = "";
 
-    /// <summary>A value of <see cref="ExecutionOutcome"/>. Required.</summary>
+    /// <summary>A value of <see cref="ExecutionOutcomes"/>. Required.</summary>
     public string Outcome { get; init; } = "";
 
     /// <summary>
@@ -30,7 +31,7 @@ public sealed class RecordExecutionRequest
     /// <summary>The resource acted on, such as <c>kv:vault/secret</c>: an identifier, never a value. Set with <see cref="ResourceAction"/>.</summary>
     public string? ResourceId { get; init; }
 
-    /// <summary>A value of <see cref="GenesisMesh.ResourceAction"/>. Set with <see cref="ResourceId"/>.</summary>
+    /// <summary>A value of <see cref="ResourceActions"/>. Set with <see cref="ResourceId"/>.</summary>
     public string? ResourceAction { get; init; }
 
     /// <summary>
@@ -39,7 +40,10 @@ public sealed class RecordExecutionRequest
     /// </summary>
     public ResourceHead? PriorResource { get; init; }
 
-    /// <summary>When it was executed; default now, but never before the decision.</summary>
+    /// <summary>
+    /// When it was executed; default now, but never before the decision. A time given here is used as given: the NA
+    /// refuses a record stamped before the decision.
+    /// </summary>
     public DateTimeOffset? ExecutedAt { get; init; }
 
     /// <summary>The record's ID; default a new UUID. Reuse it only to resubmit the same record.</summary>
@@ -134,8 +138,7 @@ public sealed class ExecutionRecorder
         var unsigned = Element(record);
         // 1.3.1 in the TypeScript SDK: a value the NA would refuse as invalid_json is refused before signing. The
         // record sits two levels deep in what carries it (a batch, or an export's quarantine record).
-        var text = Canonical.Of(unsigned);
-        StrictJsonReader.Check("[[" + text + "]]");
+        StrictJsonReader.Check("[[" + unsigned.GetRawText() + "]]");
         var keyId = _signer.KeyId;
         var signed = OfflineVerifier.ReceivedCanonical("ExecutionEvidence", unsigned);
         var sig = await _signer.SignAsync(Encoding.UTF8.GetBytes(signed), ct).ConfigureAwait(false);
@@ -152,13 +155,18 @@ public sealed class ExecutionRecorder
     }
 
     /// <summary>
-    /// The resource head a record leaves: its position on the resource chain (0 for a record without a resource) and
-    /// its digest. Pass it as the next record's <see cref="RecordExecutionRequest.PriorResource"/>.
+    /// The resource head a record leaves: its position on the resource chain and its digest. Pass it as the next
+    /// record's <see cref="RecordExecutionRequest.PriorResource"/>.
     /// </summary>
+    /// <exception cref="ArgumentException">
+    /// The record names no resource: a record linked to it would be refused (<c>resource_chain_mismatch</c>).
+    /// </exception>
     public static ResourceHead HeadOf(ExecutionEvidence evidence)
     {
         ArgumentNullException.ThrowIfNull(evidence);
-        return new ResourceHead { ResourceSequence = evidence.ResourceSequence ?? 0, RecordDigest = Digest(evidence) };
+        if (evidence.ResourceId is null || evidence.ResourceSequence is not { } sequence)
+            throw new ArgumentException("genesismesh: the record names no resource, so it is no resource's head", nameof(evidence));
+        return new ResourceHead { ResourceSequence = sequence, RecordDigest = Digest(evidence) };
     }
 
     /// <summary>
@@ -179,16 +187,51 @@ public sealed class ExecutionRecorder
         }
     }
 
-    /// <summary><paramref name="value"/> as JSON, as request bodies are written; a value JSON cannot hold is <c>invalid_json</c>.</summary>
+    /// <summary>How a record is written: as request bodies are, with every string checked for a lone surrogate.</summary>
+    private static readonly JsonSerializerOptions RecordOptions = new(Auth.SerializerOptions) { Converters = { new WholeStrings() } };
+
+    /// <summary>
+    /// <paramref name="value"/> as JSON, as request bodies are written; a value JSON cannot hold is <c>invalid_json</c>,
+    /// and a string with an unpaired surrogate <c>lone_surrogate</c>.
+    /// </summary>
     private static JsonElement Element(object value)
     {
         try
         {
-            return JsonSerializer.SerializeToElement(value, value.GetType(), Auth.SerializerOptions);
+            return JsonSerializer.SerializeToElement(value, value.GetType(), RecordOptions);
         }
-        catch (Exception e) when (e is ArgumentException or NotSupportedException or JsonException or InvalidOperationException)
+        catch (Exception e) when (e is not StrictJsonException
+            && e is ArgumentException or NotSupportedException or JsonException or InvalidOperationException)
         {
             throw new StrictJsonException("invalid_json", e.Message);
+        }
+    }
+
+    /// <summary>
+    /// Strings written whole: System.Text.Json writes an unpaired surrogate as U+FFFD, so a record would sign another
+    /// value than the caller's. It is refused instead, as the TypeScript SDK refuses it.
+    /// </summary>
+    private sealed class WholeStrings : JsonConverter<string>
+    {
+        // Only written with: records are read with Auth.SerializerOptions.
+        public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            reader.GetString();
+
+        public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(Whole(value));
+
+        public override void WriteAsPropertyName(Utf8JsonWriter writer, string value, JsonSerializerOptions options) =>
+            writer.WritePropertyName(Whole(value));
+
+        private static string Whole(string value)
+        {
+            for (var i = 0; i < value.Length; i++)
+            {
+                if (char.IsHighSurrogate(value[i]) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1])) i++;
+                else if (char.IsSurrogate(value[i]))
+                    throw new StrictJsonException("lone_surrogate", "a string holds an unpaired surrogate");
+            }
+            return value;
         }
     }
 }

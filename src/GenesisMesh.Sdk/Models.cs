@@ -1822,7 +1822,7 @@ public sealed class KeyHistoryKey
 }
 
 /// <summary>The outcomes an executor records (<see cref="ExecutionEvidence.Outcome"/>).</summary>
-public static class ExecutionOutcome
+public static class ExecutionOutcomes
 {
     /// <summary>The action completed.</summary>
     public const string Success = "success";
@@ -1833,7 +1833,7 @@ public static class ExecutionOutcome
 }
 
 /// <summary>What an execution did to its resource (<see cref="ExecutionEvidence.ResourceAction"/>).</summary>
-public static class ResourceAction
+public static class ResourceActions
 {
     /// <summary>The resource was created.</summary>
     public const string Create = "create";
@@ -1895,7 +1895,7 @@ public sealed class ExecutionEvidence
     [JsonPropertyName("executed_at")]
     public string ExecutedAt { get; set; } = "";
 
-    /// <summary>A value of <see cref="ExecutionOutcome"/>.</summary>
+    /// <summary>A value of <see cref="ExecutionOutcomes"/>.</summary>
     [JsonPropertyName("outcome")]
     public string Outcome { get; set; } = "";
 
@@ -1914,7 +1914,7 @@ public sealed class ExecutionEvidence
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ResourceId { get; set; }
 
-    /// <summary>A value of <see cref="GenesisMesh.ResourceAction"/>; set with <see cref="ResourceId"/>.</summary>
+    /// <summary>A value of <see cref="ResourceActions"/>; set with <see cref="ResourceId"/>.</summary>
     [JsonPropertyName("resource_action")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ResourceAction { get; set; }
