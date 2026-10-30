@@ -18,5 +18,5 @@ public sealed class BoundaryClient
     /// POST /boundary/verify
     /// </summary>
     public Task<VerifyResult> Verify(IDictionary<string, object?> body, CancellationToken ct = default) =>
-        _t.PublicPostAsync<VerifyResult>("/boundary/verify", body, ct);
+        _t.PublicPostAsync<VerifyResult>("/boundary/verify", body, idempotent: true, ct);
 }

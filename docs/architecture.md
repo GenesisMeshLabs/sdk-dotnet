@@ -21,10 +21,10 @@ When you add a source file, add it to the module table there and here.
 | verify | `OfflineVerifier.cs`, `KeyHistory.cs`, `Grants.cs`, `Vouching.cs` | Offline verification: agreements, boundary decisions, policies, data access intents, the NA key history, capability grants and the vouching horizon (1.8.0). One `partial class OfflineVerifier`; each result record sits in the file of its verifier. |
 | models | `Models.cs` | The request and response types of the HTTP API, with snake_case `[JsonPropertyName]` names. Data only. |
 | errors | `Errors.cs` | `GenesisMeshException` and its subclasses, and the HTTP status to exception mapping (`ErrorMapping`). |
-| auth | `Auth.cs` | Admin request signing (signature version 2): the signed payload, Ed25519 signing, the `X-Admin-*` headers, and the read-only `SerializerOptions` every body is written and read with. |
-| transport | `Transport.cs` | The only code that sends HTTP: the `HttpClient`, the NA's audience key from `/sovereign.json`, admin and public calls, strict response reading, error mapping and cancellation. |
-| clients | `Clients/*.cs` | One sub-client per NA area (`Agreement`, `Attestation`, `Boundary`, `Consensus`, `DataUsage`, `Disclosure`, `Evidence`). A method names its route and calls the transport. |
-| client | `GenesisMeshClient.cs` | The entry point and `ClientOptions`: builds the transport and the sub-clients. |
+| auth | `Auth.cs`, `Signer.cs` | Admin request signing (signature version 2): the signed payload, Ed25519 signing, the `X-Admin-*` headers, the read-only `SerializerOptions` every body is written and read with, and the operator signers (`ISigner`, `SeedSigner`). |
+| transport | `Transport.cs`, `ClientOptions.cs` | The only code that sends HTTP: the `HttpClient`, the NA's audience key from `/sovereign.json`, admin and public calls, failover across `BaseUrls`, retries, strict response reading, error mapping and cancellation; and the options it is built from (`ClientOptions`, `RetryOptions`). |
+| clients | `Clients/*.cs` | One sub-client per NA area (`Agreement`, `Attestation`, `Boundary`, `Consensus`, `DataUsage`, `Disclosure`, `Evidence`, `Health`, `NA`). A method names its route and calls the transport; one that verifies what the NA served calls the offline verifier. |
+| client | `GenesisMeshClient.cs` | The entry point: builds the transport and the sub-clients. |
 
 ## Layers
 
@@ -42,7 +42,7 @@ the other way.
 | auth | canonical, json |
 | verify | registry, canonical, json, models |
 | transport | auth, errors, models, canonical, json |
-| clients | transport, models, errors |
+| clients | transport, models, errors, verify |
 | client | every module |
 
 Two further rules:
@@ -54,25 +54,31 @@ Two further rules:
   test checks this in the compiled code too, so a reference that the source
   does not spell out (through `var`, say) still fails.
 
-Known exception, listed in the test's allowlist: transport reads
-`ClientOptions`, which is declared in `GenesisMeshClient.cs` (client). The
-allowlist may only shrink. The test fails when a new edge appears, and also
-when a listed edge is gone and still listed.
+The test's allowlist of exceptions is empty (1.9.0: `ClientOptions` moved
+into the transport module, which reads it). It may only stay empty: the test
+fails when a new edge appears. Clients may use the offline verifier (1.9.0)
+to verify what the NA served, as `NA.VerifiedKeyHistory` does; the verifier
+still uses no client.
 
 ## How a call flows
 
 1. `new GenesisMeshClient(options)` builds one `Transport` (one `HttpClient`,
-   the signing seed from `Auth.LoadSeed`) and the seven sub-clients.
+   the endpoints, the signer: `ClientOptions.Signer`, or a `SeedSigner` of the
+   seed from `Auth.LoadSeed`) and the nine sub-clients.
 2. A sub-client method, such as `Boundary.Decide(body)`, calls
    `Transport.AdminPostAsync<BoundaryDecision>("/admin/boundary/decide", body)`.
 3. For an admin route, the transport reads the NA's public key once from
-   `/sovereign.json` (or `ClientOptions.Audience`), and `Auth.BuildAdminHeaders`
-   signs method, path, query, audience and body over their canonical form.
-4. The request is sent. Cancellation by the caller's token surfaces as
-   `OperationCanceledException`; a timeout or connection failure as
-   `NetworkException`.
+   `/sovereign.json` (or `ClientOptions.Audience`), and
+   `Auth.BuildAdminHeadersAsync` has the signer sign method, path, query,
+   audience and body over their canonical form, again for every attempt.
+4. The request is sent to the active endpoint. An idempotent request moves to
+   the next endpoint on a connection failure or a 502, 503 or 504; any other
+   request only when it never reached an instance. Retries
+   (`ClientOptions.Retry`) repeat idempotent requests with backoff.
+   Cancellation by the caller's token surfaces as `OperationCanceledException`;
+   a timeout or connection failure as `NetworkException`.
 5. A non-2xx response becomes the typed exception for its status
-   (`ErrorMapping`). A 2xx body is decoded as strict UTF-8, checked by the
+   (`ErrorMapping`), with the NA's `details` and its `Retry-After` wait. A 2xx body is decoded as strict UTF-8, checked by the
    strict JSON reader, and deserialized with `Auth.SerializerOptions`
    (property names in their own case only).
 

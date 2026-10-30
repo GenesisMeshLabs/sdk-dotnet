@@ -999,6 +999,268 @@ public sealed class VerifyResult : IJsonOnDeserialized
     }
 }
 
+// ── Health (v0.60) ────────────────────────────────────────────────────────────
+
+/// <summary>Returned by GET /healthz: the process is alive, without checking its dependencies.</summary>
+public sealed class LivenessStatus
+{
+    /// <summary><c>ok</c> when the process answers.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+}
+
+/// <summary>
+/// Returned by GET /readyz: whether this NA instance can serve. <see cref="Ready"/> is false when the NA answered
+/// 503 <c>service_not_ready</c>; the failing checks are then in the other properties.
+/// </summary>
+public sealed class Readiness
+{
+    /// <summary>True when the instance is ready.</summary>
+    [JsonIgnore]
+    public bool Ready => Status == "ready";
+
+    /// <summary><c>ready</c>, or <c>not_ready</c> when the NA answered 503.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    /// <summary>The instance that answered, as host and process.</summary>
+    [JsonPropertyName("instance")]
+    public string Instance { get; set; } = "";
+
+    /// <summary><c>on</c> when several instances share one database.</summary>
+    [JsonPropertyName("ha_mode")]
+    public string HaMode { get; set; } = "";
+
+    /// <summary>The database: writable at the expected schema version.</summary>
+    [JsonPropertyName("database")]
+    public ReadinessDatabase Database { get; set; } = new();
+
+    /// <summary>The NA signing key this instance loaded.</summary>
+    [JsonPropertyName("signing_key")]
+    public ReadinessSigningKey SigningKey { get; set; } = new();
+
+    /// <summary>The NA key's state (1.5.0): anything but <c>signing</c> is not ready.</summary>
+    [JsonPropertyName("na_key")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ReadinessNAKey? NAKeyState { get; set; }
+
+    /// <summary>Records due to be signed again by the current NA key, and whether that is pending.</summary>
+    [JsonPropertyName("reissue")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Reissue { get; set; }
+
+    /// <summary><c>memory</c>, or <c>database</c> when instances share the rate limits (required in HA mode).</summary>
+    [JsonPropertyName("rate_limiter")]
+    public string RateLimiter { get; set; } = "";
+
+    /// <summary>The SQLite path, or the PostgreSQL URL without its password; only when ready.</summary>
+    [JsonPropertyName("db_path")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DbPath { get; set; }
+}
+
+/// <summary>The database check of <see cref="Readiness"/>.</summary>
+public sealed class ReadinessDatabase
+{
+    /// <summary><c>sqlite</c> or <c>postgres</c>.</summary>
+    [JsonPropertyName("backend")]
+    public string Backend { get; set; } = "";
+
+    /// <summary>True when the database accepted a write.</summary>
+    [JsonPropertyName("writable")]
+    public bool Writable { get; set; }
+
+    /// <summary>The schema version found; null when the database could not be read.</summary>
+    [JsonPropertyName("schema_version")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? SchemaVersion { get; set; }
+
+    /// <summary>The schema version this NA needs.</summary>
+    [JsonPropertyName("expected_schema_version")]
+    public int ExpectedSchemaVersion { get; set; }
+
+    /// <summary>When not ready: <c>schema_version_mismatch</c> or the error's type.</summary>
+    [JsonPropertyName("error")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Error { get; set; }
+}
+
+/// <summary>The signing key check of <see cref="Readiness"/>.</summary>
+public sealed class ReadinessSigningKey
+{
+    /// <summary>The NA key's ID.</summary>
+    [JsonPropertyName("key_id")]
+    public string KeyId { get; set; } = "";
+
+    /// <summary>Where the key is held: <c>file</c>, <c>env</c> or <c>azure-keyvault</c>.</summary>
+    [JsonPropertyName("provider")]
+    public string Provider { get; set; } = "";
+
+    /// <summary>SHA-256 (hex) of the NA public key, the same on every instance of one NA.</summary>
+    [JsonPropertyName("fingerprint")]
+    public string Fingerprint { get; set; } = "";
+}
+
+/// <summary>The NA key's state in <see cref="Readiness"/> (1.5.0).</summary>
+public sealed class ReadinessNAKey
+{
+    /// <summary>
+    /// <c>signing</c>; <c>pending</c>, a new key started before its succession takes effect; or <c>stopped</c>,
+    /// succeeded or expired.
+    /// </summary>
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "";
+
+    /// <summary>The key's position in the key history.</summary>
+    [JsonPropertyName("key_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? KeySequence { get; set; }
+
+    /// <summary>A pending key: when it starts signing.</summary>
+    [JsonPropertyName("signs_from")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SignsFrom { get; set; }
+}
+
+/// <summary>Returned by GET /health: the network, its version and the state of policies and evidence.</summary>
+public sealed class HealthStatus
+{
+    /// <summary><c>healthy</c> when the NA answers.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    /// <summary>The network's name.</summary>
+    [JsonPropertyName("network")]
+    public string Network { get; set; } = "";
+
+    /// <summary>The network's version.</summary>
+    [JsonPropertyName("version")]
+    public string Version { get; set; } = "";
+
+    /// <summary><c>unhealthy</c> when an active boundary policy fails verification: every policy-aware evaluation then denies.</summary>
+    [JsonPropertyName("boundary_policies")]
+    public string BoundaryPolicies { get; set; } = "";
+
+    /// <summary><c>required</c> or <c>optional</c>: whether every boundary decision needs an active policy.</summary>
+    [JsonPropertyName("boundary_policy_enforcement")]
+    public string BoundaryPolicyEnforcement { get; set; } = "";
+
+    /// <summary>The evidence store's mode, such as <c>on</c> or <c>off</c>.</summary>
+    [JsonPropertyName("evidence_store")]
+    public string EvidenceStore { get; set; } = "";
+}
+
+/// <summary>The readiness of one configured endpoint (<see cref="HealthClient.Endpoints"/>).</summary>
+public sealed class EndpointReadiness
+{
+    /// <summary>The endpoint probed.</summary>
+    [JsonPropertyName("base_url")]
+    public string BaseUrl { get; set; } = "";
+
+    /// <summary>True when the endpoint answered.</summary>
+    [JsonPropertyName("reachable")]
+    public bool Reachable { get; set; }
+
+    /// <summary>True when it answered ready.</summary>
+    [JsonPropertyName("ready")]
+    public bool Ready { get; set; }
+
+    /// <summary>Its readiness checks, when it sent them.</summary>
+    [JsonPropertyName("readiness")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Readiness? Readiness { get; set; }
+
+    /// <summary>Why it is not ready: the HTTP status, or the connection error.</summary>
+    [JsonPropertyName("error")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Error { get; set; }
+}
+
+// ── NA key history (v1.5.0) ───────────────────────────────────────────────────
+
+/// <summary>
+/// Returned by GET /na/key-history: the signed genesis block, every key succession and each key's validity. It
+/// proves nothing by itself: <see cref="NetworkAuthorityClient.VerifiedKeyHistory"/> rebuilds the history from the
+/// root key the caller holds.
+/// </summary>
+public sealed class KeyHistoryView
+{
+    /// <summary>The NA's sovereign ID.</summary>
+    [JsonPropertyName("sovereign_id")]
+    public string SovereignId { get; set; } = "";
+
+    /// <summary>The root key the NA names: compare it with the one you hold, never trust it alone.</summary>
+    [JsonPropertyName("root_public_key")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? RootPublicKey { get; set; }
+
+    /// <summary>How long after a succession the outgoing key is still accepted, in seconds.</summary>
+    [JsonPropertyName("handover_seconds")]
+    public int HandoverSeconds { get; set; }
+
+    /// <summary>The signed genesis block, as received.</summary>
+    [JsonPropertyName("genesis")]
+    public JsonElement Genesis { get; set; }
+
+    /// <summary>The signed key successions, oldest first, as received.</summary>
+    [JsonPropertyName("successions")]
+    public JsonElement Successions { get; set; }
+
+    /// <summary>Each key and its validity, as the NA computes it.</summary>
+    [JsonPropertyName("keys")]
+    public IList<KeyHistoryKey> Keys { get; set; } = [];
+
+    /// <summary>The key sequence of the key this NA signs with now.</summary>
+    [JsonPropertyName("signing_key_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public int? SigningKeySequence { get; set; }
+
+    /// <summary>The NA's vouching grace in seconds (1.8.0). Unsigned: verification takes it only to shorten the grace.</summary>
+    [JsonPropertyName("vouching_grace_seconds")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? VouchingGraceSeconds { get; set; }
+}
+
+/// <summary>One key of <see cref="KeyHistoryView"/>, as the NA describes it.</summary>
+public sealed class KeyHistoryKey
+{
+    /// <summary>True for the key the NA signs with now.</summary>
+    [JsonPropertyName("current")]
+    public bool Current { get; set; }
+
+    /// <summary>The key's ID.</summary>
+    [JsonPropertyName("key_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? KeyId { get; set; }
+
+    /// <summary>The key's position in the history, from 1 for the genesis key.</summary>
+    [JsonPropertyName("key_sequence")]
+    public int KeySequence { get; set; }
+
+    /// <summary>The key's public key (base64).</summary>
+    [JsonPropertyName("public_key")]
+    public string PublicKey { get; set; } = "";
+
+    /// <summary>When the next key took effect; null while this key is current.</summary>
+    [JsonPropertyName("succeeded_at")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? SucceededAt { get; set; }
+
+    /// <summary>When the key became valid; null for the genesis key.</summary>
+    [JsonPropertyName("valid_from")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? ValidFrom { get; set; }
+
+    /// <summary>The key's declared end of validity.</summary>
+    [JsonPropertyName("valid_to")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? ValidTo { get; set; }
+
+    /// <summary>True when <see cref="ValidTo"/> is enforced: only for a key named by a succession.</summary>
+    [JsonPropertyName("valid_to_enforced")]
+    public bool ValidToEnforced { get; set; }
+}
+
 internal static class ModelHelpers
 {
     /// <summary>The first entry of a signatures array, or an undefined element.</summary>

@@ -36,5 +36,5 @@ public sealed class DataUsageClient
     /// POST /data-usage/verify
     /// </summary>
     public Task<VerifyResult> Verify(IDictionary<string, object?> body, CancellationToken ct = default) =>
-        _t.PublicPostAsync<VerifyResult>("/data-usage/verify", body, ct);
+        _t.PublicPostAsync<VerifyResult>("/data-usage/verify", body, idempotent: true, ct);
 }

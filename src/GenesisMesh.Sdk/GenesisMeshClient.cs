@@ -38,6 +38,12 @@ public sealed class GenesisMeshClient : IDisposable
     /// <summary>Trust evidence — build and verify.</summary>
     public EvidenceClient Evidence { get; }
 
+    /// <summary>Liveness, readiness and health of the NA, and of each configured endpoint (v0.60).</summary>
+    public HealthClient Health { get; }
+
+    /// <summary>The NA's own keys: its key history, fetched and verified (v1.5.0).</summary>
+    public NetworkAuthorityClient NA { get; }
+
     /// <summary>A client of the NA at <see cref="ClientOptions.BaseUrl"/>.</summary>
     /// <param name="opts">The NA's URL and, for admin routes, the operator key.</param>
     public GenesisMeshClient(ClientOptions opts)
@@ -50,34 +56,10 @@ public sealed class GenesisMeshClient : IDisposable
         DataUsage = new DataUsageClient(_transport);
         Disclosure = new DisclosureClient(_transport);
         Evidence = new EvidenceClient(_transport);
+        Health = new HealthClient(_transport);
+        NA = new NetworkAuthorityClient(_transport);
     }
 
     /// <summary>Releases the HTTP client. A <see cref="ClientOptions.HttpHandler"/> stays the caller's to dispose.</summary>
     public void Dispose() => _transport.Dispose();
-}
-
-/// <summary>Configuration for <see cref="GenesisMeshClient"/>.</summary>
-public sealed class ClientOptions
-{
-    /// <summary>NA base URL, e.g. "http://127.0.0.1:9443".</summary>
-    public string BaseUrl { get; set; } = "";
-
-    /// <summary>Base64-encoded 32-byte Ed25519 seed (required for admin routes).</summary>
-    public string? SigningKey { get; set; }
-
-    /// <summary>Key identifier sent in X-Admin-Key-Id (required for admin routes).</summary>
-    public string? KeyId { get; set; }
-
-    /// <summary>
-    /// The NA's public key, which admin signatures name as their audience
-    /// (signature version 2). When unset it is read once from /sovereign.json
-    /// (network_authority.public_key).
-    /// </summary>
-    public string? Audience { get; set; }
-
-    /// <summary>HTTP request timeout. Defaults to 10 s.</summary>
-    public TimeSpan Timeout { get; set; }
-
-    /// <summary>Custom HTTP message handler, primarily for unit testing.</summary>
-    public HttpMessageHandler? HttpHandler { get; set; }
 }

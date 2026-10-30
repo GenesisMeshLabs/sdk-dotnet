@@ -51,5 +51,5 @@ public sealed class AgreementClient
     /// POST /agreements/verify
     /// </summary>
     public Task<VerifyResult> Verify(IDictionary<string, object?> body, CancellationToken ct = default) =>
-        _t.PublicPostAsync<VerifyResult>("/agreements/verify", body, ct);
+        _t.PublicPostAsync<VerifyResult>("/agreements/verify", body, idempotent: true, ct);
 }

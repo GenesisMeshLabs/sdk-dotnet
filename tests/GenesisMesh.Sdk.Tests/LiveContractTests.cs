@@ -174,6 +174,17 @@ public class LiveContractTests
             var attestation = await gm.Attestation.Issue(D(("subject_id", "vendor-contract"), ("roles", new[] { "role:client" })));
             Check("attestation_issue", attestation);
             Assert.Equal("vendor-contract", attestation.SubjectId);
+
+            Check("health_liveness", await gm.Health.Liveness());
+            var readiness = await gm.Health.Readiness();
+            Check("health_readiness", readiness);
+            Assert.True(readiness.Ready);
+            Check("health_status", await gm.Health.Status());
+            Assert.True((await gm.Health.Endpoints()).Single() is { Reachable: true, Ready: true });
+
+            Check("na_key_history", await gm.NA.KeyHistory());
+            var history = await gm.NA.VerifiedKeyHistory(naKey);
+            Assert.Equal(naKey, history.Keys.Single().PublicKey);
         }
         finally
         {

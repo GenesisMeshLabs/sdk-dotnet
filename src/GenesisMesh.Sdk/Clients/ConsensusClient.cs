@@ -25,5 +25,5 @@ public sealed class ConsensusClient
     /// POST /consensus/verify
     /// </summary>
     public Task<ConsensusVerification> Verify(IDictionary<string, object?> body, CancellationToken ct = default) =>
-        _t.PublicPostAsync<ConsensusVerification>("/consensus/verify", body, ct);
+        _t.PublicPostAsync<ConsensusVerification>("/consensus/verify", body, idempotent: true, ct);
 }
