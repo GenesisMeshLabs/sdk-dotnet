@@ -37,8 +37,10 @@ public partial class ArchitectureTests
         ("Transport.cs", "transport"),
         ("ClientOptions.cs", "transport"),
         ("Execution.cs", "execution"),
+        ("Outbox.cs", "outbox"),
         ("Clients/", "clients"),
         ("GenesisMeshClient.cs", "client"),
+        ("Governance.cs", "governance"),
     ];
 
     /// <summary>The modules each module may use (docs/architecture.md, "Layers").</summary>
@@ -53,8 +55,10 @@ public partial class ArchitectureTests
         ["verify"] = ["registry", "canonical", "json", "models"],
         ["transport"] = ["auth", "errors", "models", "canonical", "json"],
         ["execution"] = ["auth", "verify", "models", "errors", "canonical", "json"],
-        ["clients"] = ["transport", "models", "errors", "verify"],
-        ["client"] = ["json", "errors", "models", "canonical", "registry", "auth", "verify", "execution", "transport", "clients"],
+        ["outbox"] = ["auth", "registry", "models", "errors", "canonical", "json"],
+        ["clients"] = ["transport", "outbox", "models", "errors", "verify"],
+        ["client"] = ["json", "errors", "models", "canonical", "registry", "auth", "verify", "execution", "outbox", "transport", "clients"],
+        ["governance"] = ["client", "clients", "execution", "verify", "auth", "models", "errors", "json"],
     };
 
     /// <summary>The modules that may name System.Net types.</summary>

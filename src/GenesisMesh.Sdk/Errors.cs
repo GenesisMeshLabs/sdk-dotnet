@@ -42,7 +42,18 @@ public class GenesisMeshException : Exception
     /// <param name="detail">What was refused.</param>
     /// <param name="message">The exception message.</param>
     protected GenesisMeshException(int status, string code, string detail, string message)
-        : base(message)
+        : this(status, code, detail, message, null)
+    {
+    }
+
+    /// <summary>An error with its own <paramref name="message"/>, caused by <paramref name="innerException"/> (1.9.0).</summary>
+    /// <param name="status">The HTTP status, or 0 when the refusal is the SDK's own.</param>
+    /// <param name="code">The reason code.</param>
+    /// <param name="detail">What was refused.</param>
+    /// <param name="message">The exception message.</param>
+    /// <param name="innerException">The error this one reports.</param>
+    protected GenesisMeshException(int status, string code, string detail, string message, Exception? innerException)
+        : base(message, innerException)
     {
         Status = status;
         Code = code;

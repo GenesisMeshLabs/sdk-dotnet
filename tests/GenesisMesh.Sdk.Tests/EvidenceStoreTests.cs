@@ -300,15 +300,15 @@ public class EvidenceStoreTests
     {
         var sent = new List<Sent>();
         using var gm = Client(sent, _ => Json(201,
-            """{"key_id":"hub-executor","executor_sovereign_id":"partner-tech","active":true,"role":"executor","resource_prefix":"partner:"}"""));
+            """{"key_id":"portal-executor","executor_sovereign_id":"partner-portal","active":true,"role":"executor","resource_prefix":"partner:"}"""));
         var state = await gm.EvidenceStore.RegisterExecutorKey(new RegisterExecutorKeyRequest
         {
-            KeyId = "hub-executor",
+            KeyId = "portal-executor",
             PublicKey = "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
-            ExecutorSovereignId = "partner-tech",
+            ExecutorSovereignId = "partner-portal",
             ResourcePrefix = "partner:",
         });
-        Assert.Equal(("hub-executor", true, "executor", "partner:"), (state.KeyId, state.Active, state.Role, state.ResourcePrefix));
+        Assert.Equal(("portal-executor", true, "executor", "partner:"), (state.KeyId, state.Active, state.Role, state.ResourcePrefix));
         var request = Assert.Single(sent);
         Assert.Equal(("POST", "/admin/evidence/executor-keys", true), (request.Method, request.Path, request.Admin));
         var body = JsonNode.Parse(request.Body!)!.AsObject();

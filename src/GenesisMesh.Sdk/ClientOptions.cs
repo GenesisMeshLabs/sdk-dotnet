@@ -65,6 +65,14 @@ public sealed class ClientOptions
     /// the first may have been applied.
     /// </summary>
     public HttpClient? HttpClient { get; set; }
+
+    /// <summary>
+    /// 1.9.0: durable storage for signed execution records the NA has not admitted yet, such as a
+    /// <see cref="FileOutbox"/> or a store of your own. With one, <see cref="Governance.GovernedAction"/> keeps every
+    /// record until the NA admits it, and <see cref="EvidenceStoreClient.FlushPending"/> submits what is left. Give
+    /// each process its own.
+    /// </summary>
+    public IOutbox<OutboxEntry>? Outbox { get; set; }
 }
 
 /// <summary>

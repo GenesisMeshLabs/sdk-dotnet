@@ -22,10 +22,12 @@ When you add a source file, add it to the module table there and here.
 | models | `Models.cs` | The request and response types of the HTTP API, with snake_case `[JsonPropertyName]` names. Data only. |
 | errors | `Errors.cs` | `GenesisMeshException` and its subclasses, and the HTTP status to exception mapping (`ErrorMapping`). |
 | auth | `Auth.cs`, `Signer.cs` | Admin request signing (signature version 2): the signed payload, Ed25519 signing, the `X-Admin-*` headers, the read-only `SerializerOptions` every body is written and read with, and the operator signers (`ISigner`, `SeedSigner`). |
+| outbox | `Outbox.cs` | The evidence outbox (1.9.0): its rules (`EvidenceOutbox`: final refusals, classification, backoff), `FileOutbox` (one JSON file per entry, the TypeScript and Rust SDKs' format) and `MemoryOutbox`. The contract an outbox implements (`IOutbox<TEntry>`, `OutboxEntry`) is in `Models.cs`, so `ClientOptions` can name it. |
 | execution | `Execution.cs` | The executor's side (1.9.0): `ExecutionRecorder` builds and signs execution evidence as the Python reference does, chained per decision and per resource, after the metadata guard and the strict JSON check. |
 | transport | `Transport.cs`, `ClientOptions.cs` | The only code that sends HTTP: the `HttpClient`, the NA's audience key from `/sovereign.json`, admin and public calls, failover across `BaseUrls`, retries, strict response reading, error mapping and cancellation; and the options it is built from (`ClientOptions`, `RetrySettings`). |
 | clients | `Clients/*.cs` | One sub-client per NA area (`Agreement`, `Attestation`, `Boundary`, `Consensus`, `DataUsage`, `Disclosure`, `Evidence`, `EvidenceStore`, `Health`, `NA`, `Policy`). A method names its route and calls the transport; one that verifies what the NA served calls the offline verifier. |
 | client | `GenesisMeshClient.cs` | The entry point: builds the transport and the sub-clients. |
+| governance | `Governance.cs` | A controller's governed changes (1.9.0), on top of the client: `GovernedAction` (evaluate, verify the decision as received, act, record, keep in the outbox), `SummarizeDecision`, `WithoutRefusedMetadata` and `ReconcileResources`. |
 
 ## Layers
 
@@ -43,9 +45,11 @@ the other way.
 | auth | canonical, json |
 | verify | registry, canonical, json, models |
 | execution | auth, verify, models, errors, canonical, json |
+| outbox | auth, registry, models, errors, canonical, json |
 | transport | auth, errors, models, canonical, json |
-| clients | transport, models, errors, verify |
-| client | every module |
+| clients | transport, outbox, models, errors, verify |
+| client | every module below it |
+| governance | client, clients, execution, verify, auth, models, errors, json |
 
 Two further rules:
 

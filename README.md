@@ -15,12 +15,14 @@ boundary policies, trust evidence, attestations, selective disclosure,
 consensus and data usage), offline verification of their signed records, and
 signed admin calls to any other route. It is growing to the TypeScript SDK's
 governed lifecycle (decision 0008 of the core). From 1.9 it records and
-submits execution evidence and reads where each resource's chain ends (see
-[EvidenceStore](#evidencestore)). Not yet here: governed actions and the
-evidence outbox, the evidence store's history and export, its administration
-beyond registering executor keys (listing and retiring them, retention), none of the 1.3.0 changes outside the controlled path (observations,
-break-glass records, the record outbox), and none of the 1.4.0 remediation and
-review APIs (remediation records, the due queue, reviews). Those live in the
+submits execution evidence, reads where each resource's chain ends (see
+[EvidenceStore](#evidencestore)), and runs governed actions with the evidence
+outbox and reconciliation (see [Governed actions](#governed-actions)). Not yet
+here: the evidence store's history and export, its administration beyond
+registering executor keys (listing and retiring them, retention), none of the
+1.3.0 changes outside the controlled path (observations, break-glass records,
+the record outbox), and none of the 1.4.0 remediation and review APIs
+(remediation records, the due queue, reviews, urgent actions). Those live in the
 [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript) and the
 [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust). The embedded field
 registry lists their records, but this SDK does not verify evidence exports.
@@ -154,6 +156,7 @@ values.
 | `HttpHandler` | The handler requests go through, such as a `SocketsHttpHandler` with a `PooledConnectionLifetime`, so that a long-lived client follows DNS changes. The client does not dispose it. |
 | `HttpClient` | An `HttpClient` to send with, such as a typed client from `IHttpClientFactory`; its own `Timeout` applies. The client does not dispose it. A resilience handler in its pipeline must not retry POSTs: a repeated admin request carries the same signature and nonce, and the NA refuses it as a replay after the first may have been applied. |
 | `Timeout` | Each attempt's timeout (each request, and each read of the NA's key); 10 s by default. A call that fails over or retries can take longer. |
+| `Outbox` | Durable storage for signed execution records the NA has not admitted yet: a `FileOutbox`, or your own `IOutbox<OutboxEntry>` (see [Governed actions](#governed-actions)). Give each process its own. |
 
 ```csharp
 using Azure.Identity;
@@ -304,14 +307,14 @@ versions and times, never a secret value.
 // The platform team, with the privileged key: register the controller's executor key.
 await admin.EvidenceStore.RegisterExecutorKey(new RegisterExecutorKeyRequest
 {
-    KeyId = "hub-executor",
+    KeyId = "portal-executor",
     PublicKey = executorPublicKey,
-    ExecutorSovereignId = "partner-tech",
+    ExecutorSovereignId = "partner-portal",
     ResourcePrefix = "partner:",
 });
 
 // The controller, with a standard key: evaluate, verify, act, then record.
-var executor = new ExecutionRecorder("partner-tech", new SeedSigner(executorSeed, "hub-executor"));
+var executor = new ExecutionRecorder("partner-portal", new SeedSigner(executorSeed, "portal-executor"));
 var evaluation = await client.Boundary.Evaluate(request);
 // ... verify the decision, then act ...
 var resource = $"partner:{appId}/secret";
@@ -350,9 +353,113 @@ var submission = await client.EvidenceStore.Submit(record);            // "recor
   stored entries, and `ResourceStates`, each resource's latest change for
   reconciliation against a cloud inventory.
 
-Governed actions, which keep a record in an outbox until the NA admits it,
-are the next step of decision 0008. Until then, keep the signed record and
-retry `Submit` yourself.
+`Governance.GovernedAction` does all of this in one call, and with an
+outbox keeps the record until the NA admits it (see
+[Governed actions](#governed-actions)).
+
+### Governed actions
+
+From 1.9 `Governance.GovernedAction` makes one governed change, as the
+TypeScript SDK's `governedAction` does: it evaluates the request, verifies the
+decision offline, runs your action only on an authorized decision, and records
+the outcome on the resource's chain.
+
+```csharp
+using var client = new GenesisMeshClient(new ClientOptions
+{
+    BaseUrl = naUrl,
+    Signer  = new SeedSigner(operatorSeed, "portal-controller"),   // a standard key evaluates
+    Outbox  = new FileOutbox("/var/lib/portal/outbox"),
+});
+var executor = new ExecutionRecorder("partner-portal", new SeedSigner(executorSeed, "portal-executor"));
+
+var result = await Governance.GovernedAction(client, executor, new GovernedActionRequest
+{
+    RequestedCapability = "partner-secret.rotate",
+    AttestationId = partnerAttestationId,
+    Context = new EvaluationContext
+    {
+        RequestParameters = new Dictionary<string, object?> { ["app_id"] = appId, ["lifetime_days"] = 90 },
+    },
+    ResourceId = $"partner:{appId}/secret",
+    ResourceAction = ResourceActions.Rotate,
+    Verify = new GovernedVerification
+    {
+        OperatorPublicKeys = [naKey],
+        ExpectedPolicies = [rotationPolicy],      // the policies the decision must be bound to
+        ExpectedAttestation = partnerAttestation,
+    },
+}, async (decision, ct) =>
+{
+    var credential = await RotateInGraph(appId, ct);    // your change, only after a verified ALLOW
+    return new ActionReport<string>
+    {
+        Value = credential.SecretText,                   // returned to you, never recorded
+        ExecutionParameters = new Dictionary<string, object?> { ["key_id"] = credential.KeyId, ["expires_on"] = credential.End },
+    };
+});
+if (!result.Authorized) Log(result.Summary.EnforcedFailures);
+```
+
+- **Before the action.** The decision must verify under the NA's keys (or
+  `KeyHistory`), be bound to exactly the expected policies (an empty list for
+  a capability no policy selects) and, for an attestation basis, to the
+  expected attestation, carry the request's context ID, and still be valid
+  after the resource's head was read. Otherwise `DecisionVerificationException`
+  names the reason and nothing runs. It is verified as the NA sent it, so a
+  field this SDK does not know is refused by name (`unknown_field`). A denial
+  returns `Authorized == false` with `Summary` (`SummarizeDecision`): the
+  enforced and the observe-mode failures apart, and the policies applied.
+- **The record.** It chains from the resource's head: the newest pending
+  record in the outbox, otherwise the NA's head; set `PriorResource`, or
+  `NewResource` for a resource without history, to skip the read. When the
+  action throws, a `failure` record (`action failed`, without the error's
+  text) is submitted and the error rethrown. Cancelling stops the steps up to
+  and including the action; once it has run, its outcome is recorded.
+- **Without an outbox** a failed submission throws after the action ran, and
+  secret material in the report throws `SecretMaterialException` with nothing
+  signed. Keep the action idempotent, or use an outbox.
+- **With an outbox** every record is kept until the NA admits it, and a failed
+  submission does not throw: `result.Queued` is the entry, pending (retried)
+  or a dead letter (refused for good, with the NA's code; kept, never
+  dropped). Secret material in the report is recorded without the refused
+  fields and throws `MetadataRefusedException`, with the action's value; a
+  record that cannot be kept throws `EvidenceNotKeptException`. Do not run the
+  action again after either.
+
+Flush the outbox at startup and on a timer, such as from an Azure Functions
+timer trigger:
+
+```csharp
+var flushed = await client.EvidenceStore.FlushPending();
+// flushed.Admitted, flushed.Pending (in backoff, or behind a pending record), flushed.DeadLettered
+```
+
+Records are submitted in the order they were added, each after the records it
+chains from, with a backoff from 5 seconds to 15 minutes (or the NA's
+`Retry-After`, at most 15 minutes). `EvidenceOutbox` holds the rules: which
+refusals are final (`PermanentRefusals`) and how a failure is classified
+(`Classify`). `Enqueue` keeps and submits a record you signed yourself.
+
+`FileOutbox` writes one JSON file per entry, in the format of the TypeScript
+and Rust SDKs, so a controller can move between them; it creates its directory
+`0700` on Linux and macOS (restrict it yourself on Windows). For a database,
+implement `IOutbox<OutboxEntry>`: `Add`, `Update`, `Remove`, and `List` in the
+order added, each durable once it completes. `MemoryOutbox<OutboxEntry>` is
+for tests.
+
+Compare the cloud with the governed history with
+`Governance.ReconcileResources`, a pure function:
+
+```csharp
+var findings = Governance.ReconcileResources(
+    inventory.Select(s => new ObservedResource { ResourceId = s.Id, Exists = s.Exists, Version = s.KeyId }),
+    await client.EvidenceStore.ResourceStates(),
+    new ReconcileOptions { VersionKey = "key_id", CompleteInventory = true, ScopePrefix = "partner:" });
+// unmanaged, drifted, present_after_revoke, missing or in_sync, each with a detail
+```
+
+Correct each finding through a governed action.
 
 ### Attestation
 

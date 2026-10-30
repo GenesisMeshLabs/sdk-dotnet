@@ -327,6 +327,96 @@ public class LiveContractTests
             Assert.Equal((2L, ExecutionRecorder.Digest(rotated), "rotate", "success", rotateDecision.DecisionId),
                 (state.ResourceSequence, state.RecordDigest, state.LastAction, state.LastOutcome, state.LastDecisionId));
 
+            // 1.9.0: governed actions through a file outbox. The decision is verified against the published policy and
+            // the attestation as typed, so their typed forms must keep the digests the NA bound.
+            var outboxDir = Path.Combine(Path.GetTempPath(), "gm-contract-outbox-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                GenesisMeshClient Governed(string url) => new(new ClientOptions
+                {
+                    BaseUrl = url,
+                    SigningKey = seed,
+                    KeyId = keyId,
+                    Audience = naKey,
+                    Outbox = new FileOutbox(outboxDir),
+                });
+                using var governed = Governed(baseUrl);
+                var verify = new GovernedVerification
+                {
+                    OperatorPublicKeys = [naKey],
+                    ExpectedPolicies = [boundaryPolicy],
+                    ExpectedAttestation = vendor,
+                };
+                GovernedActionRequest Change(int days, string action) => new()
+                {
+                    AttestationId = vendor.AttestationId,
+                    RequestedCapability = "contract.read",
+                    Context = new EvaluationContext { RequestParameters = new Dictionary<string, object?> { ["days"] = days } },
+                    ResourceId = "contract:app-4/secret",
+                    ResourceAction = action,
+                    Verify = verify,
+                };
+                Func<BoundaryDecision, CancellationToken, Task<ActionReport<string>?>> Issue(string version, params (string, object?)[] more) =>
+                    (_, _) => Task.FromResult<ActionReport<string>?>(new ActionReport<string>
+                    {
+                        Value = version,
+                        ExecutionParameters = D([("secret_version", version), .. more]),
+                    });
+
+                var made = await Governance.GovernedAction(governed, executor, Change(30, ResourceActions.Create), Issue("v1"));
+                Assert.True(made.Authorized);
+                Assert.Equal(("recorded", "v1", 1L), (made.Submission!.Status, made.Value, made.Evidence!.ResourceSequence!.Value));
+                Assert.Equal(["contract-policy@" + boundaryPolicy.Version.ToString(CultureInfo.InvariantCulture)], made.Summary.AppliedPolicies);
+                Assert.Empty(await governed.EvidenceStore.Outbox!.List());
+
+                var ran = 0;
+                var refusal = await Governance.GovernedAction<string>(governed, executor, Change(120, ResourceActions.Rotate), (_, _) =>
+                {
+                    ran++;
+                    return Task.FromResult<ActionReport<string>?>(null);
+                });
+                Assert.False(refusal.Authorized);
+                Assert.Equal(0, ran);
+                Assert.Contains(refusal.Summary.EnforcedFailures, f => f.Gate == "contract-policy/max-days");
+
+                var rotatedGoverned = await Governance.GovernedAction(governed, executor, Change(60, ResourceActions.Rotate), Issue("v2"));
+                Assert.Equal((2L, ExecutionRecorder.Digest(made.Evidence)),
+                    (rotatedGoverned.Evidence!.ResourceSequence!.Value, rotatedGoverned.Evidence.PrevResourceDigest));
+                // A secret in the report: the change is recorded without it, and the NA admits the record.
+                var guarded = await Assert.ThrowsAsync<MetadataRefusedException>(() =>
+                    Governance.GovernedAction(governed, executor, Change(45, ResourceActions.Update), Issue("v3", ("client_secret", "x"))));
+                Assert.Equal(("recorded", "client_secret"), (guarded.Submission!.Status, guarded.Dropped.Single()));
+
+                // Kept while the NA cannot be reached (nothing listens on port 9), then admitted by a flush from another
+                // instance of the outbox, as after a restart.
+                var offlineDecision = (await gm.Boundary.Evaluate(Evaluation(30))).Decision;
+                var kept = await executor.Record(Execution(offlineDecision, "contract:app-5/secret", ResourceActions.Create, null));
+                using (var offline = Governed("http://127.0.0.1:9"))
+                {
+                    var queued = (await offline.EvidenceStore.Enqueue(kept)).Queued!;
+                    Assert.Equal((OutboxStates.Pending, EvidenceOutbox.NetworkError), (queued.State, queued.LastError!.Code));
+                }
+                using (var restarted = Governed(baseUrl))
+                {
+                    var flushed = await restarted.EvidenceStore.FlushPending(new FlushOptions { IgnoreBackoff = true });
+                    Assert.Equal(kept.EvidenceId, Assert.Single(flushed.Admitted).Id);
+                    Assert.Empty(await restarted.EvidenceStore.Outbox!.List());
+                }
+
+                var findings = Governance.ReconcileResources(
+                [
+                    new ObservedResource { ResourceId = "contract:app-4/secret", Exists = true, Version = "v3" },
+                    new ObservedResource { ResourceId = "contract:app-5/secret", Exists = false },
+                    new ObservedResource { ResourceId = "contract:app-6/secret", Exists = true },
+                ], await governed.EvidenceStore.ResourceStates());
+                Assert.Equal(new[] { ReconciliationStatuses.InSync, ReconciliationStatuses.Missing, ReconciliationStatuses.Unmanaged },
+                    findings.Select(f => f.Status));
+            }
+            finally
+            {
+                if (Directory.Exists(outboxDir)) Directory.Delete(outboxDir, recursive: true);
+            }
+
             Check("policy_deactivate", await gm.Policy.Deactivate("contract-policy", boundaryPolicy.Version));
         }
         finally

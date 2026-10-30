@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -11,8 +12,40 @@ namespace GenesisMesh;
 /// </summary>
 public sealed class EvidenceStoreClient
 {
+    /// <summary>Most pending records an enqueued record submits before its own; older ones wait for a flush.</summary>
+    private const int MaxInlineDrain = 100;
+
+    /// <summary>Refusals of a record whose predecessor is not stored: final once that predecessor is a dead letter.</summary>
+    private static readonly HashSet<string> ChainGaps = new(StringComparer.Ordinal) { "evidence_chain_gap", "resource_chain_gap" };
+
     private readonly Transport _t;
-    internal EvidenceStoreClient(Transport t) => _t = t;
+    /// <summary>Digests of outbox records by ID: a record never changes once signed.</summary>
+    private readonly ConcurrentDictionary<string, string> _digests = new(StringComparer.Ordinal);
+    /// <summary>Guards <see cref="_inFlight"/> and <see cref="_flush"/>.</summary>
+    private readonly object _gate = new();
+    /// <summary>Records <see cref="Enqueue"/> is submitting right now: a concurrent flush leaves them to it.</summary>
+    private readonly HashSet<string> _inFlight = new(StringComparer.Ordinal);
+    /// <summary>The flush in progress: every due entry (full) or an enqueued record's own drain.</summary>
+    private FlushRun? _flush;
+
+    private sealed class FlushRun(bool full, bool ignoreBackoff)
+    {
+        public bool Full { get; } = full;
+        public bool IgnoreBackoff { get; } = ignoreBackoff;
+        public TaskCompletionSource<FlushResult> Result { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    internal EvidenceStoreClient(Transport t, IOutbox<OutboxEntry>? outbox = null)
+    {
+        _t = t;
+        Outbox = outbox;
+    }
+
+    /// <summary>
+    /// The outbox signed records wait in until the NA admits them (<see cref="ClientOptions.Outbox"/>); null when none
+    /// is configured.
+    /// </summary>
+    public IOutbox<OutboxEntry>? Outbox { get; }
 
     /// <summary>
     /// Submits one signed record (<see cref="ExecutionRecorder"/>). The executor's signature authenticates it, not
@@ -40,6 +73,119 @@ public sealed class EvidenceStoreClient
             throw new SecretMaterialException(reason);
         return await _t.PublicPostAsync<EvidenceSubmission>("/evidence/execution",
             new Dictionary<string, object?> { ["evidence"] = evidence }, idempotent: true, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Keeps a signed record in the outbox (<see cref="ClientOptions.Outbox"/>) and submits it. Pending records it
+    /// chains from go first, oldest first (up to 100; older ones wait for <see cref="FlushPending"/>). A failed
+    /// submission does not throw: a transient failure leaves the record pending, with a backoff, and a refusal no
+    /// retry overcomes (<see cref="EvidenceOutbox.PermanentRefusals"/>) keeps it as a dead letter with the NA's code.
+    /// A record whose predecessor was refused is still sent, so the NA can quarantine it when it refuses it for good
+    /// too; refused only for the gap its predecessor left, it is a dead letter
+    /// (<see cref="EvidenceOutbox.PredecessorDeadLettered"/>). Passing a record already in the outbox submits it again.
+    /// </summary>
+    /// <exception cref="OutboxException">No outbox is configured (<c>outbox_required</c>), or it cannot be read.</exception>
+    /// <exception cref="InvalidOperationException">The outbox holds another record with the same evidence ID.</exception>
+    public async Task<Delivery> Enqueue(ExecutionEvidence evidence, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(evidence);
+        var outbox = RequireOutbox();
+        var entries = (await outbox.List(ct).ConfigureAwait(false)).ToList();
+        var entry = entries.Find(e => e.Id == evidence.EvidenceId);
+        if (entry is not null && DigestOf(entry) != Digest(evidence))
+            throw new InvalidOperationException($"genesismesh: a different record with evidence_id {evidence.EvidenceId} is in the outbox");
+        if (entry is null)
+        {
+            entry = EvidenceOutbox.Entry(evidence);
+            await outbox.Add(entry, ct).ConfigureAwait(false);
+            entries.Add(entry);
+        }
+        if (entry.State == OutboxStates.DeadLetter) return new Delivery { Queued = entry };
+
+        var pending = PendingBefore(entries, entry);
+        if (pending.Count == 0)
+        {
+            lock (_gate) _inFlight.Add(entry.Id);
+            try
+            {
+                return await Attempt(outbox, entries, entry, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                lock (_gate) _inFlight.Remove(entry.Id);
+            }
+        }
+        FlushRun? run = null;
+        if (pending.Count <= MaxInlineDrain)
+        {
+            lock (_gate)
+            {
+                if (_flush is null) _flush = run = new FlushRun(full: false, ignoreBackoff: true);
+            }
+        }
+        if (run is null) return new Delivery { Queued = entry };
+        var only = pending.Select(e => e.Id).Append(entry.Id).ToHashSet(StringComparer.Ordinal);
+        var (_, outcomes) = await Tracked(run, () => Flush(outbox, ignoreBackoff: true, only, ct)).ConfigureAwait(false);
+        return outcomes.TryGetValue(entry.Id, out var delivery) ? delivery : new Delivery { Queued = entry };
+    }
+
+    /// <summary>
+    /// Submits the outbox's pending records in the order they were added. A record waits while one it chains from is
+    /// pending; a record whose predecessor was refused is sent too, and is a dead letter
+    /// (<see cref="EvidenceOutbox.PredecessorDeadLettered"/>) when the NA refuses it for that gap. Records in backoff
+    /// are skipped unless <see cref="FlushOptions.IgnoreBackoff"/>; a transient failure ends the run, leaving the rest
+    /// for the next one. Run it at startup and on a timer. A call joins the run in progress when that run tries
+    /// everything it asks for, and otherwise starts one once it ends.
+    /// </summary>
+    /// <exception cref="OutboxException">No outbox is configured (<c>outbox_required</c>), or it cannot be read.</exception>
+    public async Task<FlushResult> FlushPending(FlushOptions? options = null, CancellationToken ct = default)
+    {
+        var outbox = RequireOutbox();
+        var ignoreBackoff = options?.IgnoreBackoff ?? false;
+        while (true)
+        {
+            FlushRun? running;
+            FlushRun? mine = null;
+            lock (_gate)
+            {
+                running = _flush;
+                if (running is null) _flush = mine = new FlushRun(full: true, ignoreBackoff);
+            }
+            if (mine is not null)
+                return (await Tracked(mine, () => Flush(outbox, ignoreBackoff, null, ct)).ConfigureAwait(false)).Result;
+            var joins = running!.Full && (running.IgnoreBackoff || !ignoreBackoff);
+            try
+            {
+                var result = await running.Result.Task.WaitAsync(ct).ConfigureAwait(false);
+                if (joins) return result;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // The run was its caller's to cancel, not this one's: start another.
+            }
+            catch (Exception) when (!joins)
+            {
+                // A run this call does not join: its failure is its own caller's.
+            }
+        }
+    }
+
+    /// <summary>
+    /// The newest pending record in the outbox for <paramref name="resourceId"/> that can still be admitted, or null.
+    /// <see cref="Governance.GovernedAction"/> chains from it, not from the NA's head, while it waits.
+    /// </summary>
+    /// <exception cref="OutboxException">No outbox is configured (<c>outbox_required</c>), or it cannot be read.</exception>
+    public async Task<ExecutionEvidence?> PendingHead(string resourceId, CancellationToken ct = default)
+    {
+        var entries = await RequireOutbox().List(ct).ConfigureAwait(false);
+        var dead = DeadDigests(entries);
+        for (var i = entries.Count - 1; i >= 0; i--)
+        {
+            var e = entries[i];
+            if (e.State == OutboxStates.Pending && e.Evidence.ResourceId == resourceId && !dead.Contains(DigestOf(e)))
+                return e.Evidence;
+        }
+        return null;
     }
 
     /// <summary>
@@ -172,6 +318,220 @@ public sealed class EvidenceStoreClient
     {
         ArgumentNullException.ThrowIfNull(request);
         return await _t.AdminPostAsync<ExecutorKeyState>("/admin/evidence/executor-keys", request, ct).ConfigureAwait(false);
+    }
+
+    // ── The outbox ──────────────────────────────────────────────────────────
+
+    private IOutbox<OutboxEntry> RequireOutbox() =>
+        Outbox ?? throw new OutboxException("outbox_required", "no evidence outbox is configured (ClientOptions.Outbox)");
+
+    /// <summary>
+    /// Runs <paramref name="flush"/> as the flush in progress, <paramref name="run"/>, which this caller claimed; the
+    /// slot is free again before anyone waiting on the run sees its end.
+    /// </summary>
+    private async Task<(FlushResult Result, Dictionary<string, Delivery> Outcomes)> Tracked(
+        FlushRun run, Func<Task<(FlushResult, Dictionary<string, Delivery>)>> flush)
+    {
+        (FlushResult, Dictionary<string, Delivery>) done;
+        try
+        {
+            done = await flush().ConfigureAwait(false);
+        }
+        catch (Exception e)
+        {
+            lock (_gate) _flush = null;
+            if (e is OperationCanceledException canceled) run.Result.TrySetCanceled(canceled.CancellationToken);
+            else run.Result.TrySetException(e);
+            // Observed here: a run nobody joined does not report its failure as unobserved.
+            _ = run.Result.Task.Exception;
+            throw;
+        }
+        lock (_gate) _flush = null;
+        run.Result.TrySetResult(done.Item1);
+        return done;
+    }
+
+    private async Task<(FlushResult, Dictionary<string, Delivery>)> Flush(
+        IOutbox<OutboxEntry> outbox, bool ignoreBackoff, HashSet<string>? only, CancellationToken ct)
+    {
+        var admitted = new List<OutboxEntry>();
+        var pending = new List<OutboxEntry>();
+        var deadLettered = new List<OutboxEntry>();
+        var outcomes = new Dictionary<string, Delivery>(StringComparer.Ordinal);
+        var entries = (await outbox.List(ct).ConfigureAwait(false)).ToList();
+        var waiting = new HashSet<string>(StringComparer.Ordinal);
+        var stopped = false;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            var digest = DigestOf(entry);
+            if (entry.State == OutboxStates.DeadLetter) continue;
+            bool inFlight;
+            lock (_gate) inFlight = _inFlight.Contains(entry.Id);
+            if (inFlight)
+            {
+                // Enqueue is submitting it: still pending as far as this run knows.
+                waiting.Add(digest);
+                pending.Add(entry);
+                outcomes[entry.Id] = new Delivery { Queued = entry };
+                continue;
+            }
+            if (only is not null && !only.Contains(entry.Id))
+            {
+                waiting.Add(digest);
+                continue;
+            }
+            var due = ignoreBackoff || !(EvidenceOutbox.ParseTime(entry.NextAttemptAt) is { } next && next > DateTimeOffset.UtcNow);
+            if (stopped || !due || Predecessors(entry.Evidence).Any(waiting.Contains))
+            {
+                waiting.Add(digest);
+                pending.Add(entry);
+                outcomes[entry.Id] = new Delivery { Queued = entry };
+                continue;
+            }
+            var delivery = await Attempt(outbox, entries, entry, ct).ConfigureAwait(false);
+            outcomes[entry.Id] = delivery;
+            if (delivery.Submission is not null)
+            {
+                admitted.Add(entry);
+            }
+            else if (delivery.Queued!.State == OutboxStates.DeadLetter)
+            {
+                deadLettered.Add(delivery.Queued);
+            }
+            else
+            {
+                waiting.Add(digest);
+                pending.Add(delivery.Queued);
+                stopped = true;
+            }
+        }
+        return (new FlushResult { Admitted = admitted, Pending = pending, DeadLettered = deadLettered }, outcomes);
+    }
+
+    /// <summary>Submits one entry and stores what became of it. Throws only when the caller cancels.</summary>
+    private async Task<Delivery> Attempt(IOutbox<OutboxEntry> outbox, List<OutboxEntry> entries, OutboxEntry entry, CancellationToken ct)
+    {
+        EvidenceSubmission submission;
+        try
+        {
+            submission = await Submit(entry.Evidence, ct).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            var (failure, transient) = EvidenceOutbox.Classify(e);
+            var attempts = entry.Attempts + 1;
+            // A gap behind a record not admitted yet is retried; behind a dead letter it never closes.
+            if (ChainGaps.Contains(failure.Code) && Predecessors(entry.Evidence).Any(DeadDigests(entries).Contains))
+            {
+                return new Delivery
+                {
+                    Queued = await DeadLetter(outbox, entries, entry with { Attempts = attempts }, new SubmissionFailure
+                    {
+                        Status = failure.Status,
+                        Code = EvidenceOutbox.PredecessorDeadLettered,
+                        Message = $"a record this one chains from was refused; the NA answered {failure.Code}: {failure.Message}",
+                    }).ConfigureAwait(false),
+                };
+            }
+            if (!transient)
+                return new Delivery { Queued = await DeadLetter(outbox, entries, entry with { Attempts = attempts }, failure).ConfigureAwait(false) };
+            var failed = entry with
+            {
+                Attempts = attempts,
+                LastError = failure,
+                NextAttemptAt = EvidenceOutbox.Time(EvidenceOutbox.NextAttemptAt(attempts, e, DateTimeOffset.UtcNow)),
+            };
+            await Keep(outbox, failed).ConfigureAwait(false);
+            Replace(entries, failed);
+            return new Delivery { Queued = failed };
+        }
+        try
+        {
+            await outbox.Remove(entry.Id, CancellationToken.None).ConfigureAwait(false);
+            _digests.TryRemove(entry.Id, out _);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // The NA holds the record: the next flush resubmits it, gets a duplicate and removes it.
+        }
+        return new Delivery { Submission = submission };
+    }
+
+    /// <summary>
+    /// Dead-letters <paramref name="entry"/>. Records that chain from it stay pending: each is sent in turn, so the NA
+    /// quarantines one it refuses for good, and one it refuses only for the gap is dead-lettered then.
+    /// </summary>
+    private static async Task<OutboxEntry> DeadLetter(IOutbox<OutboxEntry> outbox, List<OutboxEntry> entries, OutboxEntry entry, SubmissionFailure failure)
+    {
+        var refused = entry with { State = OutboxStates.DeadLetter, NextAttemptAt = null, LastError = failure };
+        await Keep(outbox, refused).ConfigureAwait(false);
+        Replace(entries, refused);
+        return refused;
+    }
+
+    /// <summary>Stores an entry's new state. Once the NA has answered, its answer stands even if this fails.</summary>
+    private static async Task Keep(IOutbox<OutboxEntry> outbox, OutboxEntry entry)
+    {
+        try
+        {
+            await outbox.Update(entry, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // The entry keeps its previous state; the next flush settles it.
+        }
+    }
+
+    private static void Replace(List<OutboxEntry> entries, OutboxEntry entry)
+    {
+        var i = entries.FindIndex(e => e.Id == entry.Id);
+        if (i >= 0) entries[i] = entry;
+    }
+
+    private static string Digest(ExecutionEvidence evidence) =>
+        OfflineVerifier.ExecutionDigest(Transport.ToElement(evidence).GetRawText());
+
+    private string DigestOf(OutboxEntry entry) => _digests.GetOrAdd(entry.Id, _ => Digest(entry.Evidence));
+
+    private static IEnumerable<string> Predecessors(ExecutionEvidence evidence)
+    {
+        if (!string.IsNullOrEmpty(evidence.PrevEvidenceDigest)) yield return evidence.PrevEvidenceDigest;
+        if (!string.IsNullOrEmpty(evidence.PrevResourceDigest)) yield return evidence.PrevResourceDigest;
+    }
+
+    /// <summary>Digests of the dead letters and of every record that chains from one.</summary>
+    private HashSet<string> DeadDigests(IReadOnlyList<OutboxEntry> entries)
+    {
+        var dead = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var e in entries)
+        {
+            if (e.State == OutboxStates.DeadLetter || Predecessors(e.Evidence).Any(dead.Contains)) dead.Add(DigestOf(e));
+        }
+        return dead;
+    }
+
+    /// <summary>The pending records <paramref name="entry"/> chains from, oldest first.</summary>
+    private List<OutboxEntry> PendingBefore(List<OutboxEntry> entries, OutboxEntry entry)
+    {
+        var byDigest = new Dictionary<string, OutboxEntry>(StringComparer.Ordinal);
+        foreach (var e in entries) byDigest.TryAdd(DigestOf(e), e);
+        var pending = new List<OutboxEntry>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var visit = new Stack<OutboxEntry>();
+        visit.Push(entry);
+        while (visit.TryPop(out var next))
+        {
+            foreach (var digest in Predecessors(next.Evidence))
+            {
+                if (!byDigest.TryGetValue(digest, out var before) || !seen.Add(digest)) continue;
+                visit.Push(before);
+                if (before.State == OutboxStates.Pending) pending.Add(before);
+            }
+        }
+        var order = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = 0; i < entries.Count; i++) order.TryAdd(entries[i].Id, i);
+        return pending.OrderBy(e => order[e.Id]).ToList();
     }
 
     private static Dictionary<string, string> Query(EvidenceSearchParams? search, long? afterSequence)

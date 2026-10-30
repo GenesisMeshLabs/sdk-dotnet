@@ -187,6 +187,26 @@ public sealed class ExecutionRecorder
         }
     }
 
+    /// <summary>
+    /// True when <see cref="Record"/> would refuse this metadata: the secret guard refuses it, or it is JSON the NA
+    /// would not read alike (checked as deep as a record holds it).
+    /// </summary>
+    internal static bool Unrecordable(IDictionary<string, object?> executionParameters, string? outcomeDetail)
+    {
+        try
+        {
+            var parameters = Element(executionParameters);
+            if (EvidenceMetadata.CheckMetadataOnly(parameters, outcomeDetail) is not null) return true;
+            var metadata = Element(new Dictionary<string, object?> { ["execution_parameters"] = parameters, ["outcome_detail"] = outcomeDetail });
+            StrictJsonReader.Check("[[" + metadata.GetRawText() + "]]");
+            return false;
+        }
+        catch (StrictJsonException)
+        {
+            return true;
+        }
+    }
+
     /// <summary>How a record is written: as request bodies are, with every string checked for a lone surrogate.</summary>
     private static readonly JsonSerializerOptions RecordOptions = new(Auth.SerializerOptions) { Converters = { new WholeStrings() } };
 
