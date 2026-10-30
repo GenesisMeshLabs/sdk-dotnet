@@ -443,7 +443,9 @@ refusals are final (`PermanentRefusals`) and how a failure is classified
 
 `FileOutbox` writes one JSON file per entry, in the format of the TypeScript
 and Rust SDKs, so a controller can move between them; it creates its directory
-`0700` on Linux and macOS (restrict it yourself on Windows). For a database,
+`0700` on Linux and macOS (restrict it yourself on Windows). One process uses a
+directory: where instances share a file system, such as Azure Functions scaled
+out over one `%HOME%`, give each instance its own directory or use a database. For a database,
 implement `IOutbox<OutboxEntry>`: `Add`, `Update`, `Remove`, and `List` in the
 order added, each durable once it completes. `MemoryOutbox<OutboxEntry>` is
 for tests.

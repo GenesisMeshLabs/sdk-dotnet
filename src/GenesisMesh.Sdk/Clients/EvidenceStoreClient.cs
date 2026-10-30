@@ -23,10 +23,15 @@ public sealed class EvidenceStoreClient
     private readonly ConcurrentDictionary<string, string> _digests = new(StringComparer.Ordinal);
     /// <summary>Guards <see cref="_inFlight"/> and <see cref="_flush"/>.</summary>
     private readonly object _gate = new();
-    /// <summary>Records <see cref="Enqueue"/> is submitting right now: a concurrent flush leaves them to it.</summary>
+    /// <summary>Records a call is submitting right now (<see cref="Claim"/>): every other call leaves them to it.</summary>
     private readonly HashSet<string> _inFlight = new(StringComparer.Ordinal);
     /// <summary>The flush in progress: every due entry (full) or an enqueued record's own drain.</summary>
     private FlushRun? _flush;
+    /// <summary>
+    /// Records admitted while <see cref="_flush"/> runs: it may have listed them before, and skips them rather than
+    /// sending them again.
+    /// </summary>
+    private readonly HashSet<string> _settled = new(StringComparer.Ordinal);
 
     private sealed class FlushRun(bool full, bool ignoreBackoff)
     {
@@ -82,7 +87,9 @@ public sealed class EvidenceStoreClient
     /// retry overcomes (<see cref="EvidenceOutbox.PermanentRefusals"/>) keeps it as a dead letter with the NA's code.
     /// A record whose predecessor was refused is still sent, so the NA can quarantine it when it refuses it for good
     /// too; refused only for the gap its predecessor left, it is a dead letter
-    /// (<see cref="EvidenceOutbox.PredecessorDeadLettered"/>). Passing a record already in the outbox submits it again.
+    /// (<see cref="EvidenceOutbox.PredecessorDeadLettered"/>). Passing a record already in the outbox submits it again;
+    /// while another call is submitting the same record, this one returns it as <see cref="Delivery.Queued"/> without
+    /// sending it.
     /// </summary>
     /// <exception cref="OutboxException">No outbox is configured (<c>outbox_required</c>), or it cannot be read.</exception>
     /// <exception cref="InvalidOperationException">The outbox holds another record with the same evidence ID.</exception>
@@ -94,39 +101,42 @@ public sealed class EvidenceStoreClient
         var entry = entries.Find(e => e.Id == evidence.EvidenceId);
         if (entry is not null && DigestOf(entry) != Digest(evidence))
             throw new InvalidOperationException($"genesismesh: a different record with evidence_id {evidence.EvidenceId} is in the outbox");
-        if (entry is null)
+        // Claimed before it is stored: a flush that lists it meanwhile leaves it to this call, and so does another
+        // enqueue of the same record, which returns it as queued.
+        if (!Claim(evidence.EvidenceId)) return new Delivery { Queued = entry ?? EvidenceOutbox.Entry(evidence) };
+        var claimed = true;
+        try
         {
-            entry = EvidenceOutbox.Entry(evidence);
-            await outbox.Add(entry, ct).ConfigureAwait(false);
-            entries.Add(entry);
-        }
-        if (entry.State == OutboxStates.DeadLetter) return new Delivery { Queued = entry };
+            if (entry is null)
+            {
+                entry = EvidenceOutbox.Entry(evidence);
+                await outbox.Add(entry, ct).ConfigureAwait(false);
+                entries.Add(entry);
+            }
+            if (entry.State == OutboxStates.DeadLetter) return new Delivery { Queued = entry };
 
-        var pending = PendingBefore(entries, entry);
-        if (pending.Count == 0)
-        {
-            lock (_gate) _inFlight.Add(entry.Id);
-            try
+            var pending = PendingBefore(entries, entry);
+            if (pending.Count == 0) return await Attempt(outbox, entries, entry, ct).ConfigureAwait(false);
+            FlushRun? run = null;
+            if (pending.Count <= MaxInlineDrain)
             {
-                return await Attempt(outbox, entries, entry, ct).ConfigureAwait(false);
+                lock (_gate)
+                {
+                    if (_flush is null) _flush = run = new FlushRun(full: false, ignoreBackoff: true);
+                }
             }
-            finally
-            {
-                lock (_gate) _inFlight.Remove(entry.Id);
-            }
+            if (run is null) return new Delivery { Queued = entry };
+            // The drain submits the record in its turn, and claims it then.
+            Release(entry.Id);
+            claimed = false;
+            var only = pending.Select(e => e.Id).Append(entry.Id).ToHashSet(StringComparer.Ordinal);
+            var (_, outcomes) = await Tracked(run, () => Flush(outbox, ignoreBackoff: true, only, ct)).ConfigureAwait(false);
+            return outcomes.TryGetValue(entry.Id, out var delivery) ? delivery : new Delivery { Queued = entry };
         }
-        FlushRun? run = null;
-        if (pending.Count <= MaxInlineDrain)
+        finally
         {
-            lock (_gate)
-            {
-                if (_flush is null) _flush = run = new FlushRun(full: false, ignoreBackoff: true);
-            }
+            if (claimed) Release(evidence.EvidenceId);
         }
-        if (run is null) return new Delivery { Queued = entry };
-        var only = pending.Select(e => e.Id).Append(entry.Id).ToHashSet(StringComparer.Ordinal);
-        var (_, outcomes) = await Tracked(run, () => Flush(outbox, ignoreBackoff: true, only, ct)).ConfigureAwait(false);
-        return outcomes.TryGetValue(entry.Id, out var delivery) ? delivery : new Delivery { Queued = entry };
     }
 
     /// <summary>
@@ -163,7 +173,7 @@ public sealed class EvidenceStoreClient
             {
                 // The run was its caller's to cancel, not this one's: start another.
             }
-            catch (Exception) when (!joins)
+            catch (Exception) when (!joins && !ct.IsCancellationRequested)
             {
                 // A run this call does not join: its failure is its own caller's.
             }
@@ -325,6 +335,17 @@ public sealed class EvidenceStoreClient
     private IOutbox<OutboxEntry> RequireOutbox() =>
         Outbox ?? throw new OutboxException("outbox_required", "no evidence outbox is configured (ClientOptions.Outbox)");
 
+    /// <summary>Marks a record as being submitted by this call; false when another call is submitting it.</summary>
+    private bool Claim(string id)
+    {
+        lock (_gate) return _inFlight.Add(id);
+    }
+
+    private void Release(string id)
+    {
+        lock (_gate) _inFlight.Remove(id);
+    }
+
     /// <summary>
     /// Runs <paramref name="flush"/> as the flush in progress, <paramref name="run"/>, which this caller claimed; the
     /// slot is free again before anyone waiting on the run sees its end.
@@ -339,16 +360,26 @@ public sealed class EvidenceStoreClient
         }
         catch (Exception e)
         {
-            lock (_gate) _flush = null;
+            Free();
             if (e is OperationCanceledException canceled) run.Result.TrySetCanceled(canceled.CancellationToken);
             else run.Result.TrySetException(e);
             // Observed here: a run nobody joined does not report its failure as unobserved.
             _ = run.Result.Task.Exception;
             throw;
         }
-        lock (_gate) _flush = null;
+        Free();
         run.Result.TrySetResult(done.Item1);
         return done;
+    }
+
+    /// <summary>Frees the flush slot, with what was admitted during the run.</summary>
+    private void Free()
+    {
+        lock (_gate)
+        {
+            _flush = null;
+            _settled.Clear();
+        }
     }
 
     private async Task<(FlushResult, Dictionary<string, Delivery>)> Flush(
@@ -366,30 +397,39 @@ public sealed class EvidenceStoreClient
             var entry = entries[i];
             var digest = DigestOf(entry);
             if (entry.State == OutboxStates.DeadLetter) continue;
-            bool inFlight;
-            lock (_gate) inFlight = _inFlight.Contains(entry.Id);
-            if (inFlight)
-            {
-                // Enqueue is submitting it: still pending as far as this run knows.
-                waiting.Add(digest);
-                pending.Add(entry);
-                outcomes[entry.Id] = new Delivery { Queued = entry };
-                continue;
-            }
             if (only is not null && !only.Contains(entry.Id))
             {
                 waiting.Add(digest);
                 continue;
             }
             var due = ignoreBackoff || !(EvidenceOutbox.ParseTime(entry.NextAttemptAt) is { } next && next > DateTimeOffset.UtcNow);
-            if (stopped || !due || Predecessors(entry.Evidence).Any(waiting.Contains))
+            var tried = !stopped && due && !Predecessors(entry.Evidence).Any(waiting.Contains);
+            // Claimed only when it is tried, and in one step with the check that another call has not admitted it since
+            // the list was read (nothing left to send) or claimed it (it submits the record; pending as far as this run
+            // knows).
+            bool settled, claimed = false;
+            lock (_gate)
+            {
+                settled = _settled.Contains(entry.Id);
+                if (tried && !settled) claimed = _inFlight.Add(entry.Id);
+            }
+            if (settled) continue;
+            if (!claimed)
             {
                 waiting.Add(digest);
                 pending.Add(entry);
                 outcomes[entry.Id] = new Delivery { Queued = entry };
                 continue;
             }
-            var delivery = await Attempt(outbox, entries, entry, ct).ConfigureAwait(false);
+            Delivery delivery;
+            try
+            {
+                delivery = await Attempt(outbox, entries, entry, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                Release(entry.Id);
+            }
             outcomes[entry.Id] = delivery;
             if (delivery.Submission is not null)
             {
@@ -445,6 +485,10 @@ public sealed class EvidenceStoreClient
             await Keep(outbox, failed).ConfigureAwait(false);
             Replace(entries, failed);
             return new Delivery { Queued = failed };
+        }
+        lock (_gate)
+        {
+            if (_flush is not null) _settled.Add(entry.Id);
         }
         try
         {

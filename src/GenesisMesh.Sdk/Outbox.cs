@@ -36,7 +36,10 @@ public static class EvidenceOutbox
     /// </summary>
     public const string PredecessorDeadLettered = "evidence_predecessor_dead_lettered";
 
-    /// <summary>The failure code of an exception in this process before any request was made: retried.</summary>
+    /// <summary>
+    /// The failure code of an exception in this process that is neither the NA's answer, a network error nor an answer
+    /// this SDK could not read (which keeps the strict reader's reason, such as <c>invalid_json</c>): retried.
+    /// </summary>
     public const string LocalError = "local_error";
 
     /// <summary>The failure code of a submission that got no answer from the NA: retried.</summary>
@@ -92,6 +95,9 @@ public static class EvidenceOutbox
                 }, !refused);
             case NetworkException:
                 return (new SubmissionFailure { Status = 0, Code = NetworkError, Message = error.Message }, true);
+            // The NA's answer could not be read: it may have admitted the record.
+            case StrictJsonException strict:
+                return (new SubmissionFailure { Status = 0, Code = strict.Reason, Message = error.Message }, true);
             default:
                 return (new SubmissionFailure { Status = 0, Code = LocalError, Message = error.Message }, true);
         }
@@ -196,9 +202,12 @@ public sealed class MemoryOutbox<TEntry> : IOutbox<TEntry> where TEntry : class,
 /// write the same files (<c>gm.evidence.outbox.v1</c>), so a controller can move between them.
 /// <para>
 /// One process uses a directory at a time: it is read once, then kept in memory, and nothing stops a second process
-/// from opening it too (each would keep its own view). On that first read, a temporary file a crash left is recovered
+/// from opening it too (each would keep its own view). Where instances share a file system, such as Azure Functions
+/// scaled out over one <c>%HOME%</c>, give each its own directory or implement <see cref="IOutbox{TEntry}"/> over a
+/// database. On that first read, a temporary file a crash left is recovered
 /// (an entry that was being added) or removed (an update that did not finish). A file that cannot be read, or whose
-/// record has a field this SDK does not know, is moved aside as <c>&lt;name&gt;.unreadable</c>: that read throws
+/// record has a field this SDK does not know (reading it would drop the field), is moved aside as
+/// <c>&lt;name&gt;.unreadable</c>: that read throws
 /// <c>outbox_file_unreadable</c> naming it (<see cref="OutboxException"/>), and the next read goes on without it. A
 /// file of another outbox format is refused and left in place.
 /// </para>
@@ -219,7 +228,7 @@ public sealed class FileOutbox : IOutbox<OutboxEntry>
     {
         ArgumentException.ThrowIfNullOrEmpty(directory);
         DirectoryPath = directory;
-        _files = new JsonFileOutbox<OutboxEntry>(directory, Format, IsEntry);
+        _files = new JsonFileOutbox<OutboxEntry>(directory, Format, IsEntry, KnownFields);
     }
 
     /// <summary>The outbox's directory.</summary>
@@ -237,13 +246,16 @@ public sealed class FileOutbox : IOutbox<OutboxEntry>
     /// <inheritdoc/>
     public Task<IReadOnlyList<OutboxEntry>> List(CancellationToken ct = default) => _files.List(ct);
 
-    /// <summary>
-    /// An entry holds a record object, without a field this SDK does not know: reading it would drop the field, and the
-    /// record would no longer match its signature.
-    /// </summary>
+    /// <summary>An entry holds a record object.</summary>
     private static bool IsEntry(JsonElement entry) =>
-        entry.TryGetProperty("evidence", out var evidence) && evidence.ValueKind == JsonValueKind.Object
-        && StrictFields.UnknownFields("ExecutionEvidence", evidence).Count == 0;
+        entry.TryGetProperty("evidence", out var evidence) && evidence.ValueKind == JsonValueKind.Object;
+
+    /// <summary>
+    /// The record has no field this SDK does not know: reading one would drop the field, and the record would no longer
+    /// match its signature.
+    /// </summary>
+    private static bool KnownFields(JsonElement entry) =>
+        StrictFields.UnknownFields("ExecutionEvidence", entry.GetProperty("evidence")).Count == 0;
 }
 
 /// <summary>Copies of entries, through their JSON: an outbox never shares an entry with its caller.</summary>
@@ -260,6 +272,7 @@ internal sealed partial class JsonFileOutbox<TEntry> where TEntry : class, IOutb
     private readonly string _directory;
     private readonly string _format;
     private readonly Func<JsonElement, bool> _isEntry;
+    private readonly Func<JsonElement, bool> _knownFields;
     private readonly object _lock = new();
     /// <summary>
     /// The last operation queued: every operation runs alone, after the one before it, so an update never writes a
@@ -277,7 +290,11 @@ internal sealed partial class JsonFileOutbox<TEntry> where TEntry : class, IOutb
         public TEntry Entry { get; set; } = entry;
     }
 
-    private enum Kind { Entry, OtherFormat, Unreadable }
+    /// <summary>
+    /// What a file holds: an entry; one whose record has a field this SDK does not know (complete, but not read, so
+    /// the field is not dropped); a file of another outbox format; or nothing readable.
+    /// </summary>
+    private enum Kind { Entry, UnknownFields, OtherFormat, Unreadable }
 
     [GeneratedRegex(@"^(\d{12})-([A-Za-z0-9-]{1,64})\.json$")]
     private static partial Regex EntryFile();
@@ -288,11 +305,12 @@ internal sealed partial class JsonFileOutbox<TEntry> where TEntry : class, IOutb
     [GeneratedRegex("^[A-Za-z0-9-]{1,64}$")]
     private static partial Regex PlainId();
 
-    internal JsonFileOutbox(string directory, string format, Func<JsonElement, bool> isEntry)
+    internal JsonFileOutbox(string directory, string format, Func<JsonElement, bool> isEntry, Func<JsonElement, bool> knownFields)
     {
         _directory = directory;
         _format = format;
         _isEntry = isEntry;
+        _knownFields = knownFields;
     }
 
     internal Task Add(TEntry entry, CancellationToken ct)
@@ -381,7 +399,7 @@ internal sealed partial class JsonFileOutbox<TEntry> where TEntry : class, IOutb
             var target = temp.Groups[1].Value;
             // An add synced but not renamed is recovered; an update not renamed, or a write cut short, is dropped.
             var kind = names.Contains(target) ? Kind.Unreadable : Parse(await ReadText(path, ct).ConfigureAwait(false)).Kind;
-            if (kind == Kind.Entry) File.Move(path, Path.Combine(_directory, target));
+            if (kind is Kind.Entry or Kind.UnknownFields) File.Move(path, Path.Combine(_directory, target));
             else File.Delete(path);
             recovered = true;
         }
@@ -397,7 +415,7 @@ internal sealed partial class JsonFileOutbox<TEntry> where TEntry : class, IOutb
             var (kind, entry) = Parse(await File.ReadAllTextAsync(path, Encoding.UTF8, ct).ConfigureAwait(false));
             if (kind == Kind.OtherFormat)
                 throw new OutboxException("outbox_file_other_format", $"outbox file {file} in {_directory} is not {_format}");
-            if (kind == Kind.Unreadable)
+            if (kind is Kind.Unreadable or Kind.UnknownFields)
             {
                 // Moved aside, so one bad file does not stop every action.
                 File.Move(path, path + Unreadable, overwrite: true);
@@ -478,6 +496,7 @@ internal sealed partial class JsonFileOutbox<TEntry> where TEntry : class, IOutb
             if (!body.TryGetProperty("entry", out var entry) || entry.ValueKind != JsonValueKind.Object
                 || !entry.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || !_isEntry(entry))
                 return (Kind.Unreadable, null);
+            if (!_knownFields(entry)) return (Kind.UnknownFields, null);
             return entry.Deserialize<TEntry>(Auth.SerializerOptions) is { } read ? (Kind.Entry, read) : (Kind.Unreadable, null);
         }
         catch (JsonException)

@@ -173,6 +173,20 @@ public sealed class OutboxTests : IDisposable
     }
 
     [Fact]
+    public async Task FileOutbox_RecoversAnInterruptedAddWithAnUnknownField_ThenMovesItAside()
+    {
+        await new FileOutbox(Dir).List();
+        // A newer SDK's add, flushed but not renamed: complete, so recovered, but not read, so its field is not dropped.
+        File.WriteAllText(Path.Combine(Dir, ".000000000001-e-1.json.0a1b2c.tmp"), """
+            {"format":"gm.evidence.outbox.v1","entry":{"id":"e-1","evidence":{"evidence_id":"e-1","from_the_future":1},
+            "state":"pending","attempts":0,"queued_at":"2026-10-09T12:00:00.000Z","next_attempt_at":null,"last_error":null}}
+            """);
+        var error = await Assert.ThrowsAsync<OutboxException>(() => new FileOutbox(Dir).List());
+        Assert.Equal("outbox_file_unreadable", error.Code);
+        Assert.Equal(new[] { "000000000001-e-1.json.unreadable" }, Files());
+    }
+
+    [Fact]
     public async Task FileOutbox_ReadsEntriesTheRustSdkWrites()
     {
         await new FileOutbox(Dir).List();
@@ -286,6 +300,9 @@ public sealed class OutboxTests : IDisposable
 
         var network = EvidenceOutbox.Classify(new NetworkException(new HttpRequestException("down"))).Failure;
         Assert.Equal((0, EvidenceOutbox.NetworkError), (network.Status, network.Code));
+        // An answer this SDK could not read keeps the strict reader's reason.
+        var unread = EvidenceOutbox.Classify(new StrictJsonException("duplicate_key", "\"status\""));
+        Assert.Equal((0, "duplicate_key", true), (unread.Failure.Status, unread.Failure.Code, unread.Transient));
         var local = EvidenceOutbox.Classify(new InvalidOperationException("disk")).Failure;
         Assert.Equal((0, EvidenceOutbox.LocalError, "disk"), (local.Status, local.Code, local.Message));
         Assert.Throws<ArgumentNullException>(() => EvidenceOutbox.Classify(null!));

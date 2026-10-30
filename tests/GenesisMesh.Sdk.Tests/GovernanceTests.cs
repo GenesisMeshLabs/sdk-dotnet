@@ -863,6 +863,67 @@ public class GovernanceTests
     }
 
     [Fact]
+    public async Task Outbox_AFlushWaitingOnAnotherRunStops_WhenItsCallerCancels()
+    {
+        var x = WithOutbox();
+        await x.Outbox!.Add(EvidenceOutbox.Entry(await x.Sign()));
+        var release = new TaskCompletionSource();
+        // The run holds the slot until released, whatever its token says.
+        x.Na.DuringSubmit = _ => release.Task;
+        var running = x.Gm.EvidenceStore.FlushPending();
+        using var cts = new CancellationTokenSource();
+        // It asks for more than the run in progress tries, so it waits for that run to end.
+        var waiting = x.Gm.EvidenceStore.FlushPending(new FlushOptions { IgnoreBackoff = true }, cts.Token);
+        await Task.Run(cts.Cancel).WaitAsync(TimeSpan.FromSeconds(10));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting.WaitAsync(TimeSpan.FromSeconds(10)));
+        release.SetResult();
+        Assert.Single((await running).Admitted);
+    }
+
+    [Fact]
+    public async Task Outbox_LeavesARecordAnotherEnqueueIsSubmitting()
+    {
+        var x = WithOutbox();
+        var a = await x.Sign();
+        var release = new TaskCompletionSource();
+        x.Na.DuringSubmit = ct => release.Task.WaitAsync(ct);
+        var first = x.Gm.EvidenceStore.Enqueue(a);
+        var second = await x.Gm.EvidenceStore.Enqueue(a);
+        Assert.Equal((a.EvidenceId, OutboxStates.Pending), (second.Queued!.Id, second.Queued.State));
+        release.SetResult();
+        Assert.Equal("recorded", (await first).Submission!.Status);
+        Assert.Single(x.Na.Submitted);
+        Assert.Empty(await x.Outbox!.List());
+    }
+
+    [Fact]
+    public async Task Outbox_SubmitsARecordOnce_WhenItsEnqueueRacesAFlush()
+    {
+        for (var round = 0; round < 100; round++)
+        {
+            var x = WithOutbox();
+            var a = await x.Sign();
+            var start = new TaskCompletionSource();
+            var enqueue = Task.Run(async () =>
+            {
+                await start.Task;
+                return await x.Gm.EvidenceStore.Enqueue(a);
+            });
+            var flush = Task.Run(async () =>
+            {
+                await start.Task;
+                return await x.Gm.EvidenceStore.FlushPending(new FlushOptions { IgnoreBackoff = true });
+            });
+            start.SetResult();
+            // The record is claimed before it is stored: a flush never sees it unclaimed, and the enqueue submits it.
+            Assert.Equal("recorded", (await enqueue).Submission?.Status);
+            Assert.Empty((await flush).Admitted);
+            Assert.Single(x.Na.Submitted);
+            Assert.Empty(await x.Outbox!.List());
+        }
+    }
+
+    [Fact]
     public async Task Outbox_AFlushWhoseCallerCancelsLetsTheNextOneRun()
     {
         var x = WithOutbox();
