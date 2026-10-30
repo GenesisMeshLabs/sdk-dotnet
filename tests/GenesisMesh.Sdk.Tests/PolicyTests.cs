@@ -251,7 +251,7 @@ public class PolicyTests
         using var gm = Client(sent, 201, "{}");
         await Assert.ThrowsAsync<ArgumentException>(() => gm.Boundary.Evaluate(new EvaluateRequest { RequestedCapability = "read" }));
         await Assert.ThrowsAsync<ArgumentException>(() => gm.Boundary.Evaluate(
-            new EvaluateRequest { RequestedCapability = "read", AttestationId = "a", Agreement = new { } }));
+            new EvaluateRequest { RequestedCapability = "read", AttestationId = "a", Agreement = new AgreementRecord() }));
         Assert.Empty(sent);
     }
 

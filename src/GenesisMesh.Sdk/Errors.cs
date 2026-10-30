@@ -75,9 +75,10 @@ public sealed class NetworkException : Exception
 }
 
 /// <summary>
-/// Thrown before anything is signed or sent when a record or an evaluation context would carry secret material, or
-/// more metadata than the NA accepts (<see cref="EvidenceMetadata"/>): the NA would refuse it
-/// (<c>evidence_secret_material</c>).
+/// Thrown before anything is signed or sent when metadata would carry secret material or exceed the NA's size limit
+/// (<see cref="EvidenceMetadata"/>, code <c>evidence_secret_material</c>). The NA refuses such evidence with the same
+/// code; for a boundary evaluation's context the guard is this SDK's own, as in the TypeScript SDK, since the NA does
+/// not check contexts.
 /// </summary>
 public sealed class SecretMaterialException : GenesisMeshException
 {
@@ -216,6 +217,15 @@ internal static class ErrorMapping
         error.Details = details;
         error.RetryAfter = retryAfter;
         return error;
+    }
+
+    /// <summary>A new exception like <paramref name="error"/>, for another caller.</summary>
+    internal static GenesisMeshException Copy(GenesisMeshException error)
+    {
+        var copy = ForStatus(error.Status, error.Code, error.Detail);
+        copy.Details = error.Details;
+        copy.RetryAfter = error.RetryAfter;
+        return copy;
     }
 
     /// <summary>The exception type for <paramref name="status"/>.</summary>

@@ -66,11 +66,12 @@ public sealed class PolicyClient
             new Dictionary<string, object?> { ["version"] = version }, ct);
 
     /// <summary>
-    /// Verifies a policy's signature (public route): <paramref name="policy"/> is a <see cref="BoundaryPolicy"/> as the
-    /// NA returned it, or its JSON. <paramref name="issuerPublicKeys"/> defaults to the NA's own key.
+    /// Verifies a policy's signature (public route): <paramref name="policy"/> as the NA returned it (from JSON,
+    /// deserialize it with <see cref="Auth.SerializerOptions"/>). <paramref name="issuerPublicKeys"/> defaults to the
+    /// NA's own key.
     /// POST /boundary-policies/verify
     /// </summary>
-    public Task<PolicyVerification> Verify(object policy, IReadOnlyList<string>? issuerPublicKeys = null, CancellationToken ct = default)
+    public Task<PolicyVerification> Verify(BoundaryPolicy policy, IReadOnlyList<string>? issuerPublicKeys = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(policy);
         var body = new Dictionary<string, object?> { ["policy"] = policy };

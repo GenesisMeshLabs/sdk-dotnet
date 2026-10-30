@@ -181,7 +181,7 @@ public class TransportTests
             if (calls <= 2) throw new HttpRequestException(HttpRequestError.ResponseEnded, "connection reset");
             return Json(200, """{"status":"ok"}""");
         });
-        using var gm = Client(handler, o => o.Retry = new RetryOptions { Attempts = 1, BaseDelay = TimeSpan.Zero });
+        using var gm = Client(handler, o => o.Retry = new RetrySettings { Attempts = 1, BaseDelay = TimeSpan.Zero });
         Assert.Equal("ok", (await gm.Health.Liveness()).Status);
         Assert.Equal(3, calls);
     }
@@ -257,7 +257,7 @@ public class TransportTests
             nonces.Add(req.Headers.GetValues("X-Admin-Nonce").Single());
             return nonces.Count == 1 ? Json(status, "{}") : Json(200, """{"ok":true}""");
         });
-        using var transport = SingleTransport(handler, new RetryOptions { Attempts = 1, BaseDelay = TimeSpan.Zero });
+        using var transport = SingleTransport(handler, new RetrySettings { Attempts = 1, BaseDelay = TimeSpan.Zero });
         await transport.AdminGetAsync<JsonElement>("/admin/test", null, default);
         Assert.Equal(2, nonces.Count);
         Assert.NotEqual(nonces[0], nonces[1]);
@@ -272,7 +272,7 @@ public class TransportTests
             calls++;
             throw new HttpRequestException(HttpRequestError.ConnectionError, "offline");
         });
-        using var transport = SingleTransport(handler, new RetryOptions { Attempts = 2, BaseDelay = TimeSpan.Zero });
+        using var transport = SingleTransport(handler, new RetrySettings { Attempts = 2, BaseDelay = TimeSpan.Zero });
         await Assert.ThrowsAsync<NetworkException>(() => transport.PublicGetAsync<JsonElement>("/test"));
         Assert.Equal(3, calls);
     }
@@ -280,7 +280,7 @@ public class TransportTests
     [Fact]
     public async Task NothingIsRetried_ByDefault_AndStateCreatingPostsNever()
     {
-        foreach (var retry in new RetryOptions?[] { null, new RetryOptions { Attempts = 2, BaseDelay = TimeSpan.Zero } })
+        foreach (var retry in new RetrySettings?[] { null, new RetrySettings { Attempts = 2, BaseDelay = TimeSpan.Zero } })
         {
             var calls = 0;
             using var handler = new FuncHandler(_ => { calls++; return Json(503, "{}"); });
@@ -305,7 +305,7 @@ public class TransportTests
     {
         var calls = 0;
         using var handler = new FuncHandler(_ => { calls++; return Json(status, "{}"); });
-        using var transport = SingleTransport(handler, new RetryOptions { Attempts = 2, BaseDelay = TimeSpan.Zero });
+        using var transport = SingleTransport(handler, new RetrySettings { Attempts = 2, BaseDelay = TimeSpan.Zero });
         await Assert.ThrowsAnyAsync<GenesisMeshException>(() => transport.PublicGetAsync<JsonElement>("/test"));
         Assert.Equal(1, calls);
     }
@@ -319,7 +319,7 @@ public class TransportTests
         {
             o.BaseUrls = null;
             o.BaseUrl = A;
-            o.Retry = new RetryOptions { Attempts = 1, BaseDelay = TimeSpan.Zero };
+            o.Retry = new RetrySettings { Attempts = 1, BaseDelay = TimeSpan.Zero };
         });
         Assert.True((await gm.Boundary.Verify(Body())).Accepted);
         Assert.Equal(2, calls);
@@ -334,7 +334,7 @@ public class TransportTests
             calls++;
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new BrokenStream()) };
         });
-        using var transport = SingleTransport(handler, new RetryOptions { Attempts = 1, BaseDelay = TimeSpan.Zero });
+        using var transport = SingleTransport(handler, new RetrySettings { Attempts = 1, BaseDelay = TimeSpan.Zero });
         var ex = await Assert.ThrowsAsync<NetworkException>(() => transport.PublicGetAsync<JsonElement>("/test"));
         Assert.False(ex.ConnectFailed);
         Assert.Equal(2, calls);
@@ -375,7 +375,7 @@ public class TransportTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new GenesisMeshClient(new ClientOptions
         {
             BaseUrl = A,
-            Retry = new RetryOptions { Attempts = attempts, BaseDelay = TimeSpan.FromMilliseconds(delayMs) },
+            Retry = new RetrySettings { Attempts = attempts, BaseDelay = TimeSpan.FromMilliseconds(delayMs) },
         }));
 
     [Fact]
@@ -387,7 +387,7 @@ public class TransportTests
             times.Add(DateTimeOffset.UtcNow);
             return Json(503, "{}");
         });
-        using var transport = SingleTransport(handler, new RetryOptions { Attempts = 2, BaseDelay = TimeSpan.FromMilliseconds(40) });
+        using var transport = SingleTransport(handler, new RetrySettings { Attempts = 2, BaseDelay = TimeSpan.FromMilliseconds(40) });
         await Assert.ThrowsAsync<ServerException>(() => transport.PublicGetAsync<JsonElement>("/test"));
         Assert.Equal(3, times.Count);
         Assert.True(times[1] - times[0] >= TimeSpan.FromMilliseconds(35), "first wait");
@@ -449,7 +449,7 @@ public class TransportTests
     {
         using var handler = new FuncHandler(_ => Json(200, "null"));
         using var transport = SingleTransport(handler, null);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => transport.PublicGetAsync<HealthStatus>("/health"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => transport.PublicGetAsync<NAHealth>("/health"));
     }
 
     [Theory]
@@ -631,7 +631,7 @@ public class TransportTests
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static Transport SingleTransport(HttpMessageHandler handler, RetryOptions? retry) =>
+    private static Transport SingleTransport(HttpMessageHandler handler, RetrySettings? retry) =>
         new(new ClientOptions
         {
             BaseUrl = A,

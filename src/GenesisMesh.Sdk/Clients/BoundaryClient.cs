@@ -22,7 +22,9 @@ public sealed class BoundaryClient
     /// </summary>
     /// <exception cref="ArgumentException">Neither basis is set, or both are.</exception>
     /// <exception cref="SecretMaterialException">
-    /// The context holds secret material, or more metadata than the NA accepts: nothing is signed or sent.
+    /// The context holds a field named like a secret, a value that looks like a key or token, or more than
+    /// <see cref="EvidenceMetadata.MaxMetadataBytes"/>: nothing is signed or sent. This is the SDK's own guard (the NA
+    /// does not check contexts); put identifiers, versions and timestamps in a context, never secret values.
     /// </exception>
     public async Task<BoundaryEvaluation> Evaluate(EvaluateRequest request, CancellationToken ct = default)
     {
