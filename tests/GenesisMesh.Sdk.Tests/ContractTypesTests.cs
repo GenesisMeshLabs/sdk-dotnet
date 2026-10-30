@@ -63,6 +63,16 @@ public class ContractTypesTests
         { "health_readiness", typeof(Readiness) },
         { "health_status", typeof(HealthStatus) },
         { "na_key_history", typeof(KeyHistoryView) },
+        { "policy_validate", typeof(PolicyValidation) },
+        { "policy_publish", typeof(BoundaryPolicy) },
+        { "policy_activate", typeof(PolicyActivation) },
+        { "policy_deactivate", typeof(PolicyActivation) },
+        { "policy_active", typeof(ActivePolicyStatus) },
+        { "policy_history", typeof(PolicyHistory) },
+        { "policy_verify", typeof(PolicyVerification) },
+        { "policy_list_item", typeof(PolicyVersionSummary) },
+        { "boundary_evaluate", typeof(BoundaryEvaluation) },
+        { "boundary_evaluate_decision", typeof(BoundaryDecision) },
     };
 
     [Theory]
@@ -104,6 +114,12 @@ public class ContractTypesTests
     [InlineData("data_usage_intent", typeof(DataAccessIntent))]
     [InlineData("consensus_vote", typeof(ConsensusVote))]
     [InlineData("consensus_proof", typeof(ConsensusProof))]
+    // 1.9.0: a decision kept its null denial_reason only from 1.9.0, so a typed decision passed back verifies.
+    [InlineData("boundary_decide", typeof(BoundaryDecision))]
+    [InlineData("boundary_evaluate_decision", typeof(BoundaryDecision))]
+    [InlineData("boundary_evaluate_denied_decision", typeof(BoundaryDecision))]
+    [InlineData("boundary_evaluate", typeof(BoundaryEvaluation))]
+    [InlineData("policy_publish", typeof(BoundaryPolicy))]
     public void PassedBackRecordsKeepTheirSignedForm(string name, Type model)
     {
         var raw = Response(name);

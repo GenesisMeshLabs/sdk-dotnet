@@ -60,7 +60,7 @@ jobs:
           --line 96 --branch 84
           --file Auth.cs=98 --file Canonical.cs=97 --file StrictJson.cs=97
           --file StrictFields.cs=100 --file OfflineVerifier.cs=92
-          --file KeyHistory.cs=94 --file Grants.cs=100 --file Transport.cs=97
+          --file KeyHistory.cs=94 --file Grants.cs=100 --file Transport.cs=97 --file Metadata.cs=96
 
       # Package validation: the public API against the baseline release in
       # the csproj; a removed or changed member fails (see the "API

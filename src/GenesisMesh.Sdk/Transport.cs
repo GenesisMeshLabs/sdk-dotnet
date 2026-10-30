@@ -223,6 +223,9 @@ internal sealed class Transport : IDisposable
         return (status, default, default);
     }
 
+    /// <summary><paramref name="value"/> as JSON, as request bodies are written.</summary>
+    internal static JsonElement ToElement(object value) => JsonSerializer.SerializeToElement(value, Auth.SerializerOptions);
+
     /// <summary><paramref name="element"/> read as <typeparamref name="T"/>, as responses are read.</summary>
     internal static T? Read<T>(JsonElement element) => element.Deserialize<T>(Auth.SerializerOptions);
 

@@ -185,6 +185,64 @@ public class LiveContractTests
             Check("na_key_history", await gm.NA.KeyHistory());
             var history = await gm.NA.VerifiedKeyHistory(naKey);
             Assert.Equal(naKey, history.Keys.Single().PublicKey);
+
+            // 1.9.0: the policy lifecycle and policy-aware evaluation.
+            var policyIntent = new BoundaryPolicyIntent
+            {
+                PolicyId = "contract-policy",
+                Description = "contract",
+                ValidFrom = Iso(TimeSpan.FromMinutes(-5)),
+                ValidUntil = Iso(TimeSpan.FromHours(24)),
+                Selector = new PolicySelector { ParentKinds = ["attestation"], Capabilities = ["contract.*"] },
+                Gates =
+                [
+                    new GateSpec
+                    {
+                        GateId = "max-days",
+                        GateType = "max_value.v1",
+                        Order = 0,
+                        Config = new Dictionary<string, object?> { ["path"] = "request_parameters.days", ["max"] = 90 },
+                    },
+                ],
+            };
+            Assert.True(Check("policy_validate", await gm.Policy.Validate(policyIntent))["valid"]!.GetValue<bool>());
+            var boundaryPolicy = await gm.Policy.Publish(policyIntent);
+            Check("policy_publish", boundaryPolicy);
+            Check("policy_activate", await gm.Policy.Activate("contract-policy", boundaryPolicy.Version));
+            var listed = await gm.Policy.List();
+            var listedFields = ContractTypesTests.JsonFields(typeof(PolicyVersionSummary));
+            Assert.All(recorder.Json!["policies"]!.AsArray(), item =>
+                Assert.True(item!.AsObject().All(k => listedFields.ContainsKey(k.Key)), "policy_list: unmodeled keys"));
+            Assert.Contains(listed, v => v.PolicyId == "contract-policy" && v.Active);
+            Check("policy_active", await gm.Policy.Active());
+            Check("policy_history", await gm.Policy.History("contract-policy"));
+            var policyCheck = await gm.Policy.Verify(boundaryPolicy);
+            Check("policy_verify", policyCheck);
+            Assert.True(policyCheck.Valid, recorder.Json?.ToJsonString());
+
+            var vendor = await gm.Attestation.Issue(D(("subject_id", "vendor-evaluate"), ("roles", new[] { "role:client" }),
+                ("claims", D(("capabilities", new[] { "contract.read" }))), ("validity_hours", 24)));
+            EvaluateRequest Evaluation(int days) => new()
+            {
+                AttestationId = vendor.AttestationId,
+                RequestedCapability = "contract.read",
+                Context = new EvaluationContext { RequestParameters = new Dictionary<string, object?> { ["days"] = days } },
+            };
+            var allowed = await gm.Boundary.Evaluate(Evaluation(30));
+            Check("boundary_evaluate", allowed);
+            Assert.True(allowed.Decision.Authorized, recorder.Json?.ToJsonString());
+            var denied = await gm.Boundary.Evaluate(Evaluation(120));
+            Assert.False(denied.Decision.Authorized);
+            // The typed decisions, passed back as they are, keep the form the NA signed (1.9.0: denial_reason null).
+            Accepted("boundary_verify_typed_allowed", await gm.Boundary.Verify(D(("decision", allowed.Decision))));
+            Accepted("boundary_verify_typed_denied", await gm.Boundary.Verify(D(("decision", denied.Decision))));
+            await Assert.ThrowsAsync<SecretMaterialException>(() => gm.Boundary.Evaluate(new EvaluateRequest
+            {
+                AttestationId = vendor.AttestationId,
+                RequestedCapability = "contract.read",
+                Context = new EvaluationContext { Attributes = new Dictionary<string, object?> { ["password"] = "x" } },
+            }));
+            Check("policy_deactivate", await gm.Policy.Deactivate("contract-policy", boundaryPolicy.Version));
         }
         finally
         {

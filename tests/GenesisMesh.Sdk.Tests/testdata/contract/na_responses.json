@@ -1,5 +1,5 @@
 {
-  "_comment": "Responses of a live Network Authority (1.0.2; the health and key history responses 1.8.1) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests).",
+  "_comment": "Responses of a live Network Authority (1.0.2; the health, key history, policy and evaluation responses 1.8.1) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests).",
   "agreement_accept": {
     "agreed_terms": {
       "capabilities": [
@@ -275,6 +275,482 @@
       "sig": "1iFssqE5NMkfVD5s1dLGJjseEG5oWKN/Jeik8SMADBf6LkAMHWUI2CKdtKnfvYcIZDYVQP6jp3pWHQWA0iC9CQ=="
     }
   },
+  "boundary_evaluate": {
+    "decision": {
+      "agreement_id": "012b0fc8-1657-4c69-a99e-9a200e6f5508",
+      "attestation_binding": {
+        "attestation_digest": "2112bd888020dd051e91524ec445350e9ef6dbbfe4a263879b993f225f198c04",
+        "attestation_id": "012b0fc8-1657-4c69-a99e-9a200e6f5508",
+        "issuer_sovereign_id": "contract-na",
+        "revocation_seq_checked": 0,
+        "subject_id": "vendor-a"
+      },
+      "authorized": true,
+      "context_id": "2dd81685-ba6a-400c-b544-adabd2b6cbd6",
+      "decision_id": "ca6acc2d-f33c-48b5-8eb6-0d35145afc71",
+      "decision_made_at": "2026-10-30T10:48:01.825630Z",
+      "decision_valid_until": "2026-10-30T10:53:01.825630Z",
+      "denial_reason": null,
+      "freshness_proof": null,
+      "gate_results": [
+        {
+          "detail": "attestation is active, signed by a trusted key, and not revoked",
+          "gate_name": "attestation_status",
+          "passed": true
+        },
+        {
+          "detail": "request at 2026-10-30T10:48:01.825179+00:00 is within [2026-10-30T10:48:01.820582+00:00, 2026-10-31T10:48:01.820582+00:00]",
+          "gate_name": "attestation_validity",
+          "passed": true
+        },
+        {
+          "detail": "capability 'sp-secret.create' is in attested capabilities",
+          "gate_name": "capability_check",
+          "passed": true
+        },
+        {
+          "detail": "freshness seq 0 >= commitment 0",
+          "gate_name": "freshness_check",
+          "passed": true
+        },
+        {
+          "detail": "request_parameters.app_id is in attestation claim 'apps'",
+          "gate_name": "sp-secret-policy/app",
+          "passed": true
+        },
+        {
+          "detail": "[observe] fact 'attributes.owner' is present",
+          "gate_name": "sp-secret-policy/owner",
+          "passed": true
+        },
+        {
+          "detail": "request_parameters.lifetime_days satisfies <= 90.0",
+          "gate_name": "sp-secret-policy/max-lifetime",
+          "passed": true
+        }
+      ],
+      "operator_sovereign_id": "contract-na",
+      "policy_binding": {
+        "context_digest": "9c61bbd7ac4f60ca99bb4f25031fe6142d8d2a0b257dd32af3b85015908daece",
+        "gate_evaluations": [
+          {
+            "gate_id": "app",
+            "gate_type": "attestation_claim.v1",
+            "mode": "enforce",
+            "order": 0,
+            "outcome": "pass",
+            "passed": true,
+            "policy_id": "sp-secret-policy",
+            "policy_version": 1
+          },
+          {
+            "gate_id": "owner",
+            "gate_type": "required_parameter.v1",
+            "mode": "observe",
+            "order": 1,
+            "outcome": "pass",
+            "passed": true,
+            "policy_id": "sp-secret-policy",
+            "policy_version": 1
+          },
+          {
+            "gate_id": "max-lifetime",
+            "gate_type": "max_value.v1",
+            "mode": "enforce",
+            "order": 2,
+            "outcome": "pass",
+            "passed": true,
+            "policy_id": "sp-secret-policy",
+            "policy_version": 1
+          }
+        ],
+        "policies": [
+          {
+            "policy_digest": "7033942cfbdf8ae95c0a3501f20da92b620c49ff58359ce434da2cb005a03a39",
+            "policy_id": "sp-secret-policy",
+            "signed_by": "na-contract",
+            "version": 1
+          }
+        ],
+        "policy_set_digest": "536a568193d7b0eb7128a5d771d52b17f9be0b578fad799485d5b0a5109ee39e",
+        "registry_gate_types": [
+          "attestation_claim.v1",
+          "max_value.v1",
+          "required_parameter.v1"
+        ],
+        "resolution_failure": null,
+        "resolution_status": "resolved"
+      },
+      "signature": {
+        "key_id": "na-contract",
+        "sig": "RihkZByUP3hDJQN8/ftMCieSxEgoPQDfBhomjlFFcYWvj3kW7aT/xZbxF/wRpytyjv457MBj6elDda+zAj44Dg=="
+      }
+    },
+    "justification_proof": {
+      "decision_id": "ca6acc2d-f33c-48b5-8eb6-0d35145afc71",
+      "issuer_sovereign_id": "contract-na",
+      "proof_id": "c70d2370-1b1b-46fd-945e-78fad697980e",
+      "proof_issued_at": "2026-10-30T10:48:01.825630Z",
+      "signature": {
+        "key_id": "na-contract",
+        "sig": "GP6t/QQGsPp+fqwK3iMjkWMcCctzwxYToro94pqi1Z9ZJm38EN7ZCHLd5R5zUmZF79B8uQQe4Paf8nT8jA/dDA=="
+      },
+      "trace": {
+        "agreement_id": "012b0fc8-1657-4c69-a99e-9a200e6f5508",
+        "decision_id": "ca6acc2d-f33c-48b5-8eb6-0d35145afc71",
+        "entries": [
+          {
+            "evaluated_at": "2026-10-30T10:48:01.825630Z",
+            "gate_name": "attestation_status",
+            "gate_type": "AttestationStatusGate",
+            "inputs": {
+              "attestation_id": "012b0fc8-1657-4c69-a99e-9a200e6f5508",
+              "found": true,
+              "revocation_seq_checked": 0
+            },
+            "metadata": {},
+            "reason": "attestation is active, signed by a trusted key, and not revoked",
+            "result": true
+          },
+          {
+            "evaluated_at": "2026-10-30T10:48:01.825630Z",
+            "gate_name": "attestation_validity",
+            "gate_type": "AttestationValidityGate",
+            "inputs": {
+              "expires_at": "2026-10-31T10:48:01.820582+00:00",
+              "requested_at": "2026-10-30T10:48:01.825179+00:00",
+              "valid_from": "2026-10-30T10:48:01.820582+00:00"
+            },
+            "metadata": {},
+            "reason": "request at 2026-10-30T10:48:01.825179+00:00 is within [2026-10-30T10:48:01.820582+00:00, 2026-10-31T10:48:01.820582+00:00]",
+            "result": true
+          },
+          {
+            "evaluated_at": "2026-10-30T10:48:01.825630Z",
+            "gate_name": "capability_check",
+            "gate_type": "CapabilityGate",
+            "inputs": {
+              "capabilities": [
+                "sp-secret.create",
+                "sp-secret.rotate"
+              ],
+              "requested_capability": "sp-secret.create"
+            },
+            "metadata": {},
+            "reason": "capability 'sp-secret.create' is in attested capabilities",
+            "result": true
+          },
+          {
+            "evaluated_at": "2026-10-30T10:48:01.825630Z",
+            "gate_name": "freshness_check",
+            "gate_type": "FreshnessGate",
+            "inputs": {
+              "context_freshness_seq": 0,
+              "freshness_commitment": 0
+            },
+            "metadata": {},
+            "reason": "freshness seq 0 >= commitment 0",
+            "result": true
+          },
+          {
+            "evaluated_at": "2026-10-30T10:48:01.825630Z",
+            "gate_name": "sp-secret-policy/app",
+            "gate_type": "attestation_claim.v1",
+            "inputs": {
+              "condition": {
+                "claim": "apps"
+              },
+              "path": "request_parameters.app_id",
+              "present": true,
+              "value_type": "string"
+            },
+            "metadata": {
+              "gate_id": "app",
+              "mode": "enforce",
+              "order": 0,
+              "outcome": "pass",
+              "policy_id": "sp-secret-policy",
+              "policy_version": 1
+            },
+            "reason": "request_parameters.app_id is in attestation claim 'apps'",
+            "result": true
+          },
+          {
+            "evaluated_at": "2026-10-30T10:48:01.825630Z",
+            "gate_name": "sp-secret-policy/owner",
+            "gate_type": "required_parameter.v1",
+            "inputs": {
+              "condition": {
+                "required": "attributes.owner"
+              },
+              "path": "attributes.owner",
+              "present": true,
+              "value_type": "string"
+            },
+            "metadata": {
+              "gate_id": "owner",
+              "mode": "observe",
+              "order": 1,
+              "outcome": "pass",
+              "policy_id": "sp-secret-policy",
+              "policy_version": 1
+            },
+            "reason": "fact 'attributes.owner' is present",
+            "result": true
+          },
+          {
+            "evaluated_at": "2026-10-30T10:48:01.825630Z",
+            "gate_name": "sp-secret-policy/max-lifetime",
+            "gate_type": "max_value.v1",
+            "inputs": {
+              "condition": {
+                "max": 90.0,
+                "operator": "<="
+              },
+              "path": "request_parameters.lifetime_days",
+              "present": true,
+              "value_type": "number"
+            },
+            "metadata": {
+              "gate_id": "max-lifetime",
+              "mode": "enforce",
+              "order": 2,
+              "outcome": "pass",
+              "policy_id": "sp-secret-policy",
+              "policy_version": 1
+            },
+            "reason": "request_parameters.lifetime_days satisfies <= 90.0",
+            "result": true
+          }
+        ],
+        "final_authorized": true,
+        "operator_sovereign_id": "contract-na",
+        "short_circuited_at": null,
+        "trace_id": "ffac7517-ae8f-45db-bb31-47f17712ce9e",
+        "traced_at": "2026-10-30T10:48:01.825630Z"
+      }
+    }
+  },
+  "boundary_evaluate_decision": {
+    "agreement_id": "012b0fc8-1657-4c69-a99e-9a200e6f5508",
+    "attestation_binding": {
+      "attestation_digest": "2112bd888020dd051e91524ec445350e9ef6dbbfe4a263879b993f225f198c04",
+      "attestation_id": "012b0fc8-1657-4c69-a99e-9a200e6f5508",
+      "issuer_sovereign_id": "contract-na",
+      "revocation_seq_checked": 0,
+      "subject_id": "vendor-a"
+    },
+    "authorized": true,
+    "context_id": "2dd81685-ba6a-400c-b544-adabd2b6cbd6",
+    "decision_id": "ca6acc2d-f33c-48b5-8eb6-0d35145afc71",
+    "decision_made_at": "2026-10-30T10:48:01.825630Z",
+    "decision_valid_until": "2026-10-30T10:53:01.825630Z",
+    "denial_reason": null,
+    "freshness_proof": null,
+    "gate_results": [
+      {
+        "detail": "attestation is active, signed by a trusted key, and not revoked",
+        "gate_name": "attestation_status",
+        "passed": true
+      },
+      {
+        "detail": "request at 2026-10-30T10:48:01.825179+00:00 is within [2026-10-30T10:48:01.820582+00:00, 2026-10-31T10:48:01.820582+00:00]",
+        "gate_name": "attestation_validity",
+        "passed": true
+      },
+      {
+        "detail": "capability 'sp-secret.create' is in attested capabilities",
+        "gate_name": "capability_check",
+        "passed": true
+      },
+      {
+        "detail": "freshness seq 0 >= commitment 0",
+        "gate_name": "freshness_check",
+        "passed": true
+      },
+      {
+        "detail": "request_parameters.app_id is in attestation claim 'apps'",
+        "gate_name": "sp-secret-policy/app",
+        "passed": true
+      },
+      {
+        "detail": "[observe] fact 'attributes.owner' is present",
+        "gate_name": "sp-secret-policy/owner",
+        "passed": true
+      },
+      {
+        "detail": "request_parameters.lifetime_days satisfies <= 90.0",
+        "gate_name": "sp-secret-policy/max-lifetime",
+        "passed": true
+      }
+    ],
+    "operator_sovereign_id": "contract-na",
+    "policy_binding": {
+      "context_digest": "9c61bbd7ac4f60ca99bb4f25031fe6142d8d2a0b257dd32af3b85015908daece",
+      "gate_evaluations": [
+        {
+          "gate_id": "app",
+          "gate_type": "attestation_claim.v1",
+          "mode": "enforce",
+          "order": 0,
+          "outcome": "pass",
+          "passed": true,
+          "policy_id": "sp-secret-policy",
+          "policy_version": 1
+        },
+        {
+          "gate_id": "owner",
+          "gate_type": "required_parameter.v1",
+          "mode": "observe",
+          "order": 1,
+          "outcome": "pass",
+          "passed": true,
+          "policy_id": "sp-secret-policy",
+          "policy_version": 1
+        },
+        {
+          "gate_id": "max-lifetime",
+          "gate_type": "max_value.v1",
+          "mode": "enforce",
+          "order": 2,
+          "outcome": "pass",
+          "passed": true,
+          "policy_id": "sp-secret-policy",
+          "policy_version": 1
+        }
+      ],
+      "policies": [
+        {
+          "policy_digest": "7033942cfbdf8ae95c0a3501f20da92b620c49ff58359ce434da2cb005a03a39",
+          "policy_id": "sp-secret-policy",
+          "signed_by": "na-contract",
+          "version": 1
+        }
+      ],
+      "policy_set_digest": "536a568193d7b0eb7128a5d771d52b17f9be0b578fad799485d5b0a5109ee39e",
+      "registry_gate_types": [
+        "attestation_claim.v1",
+        "max_value.v1",
+        "required_parameter.v1"
+      ],
+      "resolution_failure": null,
+      "resolution_status": "resolved"
+    },
+    "signature": {
+      "key_id": "na-contract",
+      "sig": "RihkZByUP3hDJQN8/ftMCieSxEgoPQDfBhomjlFFcYWvj3kW7aT/xZbxF/wRpytyjv457MBj6elDda+zAj44Dg=="
+    }
+  },
+  "boundary_evaluate_denied_decision": {
+    "agreement_id": "012b0fc8-1657-4c69-a99e-9a200e6f5508",
+    "attestation_binding": {
+      "attestation_digest": "2112bd888020dd051e91524ec445350e9ef6dbbfe4a263879b993f225f198c04",
+      "attestation_id": "012b0fc8-1657-4c69-a99e-9a200e6f5508",
+      "issuer_sovereign_id": "contract-na",
+      "revocation_seq_checked": 0,
+      "subject_id": "vendor-a"
+    },
+    "authorized": false,
+    "context_id": "4a72bd9c-115b-47bc-8eef-6eaa0dd9f026",
+    "decision_id": "bfe2dec5-176b-48f8-a58e-6fe8929b8924",
+    "decision_made_at": "2026-10-30T10:48:01.836916Z",
+    "decision_valid_until": "2026-10-30T10:53:01.836916Z",
+    "denial_reason": "policy gate 'sp-secret-policy/app' failed (+1 more)",
+    "freshness_proof": null,
+    "gate_results": [
+      {
+        "detail": "attestation is active, signed by a trusted key, and not revoked",
+        "gate_name": "attestation_status",
+        "passed": true
+      },
+      {
+        "detail": "request at 2026-10-30T10:48:01.836674+00:00 is within [2026-10-30T10:48:01.820582+00:00, 2026-10-31T10:48:01.820582+00:00]",
+        "gate_name": "attestation_validity",
+        "passed": true
+      },
+      {
+        "detail": "capability 'sp-secret.create' is in attested capabilities",
+        "gate_name": "capability_check",
+        "passed": true
+      },
+      {
+        "detail": "freshness seq 0 >= commitment 0",
+        "gate_name": "freshness_check",
+        "passed": true
+      },
+      {
+        "detail": "request_parameters.app_id is not in attestation claim 'apps'",
+        "gate_name": "sp-secret-policy/app",
+        "passed": false
+      },
+      {
+        "detail": "[observe] required fact 'attributes.owner' is missing",
+        "gate_name": "sp-secret-policy/owner",
+        "passed": false
+      },
+      {
+        "detail": "request_parameters.lifetime_days violates <= 90.0",
+        "gate_name": "sp-secret-policy/max-lifetime",
+        "passed": false
+      }
+    ],
+    "operator_sovereign_id": "contract-na",
+    "policy_binding": {
+      "context_digest": "ba70faa878c1d25f6d65ba6485a911241c584c551fb31e1fb25c70c3c23ea7c5",
+      "gate_evaluations": [
+        {
+          "gate_id": "app",
+          "gate_type": "attestation_claim.v1",
+          "mode": "enforce",
+          "order": 0,
+          "outcome": "fail",
+          "passed": false,
+          "policy_id": "sp-secret-policy",
+          "policy_version": 1
+        },
+        {
+          "gate_id": "owner",
+          "gate_type": "required_parameter.v1",
+          "mode": "observe",
+          "order": 1,
+          "outcome": "missing_context",
+          "passed": false,
+          "policy_id": "sp-secret-policy",
+          "policy_version": 1
+        },
+        {
+          "gate_id": "max-lifetime",
+          "gate_type": "max_value.v1",
+          "mode": "enforce",
+          "order": 2,
+          "outcome": "fail",
+          "passed": false,
+          "policy_id": "sp-secret-policy",
+          "policy_version": 1
+        }
+      ],
+      "policies": [
+        {
+          "policy_digest": "7033942cfbdf8ae95c0a3501f20da92b620c49ff58359ce434da2cb005a03a39",
+          "policy_id": "sp-secret-policy",
+          "signed_by": "na-contract",
+          "version": 1
+        }
+      ],
+      "policy_set_digest": "536a568193d7b0eb7128a5d771d52b17f9be0b578fad799485d5b0a5109ee39e",
+      "registry_gate_types": [
+        "attestation_claim.v1",
+        "max_value.v1",
+        "required_parameter.v1"
+      ],
+      "resolution_failure": null,
+      "resolution_status": "resolved"
+    },
+    "signature": {
+      "key_id": "na-contract",
+      "sig": "vd1fMNzvM6NKLpANWSBT8nAJVOOxB3RDS+hCZK3A+8hR2Lz2XWHjQhINSGGizRxbT8E+oHq5vGUhRnH8dhZNCg=="
+    }
+  },
   "boundary_verify": {
     "accepted": true,
     "authorized": true,
@@ -530,5 +1006,357 @@
     "sovereign_id": "contract-na",
     "successions": [],
     "vouching_grace_seconds": 86400
+  },
+  "policy_activate": {
+    "active": true,
+    "policy_id": "sp-secret-policy",
+    "previous_version": null,
+    "version": 1
+  },
+  "policy_active": {
+    "active": [
+      {
+        "gate_count": 3,
+        "policy": {
+          "description": "vendor secrets",
+          "gates": [
+            {
+              "config": {
+                "claim": "apps",
+                "path": "request_parameters.app_id"
+              },
+              "disclose_input": false,
+              "gate_id": "app",
+              "gate_type": "attestation_claim.v1",
+              "mode": "enforce",
+              "order": 0
+            },
+            {
+              "config": {
+                "path": "attributes.owner"
+              },
+              "disclose_input": false,
+              "gate_id": "owner",
+              "gate_type": "required_parameter.v1",
+              "mode": "observe",
+              "order": 1
+            },
+            {
+              "config": {
+                "max": 90,
+                "path": "request_parameters.lifetime_days"
+              },
+              "disclose_input": false,
+              "gate_id": "max-lifetime",
+              "gate_type": "max_value.v1",
+              "mode": "enforce",
+              "order": 2
+            }
+          ],
+          "issued_at": "2026-10-30T10:48:01.785487Z",
+          "issued_by": "na-contract",
+          "issuer_sovereign_id": "contract-na",
+          "policy_id": "sp-secret-policy",
+          "selector": {
+            "agreement_ids": [],
+            "capabilities": [
+              "sp-secret.*"
+            ],
+            "parameter_equals": {},
+            "parent_kinds": [
+              "attestation"
+            ],
+            "provider_sovereign_ids": [],
+            "requester_sovereign_ids": []
+          },
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "0ysCxdRg/R514a6fTZVZef88wPHhROxTSaFcCFdUDKOzDmZEAyzGw6brngAmGVp7uOaDfMJ+SqVjMiqxSwisDw=="
+          },
+          "valid_from": "2026-10-30T10:48:01.579561Z",
+          "valid_until": "2026-11-29T10:48:01.579561Z",
+          "version": 1
+        },
+        "policy_digest": "7033942cfbdf8ae95c0a3501f20da92b620c49ff58359ce434da2cb005a03a39",
+        "policy_id": "sp-secret-policy",
+        "selector": {
+          "agreement_ids": [],
+          "capabilities": [
+            "sp-secret.*"
+          ],
+          "parameter_equals": {},
+          "parent_kinds": [
+            "attestation"
+          ],
+          "provider_sovereign_ids": [],
+          "requester_sovereign_ids": []
+        },
+        "valid_from": "2026-10-30T10:48:01.579561+00:00",
+        "valid_until": "2026-11-29T10:48:01.579561+00:00",
+        "version": 1
+      }
+    ],
+    "enforcement": "optional",
+    "policy_set_healthy": true,
+    "problems": [],
+    "registry_gate_types": [
+      "allowlist.v1",
+      "attestation_claim.v1",
+      "boolean_required.v1",
+      "denylist.v1",
+      "max_value.v1",
+      "min_value.v1",
+      "required_parameter.v1",
+      "scope_membership.v1",
+      "time_window.v1"
+    ]
+  },
+  "policy_deactivate": {
+    "active": false,
+    "policy_id": "sp-secret-policy",
+    "version": 2
+  },
+  "policy_history": {
+    "policy_id": "sp-secret-policy",
+    "versions": [
+      {
+        "activated_at": "2026-10-30T10:48:01.806447+00:00",
+        "active": true,
+        "created_at": "2026-10-30T10:48:01.802239+00:00",
+        "deactivated_at": null,
+        "description": "v2",
+        "gate_count": 3,
+        "global": false,
+        "integrity_ok": true,
+        "policy": {
+          "description": "v2",
+          "gates": [
+            {
+              "config": {
+                "claim": "apps",
+                "path": "request_parameters.app_id"
+              },
+              "disclose_input": false,
+              "gate_id": "app",
+              "gate_type": "attestation_claim.v1",
+              "mode": "enforce",
+              "order": 0
+            },
+            {
+              "config": {
+                "path": "attributes.owner"
+              },
+              "disclose_input": false,
+              "gate_id": "owner",
+              "gate_type": "required_parameter.v1",
+              "mode": "observe",
+              "order": 1
+            },
+            {
+              "config": {
+                "max": 90,
+                "path": "request_parameters.lifetime_days"
+              },
+              "disclose_input": false,
+              "gate_id": "max-lifetime",
+              "gate_type": "max_value.v1",
+              "mode": "enforce",
+              "order": 2
+            }
+          ],
+          "issued_at": "2026-10-30T10:48:01.801861Z",
+          "issued_by": "na-contract",
+          "issuer_sovereign_id": "contract-na",
+          "policy_id": "sp-secret-policy",
+          "selector": {
+            "agreement_ids": [],
+            "capabilities": [
+              "sp-secret.*"
+            ],
+            "parameter_equals": {},
+            "parent_kinds": [
+              "attestation"
+            ],
+            "provider_sovereign_ids": [],
+            "requester_sovereign_ids": []
+          },
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "STb73mxvHYel8UKyV2CTp7YKlLAsqUL0GeQD+tTHh7N+6VPYWGNBfjYyNs7fGvbycU0IJjsm9VA+VDB12T9FAQ=="
+          },
+          "valid_from": "2026-10-30T10:48:01.579561Z",
+          "valid_until": "2026-11-29T10:48:01.579561Z",
+          "version": 2
+        },
+        "policy_digest": "f493d0e1b8316c2ef5de672299188617f5714acc0e2145cba8fbc2fa7c44ac35",
+        "policy_id": "sp-secret-policy",
+        "valid_from": "2026-10-30T10:48:01.579561+00:00",
+        "valid_until": "2026-11-29T10:48:01.579561+00:00",
+        "version": 2
+      },
+      {
+        "activated_at": "2026-10-30T10:48:01.790376+00:00",
+        "active": false,
+        "created_at": "2026-10-30T10:48:01.785845+00:00",
+        "deactivated_at": "2026-10-30T10:48:01.806447+00:00",
+        "description": "vendor secrets",
+        "gate_count": 3,
+        "global": false,
+        "integrity_ok": true,
+        "policy": {
+          "description": "vendor secrets",
+          "gates": [
+            {
+              "config": {
+                "claim": "apps",
+                "path": "request_parameters.app_id"
+              },
+              "disclose_input": false,
+              "gate_id": "app",
+              "gate_type": "attestation_claim.v1",
+              "mode": "enforce",
+              "order": 0
+            },
+            {
+              "config": {
+                "path": "attributes.owner"
+              },
+              "disclose_input": false,
+              "gate_id": "owner",
+              "gate_type": "required_parameter.v1",
+              "mode": "observe",
+              "order": 1
+            },
+            {
+              "config": {
+                "max": 90,
+                "path": "request_parameters.lifetime_days"
+              },
+              "disclose_input": false,
+              "gate_id": "max-lifetime",
+              "gate_type": "max_value.v1",
+              "mode": "enforce",
+              "order": 2
+            }
+          ],
+          "issued_at": "2026-10-30T10:48:01.785487Z",
+          "issued_by": "na-contract",
+          "issuer_sovereign_id": "contract-na",
+          "policy_id": "sp-secret-policy",
+          "selector": {
+            "agreement_ids": [],
+            "capabilities": [
+              "sp-secret.*"
+            ],
+            "parameter_equals": {},
+            "parent_kinds": [
+              "attestation"
+            ],
+            "provider_sovereign_ids": [],
+            "requester_sovereign_ids": []
+          },
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "0ysCxdRg/R514a6fTZVZef88wPHhROxTSaFcCFdUDKOzDmZEAyzGw6brngAmGVp7uOaDfMJ+SqVjMiqxSwisDw=="
+          },
+          "valid_from": "2026-10-30T10:48:01.579561Z",
+          "valid_until": "2026-11-29T10:48:01.579561Z",
+          "version": 1
+        },
+        "policy_digest": "7033942cfbdf8ae95c0a3501f20da92b620c49ff58359ce434da2cb005a03a39",
+        "policy_id": "sp-secret-policy",
+        "valid_from": "2026-10-30T10:48:01.579561+00:00",
+        "valid_until": "2026-11-29T10:48:01.579561+00:00",
+        "version": 1
+      }
+    ]
+  },
+  "policy_list_item": {
+    "activated_at": "2026-10-30T10:48:01.790376+00:00",
+    "active": true,
+    "created_at": "2026-10-30T10:48:01.785845+00:00",
+    "deactivated_at": null,
+    "description": "vendor secrets",
+    "gate_count": 3,
+    "global": false,
+    "integrity_ok": true,
+    "policy_digest": "7033942cfbdf8ae95c0a3501f20da92b620c49ff58359ce434da2cb005a03a39",
+    "policy_id": "sp-secret-policy",
+    "valid_from": "2026-10-30T10:48:01.579561+00:00",
+    "valid_until": "2026-11-29T10:48:01.579561+00:00",
+    "version": 1
+  },
+  "policy_publish": {
+    "description": "vendor secrets",
+    "gates": [
+      {
+        "config": {
+          "claim": "apps",
+          "path": "request_parameters.app_id"
+        },
+        "disclose_input": false,
+        "gate_id": "app",
+        "gate_type": "attestation_claim.v1",
+        "mode": "enforce",
+        "order": 0
+      },
+      {
+        "config": {
+          "path": "attributes.owner"
+        },
+        "disclose_input": false,
+        "gate_id": "owner",
+        "gate_type": "required_parameter.v1",
+        "mode": "observe",
+        "order": 1
+      },
+      {
+        "config": {
+          "max": 90,
+          "path": "request_parameters.lifetime_days"
+        },
+        "disclose_input": false,
+        "gate_id": "max-lifetime",
+        "gate_type": "max_value.v1",
+        "mode": "enforce",
+        "order": 2
+      }
+    ],
+    "issued_at": "2026-10-30T10:48:01.785487Z",
+    "issued_by": "na-contract",
+    "issuer_sovereign_id": "contract-na",
+    "policy_id": "sp-secret-policy",
+    "selector": {
+      "agreement_ids": [],
+      "capabilities": [
+        "sp-secret.*"
+      ],
+      "parameter_equals": {},
+      "parent_kinds": [
+        "attestation"
+      ],
+      "provider_sovereign_ids": [],
+      "requester_sovereign_ids": []
+    },
+    "signature": {
+      "key_id": "na-contract",
+      "sig": "0ysCxdRg/R514a6fTZVZef88wPHhROxTSaFcCFdUDKOzDmZEAyzGw6brngAmGVp7uOaDfMJ+SqVjMiqxSwisDw=="
+    },
+    "valid_from": "2026-10-30T10:48:01.579561Z",
+    "valid_until": "2026-11-29T10:48:01.579561Z",
+    "version": 1
+  },
+  "policy_validate": {
+    "issues": [],
+    "next_version": 1,
+    "policy_id": "sp-secret-policy",
+    "valid": true
+  },
+  "policy_verify": {
+    "policy_digest": "7033942cfbdf8ae95c0a3501f20da92b620c49ff58359ce434da2cb005a03a39",
+    "policy_id": "sp-secret-policy",
+    "reason": "valid",
+    "valid": true,
+    "version": 1
   }
 }
