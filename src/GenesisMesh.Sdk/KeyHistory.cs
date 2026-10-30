@@ -79,6 +79,10 @@ public sealed class NAKeyHistory
         ["TimeToken"] = "issued_at",
     };
 
+    /// <summary>A history with the default vouching grace, <see cref="SuccessionVouchingGrace"/>.</summary>
+    /// <param name="sovereignId">The NA's sovereign ID.</param>
+    /// <param name="rootPublicKey">The sovereign's root public key, which signs the genesis block; null for keys from <see cref="ValidAlways"/>.</param>
+    /// <param name="keys">The NA's keys in key sequence order, each with the window it is valid in.</param>
     public NAKeyHistory(string sovereignId, string? rootPublicKey, IReadOnlyList<NAKey> keys)
         : this(sovereignId, rootPublicKey, keys, SuccessionVouchingGrace)
     {
@@ -96,8 +100,13 @@ public sealed class NAKeyHistory
         VouchingGrace = grace;
     }
 
+    /// <summary>The NA's sovereign ID.</summary>
     public string SovereignId { get; }
+
+    /// <summary>The sovereign's root public key, which signs the genesis block; null for keys from <see cref="ValidAlways"/>.</summary>
     public string? RootPublicKey { get; }
+
+    /// <summary>The NA's keys in key sequence order, the genesis key first, each with the window it is valid in.</summary>
     public IReadOnlyList<NAKey> Keys { get; }
 
     /// <summary>The vouching horizon's grace of this history (1.8.0): 0 to <see cref="SuccessionVouchingGrace"/>.</summary>

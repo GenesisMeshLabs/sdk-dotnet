@@ -148,8 +148,15 @@ public sealed record AdminRequest(
 /// <summary>The four X-Admin-* headers used to authenticate admin API requests.</summary>
 public sealed class AdminHeaders
 {
+    /// <summary><c>X-Admin-Key-Id</c>: the operator key the NA checks the signature with.</summary>
     public string KeyId { get; init; } = "";
+
+    /// <summary><c>X-Admin-Signature</c>: base64 Ed25519 signature over the signed payload.</summary>
     public string Signature { get; init; } = "";
+
+    /// <summary><c>X-Admin-Timestamp</c>: when the request was signed; the NA refuses one outside its clock window.</summary>
     public string Timestamp { get; init; } = "";
+
+    /// <summary><c>X-Admin-Nonce</c>: a value used once, so the NA refuses a replayed request.</summary>
     public string Nonce { get; init; } = "";
 }

@@ -160,6 +160,8 @@ merges, the `API compatibility` check warns on pull requests and fails on main.
 
 ## Other checks
 
+- **XML docs:** every public type and member has a doc comment. The compiler's
+  CS1591 is on and warnings are errors, so a missing one fails the build.
 - **Coverage floor:** CI collects coverage (coverlet) and
   `scripts/check_coverage.py` fails below the floors in `ci.yml`.
 - **Property tests:** `PropertyTests.cs` (FsCheck) checks the strict JSON

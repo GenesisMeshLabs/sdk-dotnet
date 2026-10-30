@@ -38,6 +38,8 @@ public sealed class GenesisMeshClient : IDisposable
     /// <summary>Trust evidence — build and verify.</summary>
     public EvidenceClient Evidence { get; }
 
+    /// <summary>A client of the NA at <see cref="ClientOptions.BaseUrl"/>.</summary>
+    /// <param name="opts">The NA's URL and, for admin routes, the operator key.</param>
     public GenesisMeshClient(ClientOptions opts)
     {
         _transport = new Transport(opts);
@@ -50,6 +52,7 @@ public sealed class GenesisMeshClient : IDisposable
         Evidence = new EvidenceClient(_transport);
     }
 
+    /// <summary>Releases the HTTP client. A <see cref="ClientOptions.HttpHandler"/> stays the caller's to dispose.</summary>
     public void Dispose() => _transport.Dispose();
 }
 
