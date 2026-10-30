@@ -73,6 +73,11 @@ public class ContractTypesTests
         { "policy_list_item", typeof(PolicyVersionSummary) },
         { "boundary_evaluate", typeof(BoundaryEvaluation) },
         { "boundary_evaluate_decision", typeof(BoundaryDecision) },
+        { "evidence_register_executor_key", typeof(ExecutorKeyState) },
+        { "evidence_submit", typeof(EvidenceSubmission) },
+        { "evidence_resource_head", typeof(StoredResourceHead) },
+        { "evidence_search", typeof(EvidenceSearchResult) },
+        { "evidence_execution_record", typeof(ExecutionEvidence) },
     };
 
     [Theory]
@@ -121,6 +126,8 @@ public class ContractTypesTests
     [InlineData("boundary_evaluate", typeof(BoundaryEvaluation))]
     [InlineData("policy_publish", typeof(BoundaryPolicy))]
     [InlineData("attestation_issue", typeof(MembershipAttestation))]
+    // 1.9.0: execution evidence read from the store and passed back, as the prior record of the next one.
+    [InlineData("evidence_execution_record", typeof(ExecutionEvidence))]
     public void PassedBackRecordsKeepTheirSignedForm(string name, Type model)
     {
         var raw = Response(name);

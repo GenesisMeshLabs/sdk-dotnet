@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GenesisMesh;
+using NSec.Cryptography;
 using Xunit;
 
 namespace GenesisMesh.Tests;
@@ -242,6 +243,84 @@ public class LiveContractTests
                 RequestedCapability = "contract.read",
                 Context = new EvaluationContext { Attributes = new Dictionary<string, object?> { ["password"] = "x" } },
             }));
+            // 1.9.0: the justification proof verifies offline under the NA's key, and under its key history.
+            Assert.True(OfflineVerifier.VerifyJustificationSignature(allowed.JustificationProof.GetRawText(), [naKey]));
+            Assert.True(OfflineVerifier.VerifyJustificationSignature(allowed.JustificationProof.GetRawText(), history));
+
+            // 1.9.0: execution evidence a controller submits, with an executor key limited to "contract:".
+            using var executorKey = Key.Create(SignatureAlgorithm.Ed25519,
+                new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
+            var executorPublicKey = Convert.ToBase64String(executorKey.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+            var executorState = await gm.EvidenceStore.RegisterExecutorKey(new RegisterExecutorKeyRequest
+            {
+                KeyId = "contract-executor",
+                PublicKey = executorPublicKey,
+                ExecutorSovereignId = "contract-executor",
+                ResourcePrefix = "contract:",
+            });
+            Check("evidence_register_executor_key", executorState);
+            Assert.Equal(("contract:", true), (executorState.ResourcePrefix, executorState.Active));
+            var executor = new ExecutionRecorder("contract-executor",
+                new SeedSigner(Convert.ToBase64String(executorKey.Export(KeyBlobFormat.RawPrivateKey)), "contract-executor"));
+            const string resource = "contract:app-1/secret";
+            Assert.Null(await gm.EvidenceStore.ResourceHead(resource));
+            RecordExecutionRequest Execution(BoundaryDecision decision, string resourceId, string action, ResourceHead? head) => new()
+            {
+                Decision = decision,
+                ExecutedCapability = "contract.read",
+                Outcome = ExecutionOutcome.Success,
+                ExecutionParameters = new Dictionary<string, object?> { ["app_id"] = "app-1", ["lifetime_days"] = 30 },
+                ResourceId = resourceId,
+                ResourceAction = action,
+                PriorResource = head,
+            };
+            var created = await executor.Record(Execution(allowed.Decision, resource, ResourceAction.Create, null));
+            var submission = await gm.EvidenceStore.Submit(created);
+            Check("evidence_submit", submission);
+            Assert.Equal("recorded", submission.Status);
+            Assert.Equal("duplicate", (await gm.EvidenceStore.Submit(created)).Status);
+            var storedHead = await gm.EvidenceStore.StoredResourceHead(resource);
+            Check("evidence_resource_head", storedHead);
+            Assert.Equal((1L, ExecutionRecorder.Digest(created), "execution", created.EvidenceId),
+                (storedHead.ResourceSequence, storedHead.RecordDigest, storedHead.EntryKind, storedHead.RecordId));
+
+            var rotateDecision = (await gm.Boundary.Evaluate(Evaluation(60))).Decision;
+            var rotated = await executor.Record(Execution(rotateDecision, resource, ResourceAction.Rotate,
+                await gm.EvidenceStore.ResourceHead(resource)));
+            Assert.Equal("recorded", (await gm.EvidenceStore.Submit(rotated)).Status);
+            Assert.Equal(2, rotated.ResourceSequence);
+
+            // Refused by the NA: a resource outside the key's prefix, and a denied decision.
+            var outside = await Assert.ThrowsAsync<ValidationException>(async () => await gm.EvidenceStore.Submit(
+                await executor.Record(Execution(allowed.Decision, "other:app-2/secret", ResourceAction.Create, null))));
+            Assert.Equal("evidence_out_of_scope", outside.Code);
+            var underDenial = await Assert.ThrowsAsync<ValidationException>(async () => await gm.EvidenceStore.Submit(
+                await executor.Record(Execution(denied.Decision, "contract:app-3/secret", ResourceAction.Create, null))));
+            Assert.Equal("evidence_decision_denied", underDenial.Code);
+            await Assert.ThrowsAsync<SecretMaterialException>(() => executor.Record(new RecordExecutionRequest
+            {
+                Decision = allowed.Decision,
+                ExecutedCapability = "contract.read",
+                Outcome = ExecutionOutcome.Success,
+                ExecutionParameters = new Dictionary<string, object?> { ["client_secret"] = "x" },
+            }));
+
+            var stored = await gm.EvidenceStore.Search(new EvidenceSearchParams { ResourceId = resource, EntryKind = "execution" });
+            Check("evidence_search", stored);
+            var eventFields = ContractTypesTests.JsonFields(typeof(EvidenceEvent));
+            var entryFields = ContractTypesTests.JsonFields(typeof(EvidenceStoreEntry));
+            Assert.All(recorder.Json!["entries"]!.AsArray(), item =>
+            {
+                Assert.True(item!.AsObject().All(k => eventFields.ContainsKey(k.Key)), "evidence_search: unmodeled event keys");
+                Assert.True(item["entry"]!.AsObject().All(k => entryFields.ContainsKey(k.Key)), "evidence_search: unmodeled entry keys");
+            });
+            Assert.Equal([created.EvidenceId, rotated.EvidenceId], stored.Entries.Select(e => e.Entry.EvidenceId));
+            Assert.All(stored.Entries, e => Assert.True(OfflineVerifier.VerifyExecutionSignature(e.Payload.GetRawText(), executorPublicKey)));
+            Assert.Equal(ExecutionRecorder.Digest(rotated), OfflineVerifier.ExecutionDigest(stored.Entries[1].Payload.GetRawText()));
+            var state = (await gm.EvidenceStore.ResourceStates())[resource];
+            Assert.Equal((2L, ExecutionRecorder.Digest(rotated), "rotate", "success", rotateDecision.DecisionId),
+                (state.ResourceSequence, state.RecordDigest, state.LastAction, state.LastOutcome, state.LastDecisionId));
+
             Check("policy_deactivate", await gm.Policy.Deactivate("contract-policy", boundaryPolicy.Version));
         }
         finally

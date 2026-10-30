@@ -3,8 +3,9 @@ using NSec.Cryptography;
 namespace GenesisMesh;
 
 /// <summary>
-/// Signs admin requests for an operator key (<see cref="ClientOptions.Signer"/>). Implement it to keep the key out
-/// of this SDK, for example in an HSM. A key read from Key Vault at start, which has no Ed25519 keys, is a
+/// Signs admin requests for an operator key (<see cref="ClientOptions.Signer"/>) or, from 1.9.0, execution evidence for
+/// an executor key (<see cref="ExecutionRecorder"/>). Implement it to keep the key out of this SDK, for example in an
+/// HSM. A key read from Key Vault at start, which has no Ed25519 keys, is a
 /// <see cref="SeedSigner"/>.
 /// </summary>
 public interface ISigner

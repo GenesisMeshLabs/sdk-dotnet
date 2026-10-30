@@ -369,6 +369,70 @@ public static partial class OfflineVerifier
         return Result(true, "authorized", true);
     }
 
+    // ── execution evidence and justification proofs (1.9.0) ────────────────
+
+    /// <summary>
+    /// True when the executor signed the ExecutionEvidence (<see cref="ExecutionRecorder"/>) with the key
+    /// <paramref name="executorPublicKey"/>, and the record has no field this SDK does not know and is in canonical
+    /// form. Pass the record as received: the resource fields are left out of the signed form when null.
+    /// </summary>
+    /// <param name="evidenceJson">The ExecutionEvidence JSON.</param>
+    /// <param name="executorPublicKey">The executor key's base64 Ed25519 public key, as registered with the NA.</param>
+    /// <exception cref="StrictJsonException"><paramref name="evidenceJson"/> is not strict JSON.</exception>
+    public static bool VerifyExecutionSignature(string evidenceJson, string executorPublicKey) =>
+        SignedRecord("ExecutionEvidence", evidenceJson, _ => [executorPublicKey]);
+
+    /// <summary>
+    /// True when one of <paramref name="naPublicKeys"/> signed the justification proof of a boundary evaluation
+    /// (<see cref="BoundaryEvaluation.JustificationProof"/>), and the proof has no field this SDK does not know and is
+    /// in canonical form.
+    /// </summary>
+    /// <param name="proofJson">The JustificationProof JSON, as the NA returned it.</param>
+    /// <param name="naPublicKeys">The NA's base64 Ed25519 public keys, any of which may have signed it.</param>
+    /// <exception cref="StrictJsonException"><paramref name="proofJson"/> is not strict JSON.</exception>
+    public static bool VerifyJustificationSignature(string proofJson, IReadOnlyList<string> naPublicKeys) =>
+        SignedRecord("JustificationProof", proofJson, _ => naPublicKeys);
+
+    /// <summary>
+    /// As <see cref="VerifyJustificationSignature(string, IReadOnlyList{string})"/>, but signed by the key of the NA's
+    /// verified history that was valid at the proof's <c>proof_issued_at</c>.
+    /// </summary>
+    /// <param name="proofJson">The JustificationProof JSON, as the NA returned it.</param>
+    /// <param name="keyHistory">The NA's verified key history (<see cref="VerifyKeyHistory(string, string?, string)"/>).</param>
+    /// <exception cref="StrictJsonException"><paramref name="proofJson"/> is not strict JSON.</exception>
+    public static bool VerifyJustificationSignature(string proofJson, NAKeyHistory keyHistory)
+    {
+        ArgumentNullException.ThrowIfNull(keyHistory);
+        return SignedRecord("JustificationProof", proofJson, p =>
+            Str(p, "proof_issued_at") is { } issued && TryParseTimestamp(issued, out var at) ? keyHistory.KeysAt(at) : []);
+    }
+
+    /// <summary>
+    /// The record's <c>digest()</c>: SHA-256 hex of its canonical form without the signature and without the resource
+    /// fields that are null. The next record under the same decision, or on the same resource, links to it.
+    /// </summary>
+    /// <param name="evidenceJson">The ExecutionEvidence JSON.</param>
+    /// <exception cref="StrictJsonException"><paramref name="evidenceJson"/> is not strict JSON.</exception>
+    /// <exception cref="ArgumentException"><paramref name="evidenceJson"/> is not an object.</exception>
+    public static string ExecutionDigest(string evidenceJson)
+    {
+        using var doc = StrictJsonReader.Parse(evidenceJson);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            throw new ArgumentException("genesismesh: execution evidence must be a JSON object", nameof(evidenceJson));
+        return Sha256Hex(ReceivedCanonical("ExecutionEvidence", doc.RootElement));
+    }
+
+    /// <summary>A record of <paramref name="model"/> that is known, canonical and signed by one of its keys.</summary>
+    private static bool SignedRecord(string model, string json, Func<JsonElement, IReadOnlyList<string>> keys)
+    {
+        using var doc = StrictJsonReader.Parse(json);
+        var record = doc.RootElement;
+        return record.ValueKind == JsonValueKind.Object
+            && StrictFields.UnknownFields(model, record).Count == 0
+            && StrictFields.NonCanonicalFields(model, record).Count == 0
+            && SignedAsReceived(model, record, keys(record));
+    }
+
     // ── data usage ─────────────────────────────────────────────────────────
 
     /// <summary>True when the licensor signed the DataLicensePolicy.</summary>

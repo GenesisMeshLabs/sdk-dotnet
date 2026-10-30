@@ -1,5 +1,5 @@
 {
-  "_comment": "Responses of a live Network Authority (1.0.2; the health, key history, policy and evaluation responses 1.8.1) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests).",
+  "_comment": "Responses of a live Network Authority (1.0.2; the health, key history, policy and evaluation responses 1.8.1; the evidence store responses 1.8.1 with this SDK's execution evidence) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests). evidence_execution_record is the first stored record of evidence_search.",
   "agreement_accept": {
     "agreed_terms": {
       "capabilities": [
@@ -909,6 +909,170 @@
     "target_sovereign_id": "sovereign-b",
     "trusted": false,
     "verdict": "allow"
+  },
+  "evidence_execution_record": {
+    "agreement_id": "f492f5b1-372a-4250-a019-99f746cbaf0a",
+    "context_id": "8a2645ed-b376-452e-8554-edc25580d7c0",
+    "decision_id": "703ec5c4-d6ef-4e4e-806f-b924c15b4540",
+    "evidence_id": "c59eb17e-c1b6-4bac-836b-a8dd4cbc00e2",
+    "executed_at": "2026-10-30T16:50:16.573797Z",
+    "executed_capability": "contract.read",
+    "execution_parameters": {
+      "app_id": "app-1",
+      "lifetime_days": 30
+    },
+    "executor_sovereign_id": "contract-executor",
+    "outcome": "success",
+    "outcome_detail": null,
+    "prev_evidence_digest": null,
+    "resource_action": "create",
+    "resource_id": "contract:app-1/secret",
+    "resource_sequence": 1,
+    "sequence_no": 1,
+    "signature": {
+      "key_id": "contract-executor",
+      "sig": "5J38VVCi1OvtjOO0Cpu6nexOm9PmShhVOco9tLCVbRsQ3golBzSpc5U6BSsz1PzcVUDZ5nQmh5npR13MSQ1pDw=="
+    }
+  },
+  "evidence_register_executor_key": {
+    "active": true,
+    "executor_sovereign_id": "contract-executor",
+    "key_id": "contract-executor",
+    "resource_prefix": "contract:",
+    "role": "executor"
+  },
+  "evidence_resource_head": {
+    "entry_kind": "execution",
+    "record_digest": "b6bc5177f4669dec5d776a16ff66dd8bde220577897b3018e3014a8e219dcf7c",
+    "record_id": "c59eb17e-c1b6-4bac-836b-a8dd4cbc00e2",
+    "resource_id": "contract:app-1/secret",
+    "resource_sequence": 1
+  },
+  "evidence_search": {
+    "count": 2,
+    "entries": [
+      {
+        "entry": {
+          "attestation_id": "f492f5b1-372a-4250-a019-99f746cbaf0a",
+          "capability": "contract.read",
+          "context_id": "8a2645ed-b376-452e-8554-edc25580d7c0",
+          "decision_id": "703ec5c4-d6ef-4e4e-806f-b924c15b4540",
+          "entry_kind": "execution",
+          "evidence_id": "c59eb17e-c1b6-4bac-836b-a8dd4cbc00e2",
+          "exec_sequence_no": 1,
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "payload_digest": "6161ff98e3fc0d12c38d47cb5f8dbdc7b571b7bf33fd6134c72bf6bda057d143",
+          "prev_entry_digest": "b4295007ff7866dfe304d388595e579e59b462ad6b66aec440f51459dc001eb5",
+          "recorded_at": "2026-10-30T16:50:16.580779Z",
+          "resource_action": "create",
+          "resource_id": "contract:app-1/secret",
+          "resource_sequence": 1,
+          "store_sequence": 6,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "5331aceb51e66fba02f0e43fb9bcc58159d1d1ef44a2277ac87ea21b11ce7339",
+        "payload": {
+          "agreement_id": "f492f5b1-372a-4250-a019-99f746cbaf0a",
+          "context_id": "8a2645ed-b376-452e-8554-edc25580d7c0",
+          "decision_id": "703ec5c4-d6ef-4e4e-806f-b924c15b4540",
+          "evidence_id": "c59eb17e-c1b6-4bac-836b-a8dd4cbc00e2",
+          "executed_at": "2026-10-30T16:50:16.573797Z",
+          "executed_capability": "contract.read",
+          "execution_parameters": {
+            "app_id": "app-1",
+            "lifetime_days": 30
+          },
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "outcome_detail": null,
+          "prev_evidence_digest": null,
+          "resource_action": "create",
+          "resource_id": "contract:app-1/secret",
+          "resource_sequence": 1,
+          "sequence_no": 1,
+          "signature": {
+            "key_id": "contract-executor",
+            "sig": "5J38VVCi1OvtjOO0Cpu6nexOm9PmShhVOco9tLCVbRsQ3golBzSpc5U6BSsz1PzcVUDZ5nQmh5npR13MSQ1pDw=="
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "f492f5b1-372a-4250-a019-99f746cbaf0a",
+          "capability": "contract.read",
+          "context_id": "41ccc1f5-7188-45b4-9c9a-d7edb1987d89",
+          "decision_id": "fcd8fae2-90cb-4114-b538-93670491dfba",
+          "entry_kind": "execution",
+          "evidence_id": "7c5fcddf-e098-45f6-a9ef-85101f4de87a",
+          "exec_sequence_no": 1,
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "payload_digest": "ec7a7975436f378efa17517c6f905b8ced1c848f5b11556c091c4243b8752344",
+          "prev_entry_digest": "016467788480b6372fb2bd8c2706313cc565a98f158cb69a674e59fbaaff574f",
+          "recorded_at": "2026-10-30T16:50:16.620184Z",
+          "resource_action": "rotate",
+          "resource_id": "contract:app-1/secret",
+          "resource_sequence": 2,
+          "store_sequence": 9,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "3c4b9c4a442b1c17f8b622488ee87255156b7d5b68f5a568c984e1a5bfb678b5",
+        "payload": {
+          "agreement_id": "f492f5b1-372a-4250-a019-99f746cbaf0a",
+          "context_id": "41ccc1f5-7188-45b4-9c9a-d7edb1987d89",
+          "decision_id": "fcd8fae2-90cb-4114-b538-93670491dfba",
+          "evidence_id": "7c5fcddf-e098-45f6-a9ef-85101f4de87a",
+          "executed_at": "2026-10-30T16:50:16.616265Z",
+          "executed_capability": "contract.read",
+          "execution_parameters": {
+            "app_id": "app-1",
+            "lifetime_days": 30
+          },
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "outcome_detail": null,
+          "prev_evidence_digest": null,
+          "prev_resource_digest": "b6bc5177f4669dec5d776a16ff66dd8bde220577897b3018e3014a8e219dcf7c",
+          "resource_action": "rotate",
+          "resource_id": "contract:app-1/secret",
+          "resource_sequence": 2,
+          "sequence_no": 1,
+          "signature": {
+            "key_id": "contract-executor",
+            "sig": "EJFgqvXkOje0cpx1GK4D1YN3st2xsL03MHis9NAO8F2BhBGqiU7l+QUTeQUz365+VgMyZktD7FchMOrQra+tDw=="
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      }
+    ],
+    "next_after_sequence": null
+  },
+  "evidence_submit": {
+    "entry": {
+      "attestation_id": "f492f5b1-372a-4250-a019-99f746cbaf0a",
+      "capability": "contract.read",
+      "context_id": "8a2645ed-b376-452e-8554-edc25580d7c0",
+      "decision_id": "703ec5c4-d6ef-4e4e-806f-b924c15b4540",
+      "entry_kind": "execution",
+      "evidence_id": "c59eb17e-c1b6-4bac-836b-a8dd4cbc00e2",
+      "exec_sequence_no": 1,
+      "executor_sovereign_id": "contract-executor",
+      "outcome": "success",
+      "payload_digest": "6161ff98e3fc0d12c38d47cb5f8dbdc7b571b7bf33fd6134c72bf6bda057d143",
+      "prev_entry_digest": "b4295007ff7866dfe304d388595e579e59b462ad6b66aec440f51459dc001eb5",
+      "recorded_at": "2026-10-30T16:50:16.580779Z",
+      "resource_action": "create",
+      "resource_id": "contract:app-1/secret",
+      "resource_sequence": 1,
+      "store_sequence": 6,
+      "vendor_id": "vendor-evaluate"
+    },
+    "entry_digest": "5331aceb51e66fba02f0e43fb9bcc58159d1d1ef44a2277ac87ea21b11ce7339",
+    "status": "recorded"
   },
   "evidence_verify": {
     "accepted": true,
