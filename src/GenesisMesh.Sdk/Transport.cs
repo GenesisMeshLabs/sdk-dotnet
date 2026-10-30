@@ -104,6 +104,22 @@ internal sealed class Transport : IDisposable
     }
 
     /// <summary>
+    /// A resource ID as the tail of a request path (1.9.0): the NA serves such routes with the whole remaining path,
+    /// so the ID's <c>/</c> separate segments, and each segment must pass <see cref="PathSegment"/>. An ID that starts
+    /// or ends with white space is refused too: the URI drops white space at the end of the path, so the request would
+    /// sign one path and send another.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="resourceId"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="resourceId"/> cannot be sent as a path.</exception>
+    internal static string ResourcePath(string resourceId, string paramName)
+    {
+        ArgumentNullException.ThrowIfNull(resourceId, paramName);
+        if (resourceId.Length > 0 && (char.IsWhiteSpace(resourceId[0]) || char.IsWhiteSpace(resourceId[^1])))
+            throw new ArgumentException($"genesismesh: {paramName} must not start or end with white space", paramName);
+        return string.Join('/', resourceId.Split('/').Select(segment => PathSegment(segment, paramName)));
+    }
+
+    /// <summary>
     /// The NA's public key for admin signatures, read once from /sovereign.json. Requests that need it at the same
     /// time share one lookup. A lookup that gets no answer throws <see cref="NetworkException"/>; an answer without
     /// the key throws <c>na_public_key_unavailable</c> with the answer's status. A failed lookup is tried again by the

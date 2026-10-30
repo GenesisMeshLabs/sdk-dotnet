@@ -14,11 +14,13 @@ below (agreements, boundary decisions and from 1.9 policy-aware evaluation,
 boundary policies, trust evidence, attestations, selective disclosure,
 consensus and data usage), offline verification of their signed records, and
 signed admin calls to any other route. It is growing to the TypeScript SDK's
-governed lifecycle (decision 0008 of the core); not yet here: no evidence
-store client or evidence outbox, none
-of the 1.3.0 changes outside the controlled path (observations, break-glass
-records, the record outbox), and none of the 1.4.0 remediation and review
-APIs (remediation records, the due queue, reviews). Those live in the
+governed lifecycle (decision 0008 of the core). From 1.9 it records and
+submits execution evidence and reads where each resource's chain ends (see
+[EvidenceStore](#evidencestore)). Not yet here: governed actions and the
+evidence outbox, the evidence store's history and export, its administration
+beyond registering executor keys (listing and retiring them, retention), none of the 1.3.0 changes outside the controlled path (observations,
+break-glass records, the record outbox), and none of the 1.4.0 remediation and
+review APIs (remediation records, the due queue, reviews). Those live in the
 [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript) and the
 [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust). The embedded field
 registry lists their records, but this SDK does not verify evidence exports.
@@ -289,6 +291,69 @@ var evidence = await client.Evidence.Build(new TrustDecision
 var ev = await client.Evidence.Verify(new Dictionary<string, object?> { ["evidence"] = evidence });
 ```
 
+### EvidenceStore
+
+From 1.9 a controller records what it did after acting on an authorized
+decision and submits the record to the NA's evidence store. An executor key
+signs it: the controller generates the key pair, and the platform team
+registers its public key for the controller's sovereign, optionally limited to
+a resource prefix. A record holds metadata only: identifiers, settings,
+versions and times, never a secret value.
+
+```csharp
+// The platform team, with the privileged key: register the controller's executor key.
+await admin.EvidenceStore.RegisterExecutorKey(new RegisterExecutorKeyRequest
+{
+    KeyId = "hub-executor",
+    PublicKey = executorPublicKey,
+    ExecutorSovereignId = "partner-tech",
+    ResourcePrefix = "partner:",
+});
+
+// The controller, with a standard key: evaluate, verify, act, then record.
+var executor = new ExecutionRecorder("partner-tech", new SeedSigner(executorSeed, "hub-executor"));
+var evaluation = await client.Boundary.Evaluate(request);
+// ... verify the decision, then act ...
+var resource = $"partner:{appId}/secret";
+var record = await executor.Record(new RecordExecutionRequest
+{
+    Decision = evaluation.Decision,
+    ExecutedCapability = "partner-secret.rotate",
+    Outcome = ExecutionOutcomes.Success,
+    ExecutionParameters = new Dictionary<string, object?> { ["app_id"] = appId, ["key_id"] = newKeyId },
+    ResourceId = resource,
+    ResourceAction = ResourceActions.Rotate,
+    PriorResource = await client.EvidenceStore.ResourceHead(resource),   // null for its first record
+});
+var submission = await client.EvidenceStore.Submit(record);            // "recorded", or "duplicate" on a retry
+```
+
+- `Record` builds and signs the record as the Python reference does. Before
+  anything is signed it refuses secret material (`SecretMaterialException`)
+  and values the NA would refuse as `invalid_json` (`StrictJsonException`).
+  Records under one decision chain through `PriorRecord`; records of one
+  resource, from any decision, through `PriorResource`
+  (`ExecutionRecorder.HeadOf(record)` gives the head a record leaves).
+- `Submit` needs no operator key: the executor's signature authenticates the
+  record. Resubmitting the same record returns `duplicate`, so it is safe to
+  retry. The NA refuses with 409 `evidence_conflict` when the record's
+  position is taken, most often because another record was stored on the
+  resource after its head was read: read the head again and record anew. It
+  refuses other records with 422 and a code, for example
+  `evidence_out_of_scope` (the key is limited to other resources) or
+  `evidence_decision_denied`. The NA keeps an authentic refused record as a
+  quarantine entry.
+- Reads need a read-tier key or above: `ResourceHead` (null for a resource
+  without history) and `StoredResourceHead`, which refuse an ID they cannot
+  send as a path (one holding `%`, `?`, `#` or `\`, an empty segment, or white
+  space at either end), `Search` and `Iterate` over the
+  stored entries, and `ResourceStates`, each resource's latest change for
+  reconciliation against a cloud inventory.
+
+Governed actions, which keep a record in an outbox until the NA admits it,
+are the next step of decision 0008. Until then, keep the signed record and
+retry `Submit` yourself.
+
 ### Attestation
 
 ```csharp
@@ -483,6 +548,11 @@ var d = OfflineVerifier.VerifyBoundaryDecision(decisionJson, new DecisionVerifyO
 bool ok = OfflineVerifier.VerifyDataLicensePolicySignature(licensePolicyJson, new[] { licensorKey });
 var v = OfflineVerifier.VerifyDataAccessIntent(intentJson, licensePolicyJson, new[] { agentKey });
 // v.Valid, v.ViolationReason, v.Violations
+
+// 1.9.0: execution evidence and the justification proof of an evaluation.
+bool executed = OfflineVerifier.VerifyExecutionSignature(evidenceJson, executorPublicKey);
+bool justified = OfflineVerifier.VerifyJustificationSignature(evaluation.JustificationProof.GetRawText(), history);
+string digest = OfflineVerifier.ExecutionDigest(evidenceJson);   // what the next record links to
 ```
 
 An accepted DENY has `Accepted` true and `Authorized` false: the decision

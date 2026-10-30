@@ -1821,6 +1821,442 @@ public sealed class KeyHistoryKey
     public bool ValidToEnforced { get; set; }
 }
 
+/// <summary>The outcomes an executor records (<see cref="ExecutionEvidence.Outcome"/>).</summary>
+public static class ExecutionOutcomes
+{
+    /// <summary>The action completed.</summary>
+    public const string Success = "success";
+    /// <summary>The action failed; nothing changed.</summary>
+    public const string Failure = "failure";
+    /// <summary>The action completed in part.</summary>
+    public const string Partial = "partial";
+}
+
+/// <summary>What an execution did to its resource (<see cref="ExecutionEvidence.ResourceAction"/>).</summary>
+public static class ResourceActions
+{
+    /// <summary>The resource was created.</summary>
+    public const string Create = "create";
+    /// <summary>The resource's credential was replaced.</summary>
+    public const string Rotate = "rotate";
+    /// <summary>The resource was revoked.</summary>
+    public const string Revoke = "revoke";
+    /// <summary>The resource was changed otherwise.</summary>
+    public const string Update = "update";
+    /// <summary>The resource was deleted.</summary>
+    public const string Delete = "delete";
+}
+
+/// <summary>
+/// An executor's signed record of one execution under a decision (Python <c>ExecutionEvidence</c>), built by
+/// <see cref="ExecutionRecorder"/> and submitted with <see cref="EvidenceStoreClient.Submit"/>. Records under one
+/// decision form a chain (<see cref="SequenceNo"/>, <see cref="PrevEvidenceDigest"/>); since v0.59 a record may also
+/// name the resource it acted on and link to the resource's previous record from any decision.
+/// <para>
+/// Metadata only: identifiers and settings, never a secret value. The resource fields are left out when null, as the
+/// NA signs them; every other nullable field is written as null, so a record passed back keeps its signed form.
+/// </para>
+/// </summary>
+public sealed class ExecutionEvidence
+{
+    /// <summary>The record's ID (a UUID); a resubmission with the same ID and content is a duplicate.</summary>
+    [JsonPropertyName("evidence_id")]
+    public string EvidenceId { get; set; } = "";
+
+    /// <summary>Position under the decision, from 1.</summary>
+    [JsonPropertyName("sequence_no")]
+    public long SequenceNo { get; set; }
+
+    /// <summary>The decision that authorized the execution.</summary>
+    [JsonPropertyName("decision_id")]
+    public string DecisionId { get; set; } = "";
+
+    /// <summary>The decision's context record.</summary>
+    [JsonPropertyName("context_id")]
+    public string ContextId { get; set; } = "";
+
+    /// <summary>The agreement or attestation the decision ran under.</summary>
+    [JsonPropertyName("agreement_id")]
+    public string AgreementId { get; set; } = "";
+
+    /// <summary>The sovereign that executed; its signing key must be registered for it.</summary>
+    [JsonPropertyName("executor_sovereign_id")]
+    public string ExecutorSovereignId { get; set; } = "";
+
+    /// <summary>The capability executed: the decision's capability.</summary>
+    [JsonPropertyName("executed_capability")]
+    public string ExecutedCapability { get; set; } = "";
+
+    /// <summary>What was used, as metadata (an object); the NA refuses secret material in it.</summary>
+    [JsonPropertyName("execution_parameters")]
+    public JsonElement ExecutionParameters { get; set; }
+
+    /// <summary>When it was executed, in canonical form; never before the decision.</summary>
+    [JsonPropertyName("executed_at")]
+    public string ExecutedAt { get; set; } = "";
+
+    /// <summary>A value of <see cref="ExecutionOutcomes"/>.</summary>
+    [JsonPropertyName("outcome")]
+    public string Outcome { get; set; } = "";
+
+    /// <summary>A short description of the outcome, or null; counts toward the metadata limit.</summary>
+    [JsonPropertyName("outcome_detail")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? OutcomeDetail { get; set; }
+
+    /// <summary>The digest of the previous record under the decision; null for the first.</summary>
+    [JsonPropertyName("prev_evidence_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? PrevEvidenceDigest { get; set; }
+
+    /// <summary>The resource acted on, such as <c>kv:vault/secret</c>: an identifier, never a value (v0.59).</summary>
+    [JsonPropertyName("resource_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourceId { get; set; }
+
+    /// <summary>A value of <see cref="ResourceActions"/>; set with <see cref="ResourceId"/>.</summary>
+    [JsonPropertyName("resource_action")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourceAction { get; set; }
+
+    /// <summary>Position in the resource's history across decisions, from 1; set with <see cref="ResourceId"/>.</summary>
+    [JsonPropertyName("resource_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? ResourceSequence { get; set; }
+
+    /// <summary>The digest of the resource's previous record; null for its first.</summary>
+    [JsonPropertyName("prev_resource_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PrevResourceDigest { get; set; }
+
+    /// <summary>The executor's signature, <c>{"key_id", "sig"}</c>, over the record without it; undefined until signed.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
+/// <summary>Where the next record of a resource must link: the position and digest of its latest record.</summary>
+public sealed class ResourceHead
+{
+    /// <summary>The latest record's position on the resource chain.</summary>
+    [JsonPropertyName("resource_sequence")]
+    public long ResourceSequence { get; set; }
+
+    /// <summary>The latest record's digest (<see cref="ExecutionRecorder.Digest"/>).</summary>
+    [JsonPropertyName("record_digest")]
+    public string RecordDigest { get; set; } = "";
+}
+
+/// <summary>Returned by GET /admin/evidence/resource-heads/&lt;resource_id&gt;: the NA's head of one resource chain.</summary>
+public sealed class StoredResourceHead
+{
+    /// <summary>The resource.</summary>
+    [JsonPropertyName("resource_id")]
+    public string ResourceId { get; set; } = "";
+
+    /// <summary>The head's position on the resource chain.</summary>
+    [JsonPropertyName("resource_sequence")]
+    public long ResourceSequence { get; set; }
+
+    /// <summary>The head's digest: what the next record's <c>prev_resource_digest</c> must be.</summary>
+    [JsonPropertyName("record_digest")]
+    public string RecordDigest { get; set; } = "";
+
+    /// <summary>
+    /// v1.6.0: what the head is, <c>execution</c>, <c>grant_execution</c> or <c>retention_checkpoint</c> (retention
+    /// removed every stored record); absent from an older NA.
+    /// </summary>
+    [JsonPropertyName("entry_kind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EntryKind { get; set; }
+
+    /// <summary>v1.6.0: the head's <c>evidence_id</c> or <c>use_id</c>; null for a retention checkpoint.</summary>
+    [JsonPropertyName("record_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RecordId { get; set; }
+
+    /// <summary>The head as the next record links to it.</summary>
+    public ResourceHead ToHead() => new() { ResourceSequence = ResourceSequence, RecordDigest = RecordDigest };
+}
+
+/// <summary>
+/// The evidence store's envelope of one entry (Python <c>EvidenceStoreEntry</c>). Every entry commits to the one
+/// before it; the fields after <see cref="PayloadDigest"/> index the payload for search.
+/// </summary>
+public sealed class EvidenceStoreEntry
+{
+    /// <summary>The entry's position in the store, from 1.</summary>
+    [JsonPropertyName("store_sequence")]
+    public long StoreSequence { get; set; }
+
+    /// <summary>What the payload is, such as <c>decision</c>, <c>execution</c> or <c>break_glass</c>.</summary>
+    [JsonPropertyName("entry_kind")]
+    public string EntryKind { get; set; } = "";
+
+    /// <summary>When the NA stored the entry.</summary>
+    [JsonPropertyName("recorded_at")]
+    public string RecordedAt { get; set; } = "";
+
+    /// <summary>SHA-256 hex of the payload's canonical JSON.</summary>
+    [JsonPropertyName("payload_digest")]
+    public string PayloadDigest { get; set; } = "";
+
+    /// <summary>The previous entry's digest; null for the first entry.</summary>
+    [JsonPropertyName("prev_entry_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? PrevEntryDigest { get; set; }
+
+    /// <summary>The decision the entry belongs to, when it has one.</summary>
+    [JsonPropertyName("decision_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? DecisionId { get; set; }
+
+    /// <summary>The decision's context record, when it has one.</summary>
+    [JsonPropertyName("context_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? ContextId { get; set; }
+
+    /// <summary>The vendor (attestation subject), when known.</summary>
+    [JsonPropertyName("vendor_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? VendorId { get; set; }
+
+    /// <summary>The attestation the decision rested on, when it had one.</summary>
+    [JsonPropertyName("attestation_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? AttestationId { get; set; }
+
+    /// <summary>The capability requested or executed.</summary>
+    [JsonPropertyName("capability")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? Capability { get; set; }
+
+    /// <summary><c>authorized</c> or <c>denied</c> for a decision; the executor's outcome for an execution.</summary>
+    [JsonPropertyName("outcome")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? Outcome { get; set; }
+
+    /// <summary>The execution record's ID, for an execution.</summary>
+    [JsonPropertyName("evidence_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? EvidenceId { get; set; }
+
+    /// <summary>The executor, for an execution.</summary>
+    [JsonPropertyName("executor_sovereign_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? ExecutorSovereignId { get; set; }
+
+    /// <summary>The execution record's position under its decision.</summary>
+    [JsonPropertyName("exec_sequence_no")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public long? ExecSequenceNo { get; set; }
+
+    /// <summary>The resource acted on, when the record names one.</summary>
+    [JsonPropertyName("resource_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? ResourceId { get; set; }
+
+    /// <summary>What was done to the resource.</summary>
+    [JsonPropertyName("resource_action")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? ResourceAction { get; set; }
+
+    /// <summary>The record's position on the resource chain.</summary>
+    [JsonPropertyName("resource_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public long? ResourceSequence { get; set; }
+
+    /// <summary>v1.3.0, left out when absent: the ID of a record other than a decision or execution.</summary>
+    [JsonPropertyName("record_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RecordId { get; set; }
+
+    /// <summary>v1.3.0, left out when absent: the observation or break-glass record a judgement judges.</summary>
+    [JsonPropertyName("subject_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SubjectId { get; set; }
+
+    /// <summary>v1.3.0, left out when absent: the execution record a judgement matched.</summary>
+    [JsonPropertyName("matched_evidence_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MatchedEvidenceId { get; set; }
+
+    /// <summary>v1.3.0, left out when absent: an observation's position among the resource's observations.</summary>
+    [JsonPropertyName("observation_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? ObservationSequence { get; set; }
+}
+
+/// <summary>One stored entry with its payload, as search and export return it (schema <c>gm.evidence.event</c>).</summary>
+public sealed class EvidenceEvent
+{
+    /// <summary>Always <c>gm.evidence.event</c>.</summary>
+    [JsonPropertyName("schema")]
+    public string Schema { get; set; } = "";
+
+    /// <summary>Always 1.</summary>
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    /// <summary>The store's envelope.</summary>
+    [JsonPropertyName("entry")]
+    public EvidenceStoreEntry Entry { get; set; } = new();
+
+    /// <summary>SHA-256 hex of the envelope's canonical JSON.</summary>
+    [JsonPropertyName("entry_digest")]
+    public string EntryDigest { get; set; } = "";
+
+    /// <summary>
+    /// The stored record as signed, such as an <see cref="ExecutionEvidence"/> for an <c>execution</c> entry. Read it
+    /// with <c>Deserialize&lt;ExecutionEvidence&gt;(Auth.SerializerOptions)</c>, or verify it as received.
+    /// </summary>
+    [JsonPropertyName("payload")]
+    public JsonElement Payload { get; set; }
+}
+
+/// <summary>Returned by GET /admin/evidence: one page of matching entries.</summary>
+public sealed class EvidenceSearchResult
+{
+    /// <summary>The number of entries on this page.</summary>
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
+    /// <summary>The cursor for the next page (<see cref="EvidenceSearchParams.AfterSequence"/>); null on the last.</summary>
+    [JsonPropertyName("next_after_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public long? NextAfterSequence { get; set; }
+
+    /// <summary>The entries, in store order.</summary>
+    [JsonPropertyName("entries")]
+    public List<EvidenceEvent> Entries { get; set; } = [];
+}
+
+/// <summary>Filters for <see cref="EvidenceStoreClient.Search"/>; every filter left null matches everything.</summary>
+public sealed class EvidenceSearchParams
+{
+    /// <summary>The vendor (attestation subject).</summary>
+    public string? VendorId { get; init; }
+    /// <summary>The attestation a decision rested on.</summary>
+    public string? AttestationId { get; init; }
+    /// <summary>The capability requested or executed.</summary>
+    public string? Capability { get; init; }
+    /// <summary>The resource acted on.</summary>
+    public string? ResourceId { get; init; }
+    /// <summary><c>authorized</c> or <c>denied</c> for decisions; the executor's outcome for executions.</summary>
+    public string? Outcome { get; init; }
+    /// <summary>The entry kind, such as <c>execution</c>.</summary>
+    public string? EntryKind { get; init; }
+    /// <summary>The decision.</summary>
+    public string? DecisionId { get; init; }
+    /// <summary>v1.6.0: a grant's uses and its revocation.</summary>
+    public string? GrantId { get; init; }
+    /// <summary>The earliest <c>recorded_at</c>, ISO 8601.</summary>
+    public string? Since { get; init; }
+    /// <summary>The latest <c>recorded_at</c>, ISO 8601.</summary>
+    public string? Until { get; init; }
+    /// <summary>Entries after this store sequence: the paging cursor.</summary>
+    public long? AfterSequence { get; init; }
+    /// <summary>1 to 1000 entries a page; the NA's default is 100.</summary>
+    public int? Limit { get; init; }
+}
+
+/// <summary>
+/// The latest state of one resource, from its stored execution evidence and (1.3.1) break-glass records
+/// (<see cref="EvidenceStoreClient.ResourceStates"/>), for reconciliation against a cloud inventory.
+/// </summary>
+public sealed class ResourceState
+{
+    /// <summary>The resource.</summary>
+    public string ResourceId { get; init; } = "";
+    /// <summary>The newest execution record's position on the resource chain; 0 with only break-glass records.</summary>
+    public long ResourceSequence { get; init; }
+    /// <summary>The newest execution record's digest; empty with only break-glass records.</summary>
+    public string RecordDigest { get; init; } = "";
+    /// <summary>The latest change's action.</summary>
+    public string? LastAction { get; init; }
+    /// <summary>The latest change's outcome.</summary>
+    public string LastOutcome { get; init; } = "";
+    /// <summary>The action of the latest change that succeeded.</summary>
+    public string? LastSuccessAction { get; init; }
+    /// <summary>The parameters of the latest change that succeeded; undefined when none did.</summary>
+    public JsonElement LastSuccessParameters { get; init; }
+    /// <summary>When the latest change was made.</summary>
+    public string LastExecutedAt { get; init; } = "";
+    /// <summary>The newest execution record's decision; empty with only break-glass records.</summary>
+    public string LastDecisionId { get; init; } = "";
+    /// <summary>The break-glass record of the latest change, when it was one (1.3.1).</summary>
+    public string? LastBreakGlassId { get; init; }
+}
+
+/// <summary>A key to register with <see cref="EvidenceStoreClient.RegisterExecutorKey"/> (privileged).</summary>
+public sealed class RegisterExecutorKeyRequest
+{
+    /// <summary>The key's ID, as the records it signs name it.</summary>
+    [JsonPropertyName("key_id")]
+    public string KeyId { get; set; } = "";
+
+    /// <summary>The raw 32-byte Ed25519 public key, base64.</summary>
+    [JsonPropertyName("public_key")]
+    public string PublicKey { get; set; } = "";
+
+    /// <summary>The sovereign the key signs for.</summary>
+    [JsonPropertyName("executor_sovereign_id")]
+    public string ExecutorSovereignId { get; set; } = "";
+
+    /// <summary>v1.3.0: <c>executor</c> (the NA's default when null) or <c>observer</c>, which signs observations only.</summary>
+    [JsonPropertyName("role")]
+    public string? Role { get; set; }
+
+    /// <summary>
+    /// v1.3.0: the key signs only for resources whose ID starts with this (1 to 256 characters); null for any. The NA
+    /// refuses a record of such a key without a resource or outside the prefix (<c>evidence_out_of_scope</c>).
+    /// </summary>
+    [JsonPropertyName("resource_prefix")]
+    public string? ResourcePrefix { get; set; }
+}
+
+/// <summary>Returned by registering an executor key.</summary>
+public sealed class ExecutorKeyState
+{
+    /// <summary>The key's ID.</summary>
+    [JsonPropertyName("key_id")]
+    public string KeyId { get; set; } = "";
+
+    /// <summary>The sovereign the key signs for.</summary>
+    [JsonPropertyName("executor_sovereign_id")]
+    public string ExecutorSovereignId { get; set; } = "";
+
+    /// <summary>True while the key is not retired.</summary>
+    [JsonPropertyName("active")]
+    public bool Active { get; set; }
+
+    /// <summary>v1.3.0: <c>executor</c> or <c>observer</c>.</summary>
+    [JsonPropertyName("role")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Role { get; set; }
+
+    /// <summary>v1.3.0, left out when absent: the prefix the key is limited to.</summary>
+    [JsonPropertyName("resource_prefix")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourcePrefix { get; set; }
+}
+
+/// <summary>Returned by POST /evidence/execution.</summary>
+public sealed class EvidenceSubmission
+{
+    /// <summary><c>recorded</c>, or <c>duplicate</c> for an identical resubmission: safe to retry.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    /// <summary>The store's envelope of the record.</summary>
+    [JsonPropertyName("entry")]
+    public EvidenceStoreEntry Entry { get; set; } = new();
+
+    /// <summary>SHA-256 hex of the envelope's canonical JSON.</summary>
+    [JsonPropertyName("entry_digest")]
+    public string EntryDigest { get; set; } = "";
+}
+
 internal static class ModelHelpers
 {
     /// <summary>The first entry of a signatures array, or an undefined element.</summary>

@@ -36,6 +36,7 @@ public partial class ArchitectureTests
         ("Signer.cs", "auth"),
         ("Transport.cs", "transport"),
         ("ClientOptions.cs", "transport"),
+        ("Execution.cs", "execution"),
         ("Clients/", "clients"),
         ("GenesisMeshClient.cs", "client"),
     ];
@@ -51,8 +52,9 @@ public partial class ArchitectureTests
         ["auth"] = ["canonical", "json"],
         ["verify"] = ["registry", "canonical", "json", "models"],
         ["transport"] = ["auth", "errors", "models", "canonical", "json"],
+        ["execution"] = ["auth", "verify", "models", "errors", "canonical", "json"],
         ["clients"] = ["transport", "models", "errors", "verify"],
-        ["client"] = ["json", "errors", "models", "canonical", "registry", "auth", "verify", "transport", "clients"],
+        ["client"] = ["json", "errors", "models", "canonical", "registry", "auth", "verify", "execution", "transport", "clients"],
     };
 
     /// <summary>The modules that may name System.Net types.</summary>

@@ -43,6 +43,19 @@ public static class Canonical
         return sb.ToString();
     }
 
+    /// <summary>
+    /// <paramref name="value"/> as the NA writes a timestamp (1.9.0): UTC, <c>YYYY-MM-DDTHH:MM:SS</c>, six digits of
+    /// microseconds when not all zero, then <c>Z</c>. A record signed over another spelling would not survive the NA's
+    /// re-serialization; precision below a microsecond is dropped.
+    /// </summary>
+    public static string Timestamp(DateTimeOffset value)
+    {
+        var utc = value.UtcDateTime;
+        var micros = utc.Ticks % TimeSpan.TicksPerSecond / 10;
+        var seconds = utc.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture);
+        return micros == 0 ? seconds + "Z" : seconds + "." + micros.ToString("D6", CultureInfo.InvariantCulture) + "Z";
+    }
+
     /// <summary>Canonical form of selected top-level keys of an object (missing keys become null).</summary>
     public static string OfKeys(JsonElement obj, IReadOnlyCollection<string> keys)
     {

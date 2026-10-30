@@ -38,6 +38,12 @@ public sealed class GenesisMeshClient : IDisposable
     /// <summary>Trust evidence — build and verify.</summary>
     public EvidenceClient Evidence { get; }
 
+    /// <summary>
+    /// The evidence store (1.9.0): submit signed execution evidence, read where a resource's chain ends, search what is
+    /// stored and register executor keys.
+    /// </summary>
+    public EvidenceStoreClient EvidenceStore { get; }
+
     /// <summary>The boundary policy lifecycle: validate, publish, activate, deactivate, list and verify (v0.58).</summary>
     public PolicyClient Policy { get; }
 
@@ -59,6 +65,7 @@ public sealed class GenesisMeshClient : IDisposable
         DataUsage = new DataUsageClient(_transport);
         Disclosure = new DisclosureClient(_transport);
         Evidence = new EvidenceClient(_transport);
+        EvidenceStore = new EvidenceStoreClient(_transport);
         Policy = new PolicyClient(_transport);
         Health = new HealthClient(_transport);
         NA = new NetworkAuthorityClient(_transport);
