@@ -43,7 +43,8 @@ public sealed class HealthClient
 
     /// <summary>
     /// The readiness of every configured endpoint, each asked directly, without failover: for monitoring an HA
-    /// deployment. An endpoint that does not answer is reported unreachable, not thrown.
+    /// deployment. An endpoint that does not answer, or answers 200 with a body that is not strict JSON, is reported
+    /// unreachable, not thrown.
     /// GET /readyz on each endpoint
     /// </summary>
     public async Task<IReadOnlyList<EndpointReadiness>> Endpoints(CancellationToken ct = default) =>

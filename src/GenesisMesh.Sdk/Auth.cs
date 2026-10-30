@@ -149,14 +149,16 @@ public static class Auth
         timestamp ??= DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fff", CultureInfo.InvariantCulture) + "Z";
         nonce ??= Guid.NewGuid().ToString();
 
-        var canonical = AdminSigningPayload(request, signer.KeyId, timestamp, nonce);
+        // Read once: the header must name the key ID that was signed.
+        var keyId = signer.KeyId;
+        var canonical = AdminSigningPayload(request, keyId, timestamp, nonce);
         var sig = await signer.SignAsync(canonical, cancellationToken).ConfigureAwait(false);
         if (sig is not { Length: 64 })
             throw new InvalidOperationException("genesismesh: the signer returned a signature that is not 64 bytes");
 
         return new AdminHeaders
         {
-            KeyId = signer.KeyId,
+            KeyId = keyId,
             Signature = Convert.ToBase64String(sig),
             Timestamp = timestamp,
             Nonce = nonce,

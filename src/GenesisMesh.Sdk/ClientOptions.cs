@@ -10,8 +10,9 @@ public sealed class ClientOptions
     /// Several NA instances sharing one database (high availability), used without a load balancer; set this or
     /// <see cref="BaseUrl"/>, not both. Requests go to one instance. An idempotent request moves to the next instance
     /// on a connection failure or a 502, 503 or 504. Any other request moves only when it never reached an instance:
-    /// the connection could not be made, or the NA's key could not be read first. Otherwise it is not sent again, and
-    /// the next request starts at the next instance.
+    /// the connection could not be made, or the NA's key could not be read first because the instance did not answer
+    /// or answered 502, 503 or 504. Otherwise it is not sent again, and the next request starts at the next
+    /// instance.
     /// </summary>
     public IReadOnlyList<string>? BaseUrls { get; set; }
 
@@ -34,7 +35,10 @@ public sealed class ClientOptions
     /// </summary>
     public string? Audience { get; set; }
 
-    /// <summary>HTTP request timeout. Defaults to 10 s.</summary>
+    /// <summary>
+    /// The timeout of each attempt: each request, and each read of the NA's key. A call that fails over or retries can
+    /// take longer. Defaults to 10 s.
+    /// </summary>
     public TimeSpan Timeout { get; set; }
 
     /// <summary>
@@ -46,7 +50,11 @@ public sealed class ClientOptions
     /// <summary>Extra headers on every request, such as for an API gateway in front of the NA.</summary>
     public IReadOnlyDictionary<string, string>? Headers { get; set; }
 
-    /// <summary>Custom HTTP message handler, such as one from <c>IHttpClientFactory</c> or for unit testing.</summary>
+    /// <summary>
+    /// The handler requests go through, such as a <c>SocketsHttpHandler</c> configured for your network (set its
+    /// <c>PooledConnectionLifetime</c> so that a long-lived client follows DNS changes) or one for unit tests. The client
+    /// keeps it for its lifetime and does not dispose it.
+    /// </summary>
     public HttpMessageHandler? HttpHandler { get; set; }
 }
 

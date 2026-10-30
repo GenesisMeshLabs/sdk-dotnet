@@ -1157,7 +1157,7 @@ public sealed class EndpointReadiness
     [JsonPropertyName("base_url")]
     public string BaseUrl { get; set; } = "";
 
-    /// <summary>True when the endpoint answered.</summary>
+    /// <summary>True when the endpoint answered; false also when it answered 200 with a body that is not strict JSON.</summary>
     [JsonPropertyName("reachable")]
     public bool Reachable { get; set; }
 

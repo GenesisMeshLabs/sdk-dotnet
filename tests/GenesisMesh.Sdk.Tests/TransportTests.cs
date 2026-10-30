@@ -342,6 +342,30 @@ public class TransportTests
         Assert.Equal(3, calls);
     }
 
+    [Fact]
+    public async Task ADroppedResponseBody_DoesNotMoveAStateCreatingRequest_ToAnotherInstance()
+    {
+        var calls = new List<string>();
+        using var handler = new FuncHandler(req =>
+        {
+            calls.Add(req.RequestUri!.Host);
+            return new HttpResponseMessage(HttpStatusCode.Created) { Content = new StreamContent(new BrokenStream()) };
+        });
+        using var gm = Client(handler, o => o.Audience = "TEST");
+        var ex = await Assert.ThrowsAsync<NetworkException>(() => gm.Attestation.Issue(Attestation()));
+        Assert.False(ex.ConnectFailed);
+        Assert.Equal(["na-a"], calls);
+    }
+
+    [Fact]
+    public async Task AKeyLookupAnswering503_MovesAStateCreatingRequest_ToTheNextInstance()
+    {
+        var cluster = new Cluster(new() { [A] = new Status(503), [B] = new Status(201) });
+        using var gm = Client(cluster);
+        await gm.Attestation.Issue(Attestation());
+        Assert.Equal([$"{A}/sovereign.json", $"{B}/sovereign.json", $"{B}/admin/attestations"], cluster.Calls);
+    }
+
     [Theory]
     [InlineData(-1, 0)]
     [InlineData(11, 0)]
@@ -496,6 +520,25 @@ public class TransportTests
         signer.Fail = true;
         await Assert.ThrowsAsync<InvalidOperationException>(() => transport.AdminGetAsync<JsonElement>("/c", null, default));
         Assert.Equal(2, keyIds.Count);
+    }
+
+    /// <summary>A signer whose key ID changes each time it is read, as during a key rotation.</summary>
+    private sealed class RotatingSigner : ISigner
+    {
+        private int _reads;
+        public string KeyId => "k" + Interlocked.Increment(ref _reads);
+        public ValueTask<byte[]> SignAsync(ReadOnlyMemory<byte> message, CancellationToken cancellationToken = default) =>
+            new SeedSigner(TestHelpers.ZeroSeedB64, "x").SignAsync(message, cancellationToken);
+    }
+
+    [Fact]
+    public async Task TheHeaderNamesTheKeyIdThatWasSigned()
+    {
+        var request = new AdminRequest("GET", "/a", "TEST");
+        var headers = await Auth.BuildAdminHeadersAsync(request, new RotatingSigner());
+        var payload = Auth.AdminSigningPayload(request, headers.KeyId, headers.Timestamp, headers.Nonce);
+        using var key = Key.Import(SignatureAlgorithm.Ed25519, Auth.LoadSeed(TestHelpers.ZeroSeedB64), KeyBlobFormat.RawPrivateKey);
+        Assert.True(SignatureAlgorithm.Ed25519.Verify(key.PublicKey, payload, Convert.FromBase64String(headers.Signature)));
     }
 
     [Fact]

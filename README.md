@@ -134,12 +134,12 @@ activate policies (`POST /admin/boundary-policies`, then
 
 | Option | What it does |
 |---|---|
-| `BaseUrls` | Several NA instances sharing one database, without a load balancer; set this or `BaseUrl`. Requests go to one instance. An idempotent request (a GET, a verification) moves to the next instance on a connection failure or a 502, 503 or 504. Any other request moves only when it never reached an instance: the connection could not be made, or the NA's key could not be read first. Otherwise it is not sent again, and the next request starts at the next instance. |
+| `BaseUrls` | Several NA instances sharing one database, without a load balancer; set this or `BaseUrl`. Requests go to one instance. An idempotent request (a GET, a verification) moves to the next instance on a connection failure or a 502, 503 or 504. Any other request moves only when it never reached an instance: the connection could not be made, or the NA's key could not be read first because the instance did not answer or answered 502, 503 or 504. Otherwise it is not sent again, and the next request starts at the next instance. |
 | `Retry` | `new RetryOptions { Attempts = 3 }`: idempotent requests are tried again after a connection failure or a 429, 502, 503 or 504, waiting `BaseDelay` (200 ms) and doubling it each time. Off by default. A request that creates state is never retried. |
 | `Signer` | An `ISigner` for admin requests, used instead of `SigningKey` and `KeyId`: implement it for an HSM, or use `SeedSigner` for a key read at start. |
 | `Headers` | Extra headers on every request, such as for an API gateway in front of the NA. |
-| `HttpHandler` | The handler requests go through, such as one from `IHttpClientFactory`. The client does not dispose it. |
-| `Timeout` | Each attempt's timeout; 10 s by default. |
+| `HttpHandler` | The handler requests go through, such as a `SocketsHttpHandler` with a `PooledConnectionLifetime`, so that a long-lived client follows DNS changes. The client does not dispose it. |
+| `Timeout` | Each attempt's timeout (each request, and each read of the NA's key); 10 s by default. A call that fails over or retries can take longer. |
 
 ```csharp
 using Azure.Identity;

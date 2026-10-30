@@ -32,7 +32,17 @@ public class GenesisMeshException : Exception
     /// <param name="code">The NA's error code.</param>
     /// <param name="detail">The NA's error message.</param>
     public GenesisMeshException(int status, string code, string detail)
-        : base($"genesismesh: HTTP {status} {code}: {detail}")
+        : this(status, code, detail, $"genesismesh: HTTP {status} {code}: {detail}")
+    {
+    }
+
+    /// <summary>An error with its own <paramref name="message"/>, for a refusal that is not an HTTP answer.</summary>
+    /// <param name="status">The HTTP status, or 0 when the refusal is the SDK's own.</param>
+    /// <param name="code">The reason code.</param>
+    /// <param name="detail">What was refused.</param>
+    /// <param name="message">The exception message.</param>
+    protected GenesisMeshException(int status, string code, string detail, string message)
+        : base(message)
     {
         Status = status;
         Code = code;

@@ -23,8 +23,9 @@ internal sealed class Transport : IDisposable
     private readonly int _retryAttempts;
     private readonly TimeSpan _retryBaseDelay;
     private readonly KeyValuePair<string, string>[] _headers;
-    private readonly SemaphoreSlim _audienceLock = new(1, 1);
-    private string? _audience;
+    private readonly object _audienceGate = new();
+    private Task<string>? _audienceLookup;
+    private volatile string? _audience;
 
     internal Transport(ClientOptions opts)
     {
@@ -65,12 +66,18 @@ internal sealed class Transport : IDisposable
     internal IReadOnlyList<string> BaseUrls => _baseUrls;
 
     /// <summary>The endpoint requests go to now.</summary>
-    internal string BaseUrl => _baseUrls[(uint)Volatile.Read(ref _active) % (uint)_baseUrls.Length];
+    internal string BaseUrl => Endpoint(Volatile.Read(ref _active));
 
-    /// <summary>Move to the next endpoint (nothing with one endpoint).</summary>
-    private void Failover()
+    private string Endpoint(int position) => _baseUrls[(uint)position % (uint)_baseUrls.Length];
+
+    /// <summary>
+    /// Move past the endpoint at <paramref name="used"/>, the position a failed attempt was sent to. Attempts that
+    /// failed at the same endpoint at the same time move once together; one that failed at an endpoint already left
+    /// behind moves nothing.
+    /// </summary>
+    private void MoveFrom(int used)
     {
-        if (_baseUrls.Length > 1) Interlocked.Increment(ref _active);
+        if (_baseUrls.Length > 1) Interlocked.CompareExchange(ref _active, used + 1, used);
     }
 
     /// <summary>
@@ -92,42 +99,69 @@ internal sealed class Transport : IDisposable
     }
 
     /// <summary>
-    /// The NA's public key for admin signatures, read once from /sovereign.json. A lookup that gets no answer throws
-    /// <see cref="NetworkException"/>; an answer without the key throws <c>na_public_key_unavailable</c> with the
-    /// answer's status. A failed lookup is tried again by the next admin request.
+    /// The NA's public key for admin signatures, read once from /sovereign.json. Requests that need it at the same
+    /// time share one lookup. A lookup that gets no answer throws <see cref="NetworkException"/>; an answer without
+    /// the key throws <c>na_public_key_unavailable</c> with the answer's status. A failed lookup is tried again by the
+    /// next request.
     /// </summary>
     private async Task<string> AudienceAsync(CancellationToken ct)
     {
-        if (_audience is not null) return _audience;
-        await _audienceLock.WaitAsync(ct).ConfigureAwait(false);
+        if (_audience is { } known) return known;
+        Task<string> lookup;
+        lock (_audienceGate) lookup = _audienceLookup ??= LookupAsync();
         try
         {
-            if (_audience is null)
-            {
-                var (status, body) = await GetAtAsync(BaseUrl, "/sovereign.json", ct).ConfigureAwait(false);
-                string? key = null;
-                try
-                {
-                    using var doc = StrictJsonReader.Parse(StrictJsonReader.DecodeUtf8(body));
-                    if (doc.RootElement.ValueKind == JsonValueKind.Object
-                        && doc.RootElement.TryGetProperty("network_authority", out var authority)
-                        && authority.ValueKind == JsonValueKind.Object
-                        && authority.TryGetProperty("public_key", out var publicKey)
-                        && publicKey.ValueKind == JsonValueKind.String)
-                        key = publicKey.GetString();
-                }
-                catch (Exception e) when (e is JsonException or FormatException) { /* no key */ }
-                if (status != 200 || string.IsNullOrEmpty(key))
-                    throw ErrorMapping.ForStatus(status, LookupUnavailable,
-                        $"Could not read the NA public key from /sovereign.json (HTTP {status})");
-                _audience = key;
-            }
-            return _audience;
+            return await lookup.WaitAsync(ct).ConfigureAwait(false);
         }
-        finally
+        catch when (lookup.IsCompleted)
         {
-            _audienceLock.Release();
+            lock (_audienceGate)
+            {
+                if (ReferenceEquals(_audienceLookup, lookup)) _audienceLookup = null;
+            }
+            throw;
         }
+    }
+
+    /// <summary>
+    /// One read of the NA's key from the active endpoint, bounded by the request timeout rather than one caller's
+    /// cancellation, since several requests wait for it. An endpoint that does not answer, or answers 502, 503 or
+    /// 504, is moved past.
+    /// </summary>
+    private async Task<string> LookupAsync()
+    {
+        var used = Volatile.Read(ref _active);
+        int status;
+        byte[] body;
+        try
+        {
+            (status, body) = await GetAtAsync(Endpoint(used), "/sovereign.json", CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (NetworkException)
+        {
+            MoveFrom(used);
+            throw;
+        }
+        string? key = null;
+        try
+        {
+            using var doc = StrictJsonReader.Parse(StrictJsonReader.DecodeUtf8(body));
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("network_authority", out var authority)
+                && authority.ValueKind == JsonValueKind.Object
+                && authority.TryGetProperty("public_key", out var publicKey)
+                && publicKey.ValueKind == JsonValueKind.String)
+                key = publicKey.GetString();
+        }
+        catch (Exception e) when (e is JsonException or FormatException) { /* no key */ }
+        if (status != 200 || string.IsNullOrEmpty(key))
+        {
+            if (FailoverStatus.Contains(status)) MoveFrom(used);
+            throw ErrorMapping.ForStatus(status, LookupUnavailable,
+                $"Could not read the NA public key from /sovereign.json (HTTP {status})");
+        }
+        _audience = key;
+        return key;
     }
 
     /// <summary>A signed admin POST, sent again only when <paramref name="idempotent"/>.</summary>
@@ -171,15 +205,15 @@ internal sealed class Transport : IDisposable
     internal async Task<(int Status, T? Body, JsonElement Details)> PublicGetAtAsync<T>(string baseUrl, string path, CancellationToken ct)
     {
         var (status, bytes) = await GetAtAsync(baseUrl.TrimEnd('/'), path, ct).ConfigureAwait(false);
-        var text = StrictJsonReader.DecodeUtf8(bytes);
         if (status == 200)
         {
+            var text = StrictJsonReader.DecodeUtf8(bytes);
             StrictJsonReader.Check(text);
             return (status, JsonSerializer.Deserialize<T>(text, Auth.SerializerOptions), default);
         }
         try
         {
-            using var doc = StrictJsonReader.Parse(text);
+            using var doc = StrictJsonReader.Parse(StrictJsonReader.DecodeUtf8(bytes));
             if (doc.RootElement.ValueKind == JsonValueKind.Object
                 && doc.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object
                 && error.TryGetProperty("details", out var details))
@@ -215,9 +249,13 @@ internal sealed class Transport : IDisposable
         {
             Answer? answer = null;
             Exception? error = null;
+            int? used = null;
             try
             {
-                answer = await AttemptAsync(spec, ct).ConfigureAwait(false);
+                var headers = spec.Admin ? await SignAsync(spec, ct).ConfigureAwait(false) : null;
+                // Read after the key lookup, which may have moved past a down instance.
+                used = Volatile.Read(ref _active);
+                answer = await AttemptAsync(spec, headers, Endpoint(used.Value), ct).ConfigureAwait(false);
             }
             catch (NetworkException e)
             {
@@ -230,7 +268,8 @@ internal sealed class Transport : IDisposable
             }
             var status = answer?.Status ?? (error as GenesisMeshException)?.Status;
             var failoverWorthy = error is NetworkException || (status is { } s && FailoverStatus.Contains(s));
-            if (failoverWorthy) Failover();
+            // A failed key lookup has moved past its endpoint already.
+            if (failoverWorthy && used is { } position) MoveFrom(position);
             // A request that may have reached an instance is sent elsewhere only when it is idempotent; one that was
             // never sent can always move on.
             var mayMove = spec.Idempotent || (error is NetworkException network ? network.ConnectFailed : error is not null);
@@ -258,34 +297,38 @@ internal sealed class Transport : IDisposable
         return TimeSpan.FromMilliseconds(Math.Min(delay, 60_000));
     }
 
-    /// <summary>One request to the active endpoint, signed afresh when it is an admin request.</summary>
-    private async Task<Answer> AttemptAsync(Spec spec, CancellationToken ct)
+    /// <summary>The admin headers of one attempt, signed afresh, after the NA's key is known.</summary>
+    private async Task<AdminHeaders> SignAsync(Spec spec, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(spec.Method, BaseUrl + PathWithQuery(spec.Path, spec.Query));
-        foreach (var (name, value) in _headers) req.Headers.TryAddWithoutValidation(name, value);
-
-        if (spec.Admin)
+        if (_signer is null)
+            throw new InvalidOperationException($"genesismesh: signing key required for admin route {spec.Path}");
+        string audience;
+        try
         {
-            if (_signer is null)
-                throw new InvalidOperationException($"genesismesh: signing key required for admin route {spec.Path}");
-            string audience;
-            try
-            {
-                audience = await AudienceAsync(ct).ConfigureAwait(false);
-            }
-            catch (NetworkException e)
-            {
-                // The request itself was not sent, so it may move to another instance, idempotent or not.
-                throw new NetworkException($"{spec.Method} {spec.Path} not sent: {e.Message}", e, connectFailed: true);
-            }
-            var query = spec.Query?.ToDictionary(p => p.Key, p => (IReadOnlyList<string>)[p.Value]);
-            var signed = new AdminRequest(spec.Method.Method, spec.Path, audience,
-                spec.Method == HttpMethod.Get ? null : spec.Body, query);
-            var headers = await Auth.BuildAdminHeadersAsync(signed, _signer, cancellationToken: ct).ConfigureAwait(false);
-            req.Headers.Add("X-Admin-Key-Id", headers.KeyId);
-            req.Headers.Add("X-Admin-Signature", headers.Signature);
-            req.Headers.Add("X-Admin-Timestamp", headers.Timestamp);
-            req.Headers.Add("X-Admin-Nonce", headers.Nonce);
+            audience = await AudienceAsync(ct).ConfigureAwait(false);
+        }
+        catch (NetworkException e)
+        {
+            // The request itself was not sent, so it may move to another instance, idempotent or not.
+            throw new NetworkException($"{spec.Method} {spec.Path} not sent: {e.Message}", e, connectFailed: true);
+        }
+        var query = spec.Query?.ToDictionary(p => p.Key, p => (IReadOnlyList<string>)[p.Value]);
+        var signed = new AdminRequest(spec.Method.Method, spec.Path, audience,
+            spec.Method == HttpMethod.Get ? null : spec.Body, query);
+        return await Auth.BuildAdminHeadersAsync(signed, _signer, cancellationToken: ct).ConfigureAwait(false);
+    }
+
+    /// <summary>One request to <paramref name="baseUrl"/>.</summary>
+    private async Task<Answer> AttemptAsync(Spec spec, AdminHeaders? admin, string baseUrl, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(spec.Method, baseUrl + PathWithQuery(spec.Path, spec.Query));
+        foreach (var (name, value) in _headers) req.Headers.TryAddWithoutValidation(name, value);
+        if (admin is not null)
+        {
+            req.Headers.Add("X-Admin-Key-Id", admin.KeyId);
+            req.Headers.Add("X-Admin-Signature", admin.Signature);
+            req.Headers.Add("X-Admin-Timestamp", admin.Timestamp);
+            req.Headers.Add("X-Admin-Nonce", admin.Nonce);
         }
 
         if (spec.Body is not null)
@@ -378,9 +421,5 @@ internal sealed class Transport : IDisposable
         return StrictJsonReader.DecodeUtf8(answer.Body);
     }
 
-    public void Dispose()
-    {
-        _http.Dispose();
-        _audienceLock.Dispose();
-    }
+    public void Dispose() => _http.Dispose();
 }

@@ -42,12 +42,16 @@ public sealed class KeyHistoryException : GenesisMeshException
     /// <summary>A refused key history.</summary>
     /// <param name="verification">The failed verification.</param>
     public KeyHistoryException(KeyHistoryVerificationResult verification)
-        : base(0, verification?.Reason ?? "key_history_invalid",
-            $"the NA key history is refused: {verification?.Reason ?? "key_history_invalid"} (key {verification?.KeySequence?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?"})")
+        : base(0, Reason(verification), Describe(verification), "genesismesh: " + Describe(verification))
     {
         Verification = verification ?? throw new ArgumentNullException(nameof(verification));
     }
 
     /// <summary>The failed verification: the reason and the key sequence it failed at.</summary>
     public KeyHistoryVerificationResult Verification { get; }
+
+    private static string Reason(KeyHistoryVerificationResult? verification) => verification?.Reason ?? "key_history_invalid";
+
+    private static string Describe(KeyHistoryVerificationResult? verification) =>
+        $"the NA key history is refused: {Reason(verification)} (key {verification?.KeySequence?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?"})";
 }
