@@ -27,7 +27,6 @@ enforces the layer table; a new source file goes into its module table.
 src/GenesisMesh.Sdk/       # the package (one assembly, namespace GenesisMesh)
 tests/GenesisMesh.Sdk.Tests/ # tests; testdata/conformance/ holds the core's vectors, copied unchanged
 scripts/                   # changelog, version, TRX and registry tools; contract_na.py for the live test
-sandbox/sdk-smoke-dotnet/  # smoke program against a running NA (compiled in CI)
 changelog.d/               # changelog fragments, one per change
 docs/architecture.md       # modules, layers, flows, recipes
 ```
