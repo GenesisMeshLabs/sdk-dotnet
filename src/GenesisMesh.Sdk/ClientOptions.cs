@@ -45,7 +45,7 @@ public sealed class ClientOptions
     /// Retries of idempotent requests after a connection failure or a 429, 502, 503 or 504, with exponential backoff.
     /// Off when unset. Requests that create state are never retried.
     /// </summary>
-    public RetryOptions? Retry { get; set; }
+    public RetrySettings? Retry { get; set; }
 
     /// <summary>Extra headers on every request, such as for an API gateway in front of the NA.</summary>
     public IReadOnlyDictionary<string, string>? Headers { get; set; }
@@ -56,6 +56,15 @@ public sealed class ClientOptions
     /// keeps it for its lifetime and does not dispose it.
     /// </summary>
     public HttpMessageHandler? HttpHandler { get; set; }
+
+    /// <summary>
+    /// The <see cref="System.Net.Http.HttpClient"/> requests are sent with, such as a typed client from
+    /// <c>IHttpClientFactory</c>. Takes precedence over <see cref="HttpHandler"/> and <see cref="Timeout"/>: its own
+    /// <c>Timeout</c> applies to each attempt. The client does not dispose it. A handler in its pipeline must not retry
+    /// POSTs: a repeated admin request carries the same signature and nonce, and the NA refuses it as a replay after
+    /// the first may have been applied.
+    /// </summary>
+    public HttpClient? HttpClient { get; set; }
 }
 
 /// <summary>
@@ -63,7 +72,7 @@ public sealed class ClientOptions
 /// <see cref="BaseDelay"/> times 2<sup>n</sup>, at most a minute. These waits do not follow <c>Retry-After</c>: a
 /// refusal that names a wait carries it in <see cref="GenesisMeshException.RetryAfter"/>, for the caller to honour.
 /// </summary>
-public sealed class RetryOptions
+public sealed class RetrySettings
 {
     /// <summary>Extra attempts after the first, 0 to 10. 0 disables retries.</summary>
     public int Attempts { get; set; }

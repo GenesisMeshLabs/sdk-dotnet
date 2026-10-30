@@ -19,14 +19,15 @@ public sealed class HealthClient
     /// Whether the NA can serve: its database is writable at the expected schema, its key is loaded and signing, and
     /// in HA mode its rate limits are shared. A not-ready NA (503 <c>service_not_ready</c>) is returned with
     /// <see cref="GenesisMesh.Readiness.Ready"/> false and the failing checks, not thrown. With several
-    /// <see cref="ClientOptions.BaseUrls"/>, a not-ready instance is passed over for the next.
+    /// <see cref="ClientOptions.BaseUrls"/>, a not-ready instance is passed over for the next. A probe answers at once:
+    /// <see cref="ClientOptions.Retry"/> does not apply.
     /// GET /readyz
     /// </summary>
     public async Task<Readiness> Readiness(CancellationToken ct = default)
     {
         try
         {
-            return await _t.PublicGetAsync<Readiness>("/readyz", ct).ConfigureAwait(false);
+            return await _t.PublicGetAsync<Readiness>("/readyz", retry: false, ct).ConfigureAwait(false);
         }
         catch (GenesisMeshException e) when (e.Status == 503 && e.Code == "service_not_ready")
         {
@@ -38,8 +39,8 @@ public sealed class HealthClient
     /// The network, its version, the health of the boundary policies and the evidence store's mode.
     /// GET /health
     /// </summary>
-    public Task<HealthStatus> Status(CancellationToken ct = default) =>
-        _t.PublicGetAsync<HealthStatus>("/health", ct);
+    public Task<NAHealth> Status(CancellationToken ct = default) =>
+        _t.PublicGetAsync<NAHealth>("/health", ct);
 
     /// <summary>
     /// The readiness of every configured endpoint, each asked directly, without failover: for monitoring an HA

@@ -133,8 +133,11 @@ The decision is signed by the NA: check it offline with
 [Offline verification](#offline-verification)) before acting on it. A denial
 is a signed decision with `Authorized` false, not an exception.
 `Boundary.Evaluate` refuses a context holding secret material
-(`SecretMaterialException`) before anything is signed or sent: put
-identifiers, versions and timestamps in it, never secret values.
+(`SecretMaterialException`) before anything is signed or sent. It is the
+SDK's own guard, as in the TypeScript SDK: a field named like a secret
+(`password`, `token`, `value`, ...) or a value that looks like a key or token
+is refused. Put identifiers, versions and timestamps in it, never secret
+values.
 
 ## Client options
 
@@ -143,10 +146,11 @@ identifiers, versions and timestamps in it, never secret values.
 | Option | What it does |
 |---|---|
 | `BaseUrls` | Several NA instances sharing one database, without a load balancer; set this or `BaseUrl`. Requests go to one instance. An idempotent request (a GET, a verification) moves to the next instance on a connection failure or a 502, 503 or 504. Any other request moves only when it never reached an instance: the connection could not be made, or the NA's key could not be read first because the instance did not answer or answered 502, 503 or 504. Otherwise it is not sent again, and the next request starts at the next instance. |
-| `Retry` | `new RetryOptions { Attempts = 3 }`: idempotent requests are tried again after a connection failure or a 429, 502, 503 or 504, waiting `BaseDelay` (200 ms) and doubling it each time. Off by default. A request that creates state is never retried. |
+| `Retry` | `new RetrySettings { Attempts = 3 }`: idempotent requests are tried again after a connection failure or a 429, 502, 503 or 504, waiting `BaseDelay` (200 ms) and doubling it each time. Off by default. A request that creates state is never retried. |
 | `Signer` | An `ISigner` for admin requests, used instead of `SigningKey` and `KeyId`: implement it for an HSM, or use `SeedSigner` for a key read at start. |
 | `Headers` | Extra headers on every request, such as for an API gateway in front of the NA. |
 | `HttpHandler` | The handler requests go through, such as a `SocketsHttpHandler` with a `PooledConnectionLifetime`, so that a long-lived client follows DNS changes. The client does not dispose it. |
+| `HttpClient` | An `HttpClient` to send with, such as a typed client from `IHttpClientFactory`; its own `Timeout` applies. The client does not dispose it. A resilience handler in its pipeline must not retry POSTs: a repeated admin request carries the same signature and nonce, and the NA refuses it as a replay after the first may have been applied. |
 | `Timeout` | Each attempt's timeout (each request, and each read of the NA's key); 10 s by default. A call that fails over or retries can take longer. |
 
 ```csharp
@@ -162,13 +166,20 @@ using var client = new GenesisMeshClient(new ClientOptions
 {
     BaseUrls = ["https://na-1.internal:9443", "https://na-2.internal:9443"],
     Signer   = new SeedSigner(seed, "controller"),
-    Retry    = new RetryOptions { Attempts = 3 },
+    Retry    = new RetrySettings { Attempts = 3 },
 });
 ```
 
 A retry does not wait for a `Retry-After` the NA sends; the wait is on the
 exception (`RetryAfter`, see [Error handling](#error-handling)) for you to
 honour, for example when the NA's admin rate limit answers 429.
+
+`BaseUrl` must be an absolute http(s) URL: a missing or relative one is
+refused when the client is built. A request that times out may have reached
+the NA, so a state-creating request is not moved to another instance after a
+timeout, even one spent connecting (the TypeScript SDK moves a request whose
+connection timed out). `Health.Readiness()` is a probe: it fails over but is
+not retried.
 
 ## Sub-clients
 
@@ -687,7 +698,8 @@ All of them derive from `GenesisMeshException` (`Status`, `Code`, `Detail`).
 
 A `SecretMaterialException` (1.9.0, code `evidence_secret_material`) is
 thrown before anything is signed or sent when an evaluation context holds
-secret material or more metadata than the NA accepts (`EvidenceMetadata`).
+secret material or more than 16 KiB of metadata (`EvidenceMetadata`): the
+SDK's own guard for contexts, and the NA's rule for evidence.
 
 A connection failure or timeout is a `NetworkException`. Its `ConnectFailed`
 is true when the request did not reach the NA, so sending it again cannot

@@ -22,7 +22,7 @@ When you add a source file, add it to the module table there and here.
 | models | `Models.cs` | The request and response types of the HTTP API, with snake_case `[JsonPropertyName]` names. Data only. |
 | errors | `Errors.cs` | `GenesisMeshException` and its subclasses, and the HTTP status to exception mapping (`ErrorMapping`). |
 | auth | `Auth.cs`, `Signer.cs` | Admin request signing (signature version 2): the signed payload, Ed25519 signing, the `X-Admin-*` headers, the read-only `SerializerOptions` every body is written and read with, and the operator signers (`ISigner`, `SeedSigner`). |
-| transport | `Transport.cs`, `ClientOptions.cs` | The only code that sends HTTP: the `HttpClient`, the NA's audience key from `/sovereign.json`, admin and public calls, failover across `BaseUrls`, retries, strict response reading, error mapping and cancellation; and the options it is built from (`ClientOptions`, `RetryOptions`). |
+| transport | `Transport.cs`, `ClientOptions.cs` | The only code that sends HTTP: the `HttpClient`, the NA's audience key from `/sovereign.json`, admin and public calls, failover across `BaseUrls`, retries, strict response reading, error mapping and cancellation; and the options it is built from (`ClientOptions`, `RetrySettings`). |
 | clients | `Clients/*.cs` | One sub-client per NA area (`Agreement`, `Attestation`, `Boundary`, `Consensus`, `DataUsage`, `Disclosure`, `Evidence`, `Health`, `NA`, `Policy`). A method names its route and calls the transport; one that verifies what the NA served calls the offline verifier. |
 | client | `GenesisMeshClient.cs` | The entry point: builds the transport and the sub-clients. |
 
@@ -74,7 +74,9 @@ still uses no client.
 4. The request is sent to the active endpoint. An idempotent request moves to
    the next endpoint on a connection failure or a 502, 503 or 504; any other
    request only when it never reached an instance. Retries
-   (`ClientOptions.Retry`) repeat idempotent requests with backoff.
+   (`ClientOptions.Retry`) repeat idempotent requests with backoff. Requests
+   that need the NA's key at the same time share one lookup; a failed lookup is
+   dropped as it fails.
    Cancellation by the caller's token surfaces as `OperationCanceledException`;
    a timeout or connection failure as `NetworkException`.
 5. A non-2xx response becomes the typed exception for its status

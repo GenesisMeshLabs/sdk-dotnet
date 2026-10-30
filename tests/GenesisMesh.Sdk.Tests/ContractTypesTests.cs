@@ -61,7 +61,7 @@ public class ContractTypesTests
         { "attestation_issue", typeof(MembershipAttestation) },
         { "health_liveness", typeof(LivenessStatus) },
         { "health_readiness", typeof(Readiness) },
-        { "health_status", typeof(HealthStatus) },
+        { "health_status", typeof(NAHealth) },
         { "na_key_history", typeof(KeyHistoryView) },
         { "policy_validate", typeof(PolicyValidation) },
         { "policy_publish", typeof(BoundaryPolicy) },
@@ -120,6 +120,7 @@ public class ContractTypesTests
     [InlineData("boundary_evaluate_denied_decision", typeof(BoundaryDecision))]
     [InlineData("boundary_evaluate", typeof(BoundaryEvaluation))]
     [InlineData("policy_publish", typeof(BoundaryPolicy))]
+    [InlineData("attestation_issue", typeof(MembershipAttestation))]
     public void PassedBackRecordsKeepTheirSignedForm(string name, Type model)
     {
         var raw = Response(name);

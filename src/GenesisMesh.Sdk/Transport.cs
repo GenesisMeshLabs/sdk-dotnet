@@ -17,6 +17,7 @@ internal sealed class Transport : IDisposable
     private const string LookupUnavailable = "na_public_key_unavailable";
 
     private readonly HttpClient _http;
+    private readonly bool _ownsHttp;
     private readonly string[] _baseUrls;
     private int _active;
     private readonly ISigner? _signer;
@@ -39,19 +40,23 @@ internal sealed class Transport : IDisposable
         }
         else
         {
+            if (!IsHttpUrl(opts.BaseUrl))
+                throw new ArgumentException("genesismesh: BaseUrl must be an absolute http(s) URL, or set BaseUrls", nameof(opts));
             _baseUrls = [opts.BaseUrl.TrimEnd('/')];
         }
 
-        var retry = opts.Retry ?? new RetryOptions();
+        var retry = opts.Retry ?? new RetrySettings();
         if (retry.Attempts is < 0 or > 10 || retry.BaseDelay < TimeSpan.Zero || retry.BaseDelay > TimeSpan.FromMinutes(1))
             throw new ArgumentOutOfRangeException(nameof(opts), "genesismesh: Retry needs 0 to 10 attempts and a BaseDelay of 0 to 60 s");
         _retryAttempts = retry.Attempts;
         _retryBaseDelay = retry.BaseDelay;
 
         var timeout = opts.Timeout > TimeSpan.Zero ? opts.Timeout : TimeSpan.FromSeconds(10);
-        _http = opts.HttpHandler is not null
-            ? new HttpClient(opts.HttpHandler, disposeHandler: false) { Timeout = timeout }
-            : new HttpClient { Timeout = timeout };
+        _ownsHttp = opts.HttpClient is null;
+        _http = opts.HttpClient
+            ?? (opts.HttpHandler is not null
+                ? new HttpClient(opts.HttpHandler, disposeHandler: false) { Timeout = timeout }
+                : new HttpClient { Timeout = timeout });
         _headers = opts.Headers?.ToArray() ?? [];
 
         _signer = opts.Signer
@@ -108,18 +113,36 @@ internal sealed class Transport : IDisposable
     {
         if (_audience is { } known) return known;
         Task<string> lookup;
-        lock (_audienceGate) lookup = _audienceLookup ??= LookupAsync();
+        lock (_audienceGate)
+        {
+            if (_audienceLookup is { } running)
+            {
+                lookup = running;
+            }
+            else
+            {
+                lookup = _audienceLookup = LookupAsync();
+                // Dropped as it fails, so the next request starts a new lookup even when every request that waited
+                // for this one was cancelled first.
+                _ = lookup.ContinueWith(failed =>
+                {
+                    lock (_audienceGate)
+                    {
+                        if (ReferenceEquals(_audienceLookup, failed)) _audienceLookup = null;
+                    }
+                }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+            }
+        }
         try
         {
             return await lookup.WaitAsync(ct).ConfigureAwait(false);
         }
-        catch when (lookup.IsCompleted)
+        catch (GenesisMeshException e) when (lookup.IsFaulted)
         {
-            lock (_audienceGate)
-            {
-                if (ReferenceEquals(_audienceLookup, lookup)) _audienceLookup = null;
-            }
-            throw;
+            // Each waiting request gets an exception of its own: one instance rethrown by several threads at once
+            // would share, and garble, one stack trace.
+            throw ErrorMapping.Copy(e);
         }
     }
 
@@ -189,8 +212,12 @@ internal sealed class Transport : IDisposable
     internal async Task<T> PublicPostAsync<T>(string path, object? body, bool idempotent, CancellationToken ct) =>
         Parse<T>(await SendAsync(new Spec(HttpMethod.Post, path, null, body, Admin: false, idempotent), ct).ConfigureAwait(false));
 
-    internal async Task<T> PublicGetAsync<T>(string path, CancellationToken ct = default) =>
-        Parse<T>(await SendAsync(new Spec(HttpMethod.Get, path, null, null, Admin: false, Idempotent: true), ct).ConfigureAwait(false));
+    internal Task<T> PublicGetAsync<T>(string path, CancellationToken ct = default) => PublicGetAsync<T>(path, retry: true, ct);
+
+    /// <summary>An unauthenticated GET; without <paramref name="retry"/>, failover only, as a probe needs.</summary>
+    internal async Task<T> PublicGetAsync<T>(string path, bool retry, CancellationToken ct) =>
+        Parse<T>(await SendAsync(new Spec(HttpMethod.Get, path, null, null, Admin: false, Idempotent: true, NoRetry: !retry), ct)
+            .ConfigureAwait(false));
 
     /// <summary>An unauthenticated GET whose body is returned as text, for a caller that verifies it as received.</summary>
     internal async Task<string> PublicGetTextAsync(string path, CancellationToken ct) =>
@@ -229,8 +256,10 @@ internal sealed class Transport : IDisposable
     /// <summary><paramref name="element"/> read as <typeparamref name="T"/>, as responses are read.</summary>
     internal static T? Read<T>(JsonElement element) => element.Deserialize<T>(Auth.SerializerOptions);
 
+    /// <summary>One request: <paramref name="NoRetry"/> sends an idempotent request without <see cref="ClientOptions.Retry"/>, failover kept.</summary>
     private readonly record struct Spec(
-        HttpMethod Method, string Path, IReadOnlyDictionary<string, string>? Query, object? Body, bool Admin, bool Idempotent);
+        HttpMethod Method, string Path, IReadOnlyDictionary<string, string>? Query, object? Body, bool Admin, bool Idempotent,
+        bool NoRetry = false);
 
     private sealed record Answer(int Status, byte[] Body, TimeSpan? RetryAfter)
     {
@@ -245,7 +274,7 @@ internal sealed class Transport : IDisposable
     private async Task<Answer> SendAsync(Spec spec, CancellationToken ct)
     {
         var failovers = _baseUrls.Length - 1;
-        var retries = spec.Idempotent ? _retryAttempts : 0;
+        var retries = spec.Idempotent && !spec.NoRetry ? _retryAttempts : 0;
         var failoversLeft = failovers;
         var retriesUsed = 0;
         while (true)
@@ -424,5 +453,8 @@ internal sealed class Transport : IDisposable
         return StrictJsonReader.DecodeUtf8(answer.Body);
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        if (_ownsHttp) _http.Dispose();
+    }
 }

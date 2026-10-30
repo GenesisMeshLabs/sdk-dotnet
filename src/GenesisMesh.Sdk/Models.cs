@@ -481,8 +481,10 @@ public sealed class MembershipAttestation : IJsonOnDeserialized
     public string SubjectId { get; set; } = "";
 
     /// <summary>The member's public key, when the attestation binds one.</summary>
+    // Written even when null (1.9.0): the NA signs the field as null, and a record passed back without it fails its
+    // signature.
     [JsonPropertyName("subject_public_key")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? SubjectPublicKey { get; set; }
 
     /// <summary>The roles the issuer grants the member.</summary>
@@ -660,7 +662,10 @@ public sealed class ConsensusVote
     public bool Vote { get; set; }
 
     /// <summary>The validator's reason, if it gave one.</summary>
+    // Written even when null (1.9.0): the NA signs the field as null, and a record passed back without it fails its
+    // signature.
     [JsonPropertyName("reason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? Reason { get; set; }
 
     /// <summary>When the vote was cast.</summary>
@@ -668,7 +673,10 @@ public sealed class ConsensusVote
     public string VotedAt { get; set; } = "";
 
     /// <summary>Binds the vote to the validator's view of the proof (v0.38); required on approve votes.</summary>
+    // Written even when null (1.9.0): the NA signs the field as null, and a record passed back without it fails its
+    // signature.
     [JsonPropertyName("context_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? ContextDigest { get; set; }
 
     /// <summary>The validator's signature over the canonical vote.</summary>
@@ -716,7 +724,10 @@ public sealed class ConsensusProof
     public string ExpiresAt { get; set; } = "";
 
     /// <summary>Digest of the cascade assessment that cleared the proof; null on proofs before v0.38.</summary>
+    // Written even when null (1.9.0): the NA signs the field as null, and a record passed back without it fails its
+    // signature.
     [JsonPropertyName("cascade_assessment_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? CascadeAssessmentDigest { get; set; }
 
     /// <summary>The assembler's signature over the canonical proof.</summary>
@@ -1019,12 +1030,12 @@ public sealed class EvaluateRequest
     public string? AttestationId { get; set; }
 
     /// <summary>
-    /// The basis: a signed agreement, as an <see cref="AgreementRecord"/> or its JSON as the NA returned it. Set this or
-    /// <see cref="AttestationId"/>.
+    /// The basis: a signed agreement as the NA returned it (from JSON, deserialize it with
+    /// <see cref="Auth.SerializerOptions"/>). Set this or <see cref="AttestationId"/>.
     /// </summary>
     [JsonPropertyName("agreement")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public object? Agreement { get; set; }
+    public AgreementRecord? Agreement { get; set; }
 
     /// <summary>The request's parameters and attributes, which the policy gates read. Never put secret values in it.</summary>
     [JsonPropertyName("context")]
@@ -1121,20 +1132,58 @@ public sealed class BoundaryPolicyIntent
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IList<GateSpec>? Gates { get; set; }
 
-    /// <summary>Per gate ID (or <c>*</c>), what a DENY by that gate leads to (1.4.0).</summary>
+    /// <summary>Per gate ID (or <c>*</c> for every other gate), what a DENY by that gate leads to (1.4.0).</summary>
     [JsonPropertyName("remediation")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public IDictionary<string, object?>? Remediation { get; set; }
+    public IDictionary<string, GateRemediation>? Remediation { get; set; }
 
-    /// <summary>True when every change allowed under the policy is reviewed by a second holder (1.4.0).</summary>
+    /// <summary>
+    /// True when every change allowed under the policy is reviewed by a second holder (1.4.0). Sent only when true: the
+    /// NA accepts no other value.
+    /// </summary>
     [JsonPropertyName("review_required")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? ReviewRequired { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ReviewRequired { get; set; }
 
-    /// <summary>The policy's emergency capability (1.4.0).</summary>
+    /// <summary>Marks the policy's capability as the emergency form of an ordinary one (1.4.0).</summary>
     [JsonPropertyName("emergency")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public object? Emergency { get; set; }
+    public EmergencyCapability? Emergency { get; set; }
+}
+
+/// <summary>What a change judged DENY by a gate leads to (<see cref="BoundaryPolicyIntent.Remediation"/>, 1.4.0).</summary>
+public sealed class GateRemediation
+{
+    /// <summary>
+    /// <c>cancel</c>: the controller cancels the change once <see cref="GraceSeconds"/> have passed since the judgement;
+    /// <c>alert_only</c>: the denial is recorded and its author told, and nothing is changed.
+    /// </summary>
+    [JsonPropertyName("mode")]
+    public string Mode { get; set; } = "";
+
+    /// <summary>How long after the judgement the change is cancelled, in seconds.</summary>
+    [JsonPropertyName("grace_seconds")]
+    public int GraceSeconds { get; set; }
+}
+
+/// <summary>
+/// Marks a policy's capability as the emergency form of an ordinary one (<see cref="BoundaryPolicyIntent.Emergency"/>,
+/// 1.4.0). The policy must require the justification parameter, every change made under it is reviewed, and what it
+/// creates lives at most <see cref="MaxLifetimeSeconds"/>.
+/// </summary>
+public sealed class EmergencyCapability
+{
+    /// <summary>The ordinary capability the emergency capability performs.</summary>
+    [JsonPropertyName("stands_for")]
+    public string StandsFor { get; set; } = "";
+
+    /// <summary>The request parameter that carries the justification.</summary>
+    [JsonPropertyName("justification_parameter")]
+    public string JustificationParameter { get; set; } = "";
+
+    /// <summary>The longest an emergency change lives, in seconds (at least 60).</summary>
+    [JsonPropertyName("max_lifetime_seconds")]
+    public int MaxLifetimeSeconds { get; set; }
 }
 
 /// <summary>Which requests a policy applies to: a request matches when it matches every list that is not empty.</summary>
@@ -1236,7 +1285,7 @@ public sealed class BoundaryPolicy
     [JsonPropertyName("gates")]
     public IList<GateSpec> Gates { get; set; } = [];
 
-    /// <summary>What a DENY by a gate leads to (1.4.0); signed when present.</summary>
+    /// <summary>What a DENY by a gate leads to (1.4.0), as signed (raw, so it is passed back exactly); signed when present.</summary>
     [JsonPropertyName("remediation")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public JsonElement Remediation { get; set; }
@@ -1246,7 +1295,7 @@ public sealed class BoundaryPolicy
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public JsonElement ReviewRequired { get; set; }
 
-    /// <summary>The policy's emergency capability (1.4.0); signed when present.</summary>
+    /// <summary>The policy's emergency capability (1.4.0), as signed; signed when present.</summary>
     [JsonPropertyName("emergency")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public JsonElement Emergency { get; set; }
@@ -1634,7 +1683,7 @@ public sealed class ReadinessNAKey
 }
 
 /// <summary>Returned by GET /health: the network, its version and the state of policies and evidence.</summary>
-public sealed class HealthStatus
+public sealed class NAHealth
 {
     /// <summary><c>healthy</c> when the NA answers.</summary>
     [JsonPropertyName("status")]
