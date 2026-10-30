@@ -9,11 +9,13 @@
 
 ## Scope
 
-This SDK (1.8) covers the Network Authority's trust API: the sub-clients
-below (agreements, boundary decisions, trust evidence, attestations,
-selective disclosure, consensus and data usage), offline verification of
-their signed records, and signed admin calls to any other route. It has no
-governed lifecycle API: no evidence store client or evidence outbox, none
+This SDK covers the Network Authority's trust API: the sub-clients
+below (agreements, boundary decisions and from 1.9 policy-aware evaluation,
+boundary policies, trust evidence, attestations, selective disclosure,
+consensus and data usage), offline verification of their signed records, and
+signed admin calls to any other route. It is growing to the TypeScript SDK's
+governed lifecycle (decision 0008 of the core); not yet here: no evidence
+store client or evidence outbox, none
 of the 1.3.0 changes outside the controlled path (observations, break-glass
 records, the record outbox), and none of the 1.4.0 remediation and review
 APIs (remediation records, the due queue, reviews). Those live in the
@@ -59,17 +61,13 @@ the keys and port that guide sets up.
 
 ## Quick start
 
-A controller asks the NA for a decision with one signed call:
-`POST /admin/boundary/evaluate`, which applies the active boundary policies.
-This SDK has no method for that route, so the call is a raw admin call (see
-[Raw admin calls](#raw-admin-calls)). Setup, here issuing an attestation for
-the controller, uses the privileged key `operator-local`; the controller uses
-its standard key `controller`.
+A controller asks the NA for a decision with one signed call,
+`Boundary.Evaluate`, which applies the active boundary policies. Setup, here
+publishing a policy and issuing an attestation for the controller, uses the
+privileged key `operator-local`; the controller uses its standard key
+`controller`.
 
 ```csharp
-using System.Net.Http.Json;
-using System.Text;
-using System.Text.Json;
 using GenesisMesh;
 
 // A key file holds comment lines and the base64 Ed25519 seed.
@@ -79,13 +77,31 @@ static string Seed(string path) =>
 var baseUrl = "http://127.0.0.1:9443";
 
 // Setup: the privileged key. Create one client and reuse it; dispose it when done.
-using var client = new GenesisMeshClient(new ClientOptions
+using var admin = new GenesisMeshClient(new ClientOptions
 {
     BaseUrl    = baseUrl,
     SigningKey = Seed("local/.genesis-mesh/keys/operator.key"),
     KeyId      = "operator-local",
 });
-var attestation = await client.Attestation.Issue(new Dictionary<string, object?>
+var policy = await admin.Policy.Publish(new BoundaryPolicyIntent
+{
+    PolicyId   = "app-invoke",
+    ValidFrom  = DateTimeOffset.UtcNow.ToString("O"),
+    ValidUntil = DateTimeOffset.UtcNow.AddDays(30).ToString("O"),
+    Selector   = new PolicySelector { Capabilities = ["app.*"] },
+    Gates =
+    [
+        new GateSpec
+        {
+            GateId   = "max-lifetime",
+            GateType = "max_value.v1",
+            Order    = 0,
+            Config   = new Dictionary<string, object?> { ["path"] = "request_parameters.lifetime_days", ["max"] = 90 },
+        },
+    ],
+});
+await admin.Policy.Activate(policy.PolicyId, policy.Version);
+var attestation = await admin.Attestation.Issue(new Dictionary<string, object?>
 {
     ["subject_id"]     = "my-controller",
     ["roles"]          = new[] { "role:client" },
@@ -94,39 +110,31 @@ var attestation = await client.Attestation.Issue(new Dictionary<string, object?>
 });
 
 // Run time: the controller's standard key evaluates a request under the attestation.
-var body = new Dictionary<string, object?>
+using var controller = new GenesisMeshClient(new ClientOptions
 {
-    ["attestation_id"]       = attestation.AttestationId,
-    ["requested_capability"] = "app.invoke",
-};
-using var http = new HttpClient { BaseAddress = new Uri(baseUrl) };
-var naKey = (await http.GetFromJsonAsync<JsonElement>("/sovereign.json"))
-    .GetProperty("network_authority").GetProperty("public_key").GetString()!;
-var headers = Auth.BuildAdminHeaders(new AdminRequest("POST", "/admin/boundary/evaluate", naKey, body),
-    "controller", Auth.LoadSeed(Seed("local/.genesis-mesh/keys/controller.key")));
-using var request = new HttpRequestMessage(HttpMethod.Post, "/admin/boundary/evaluate")
+    BaseUrl    = baseUrl,
+    SigningKey = Seed("local/.genesis-mesh/keys/controller.key"),
+    KeyId      = "controller",
+});
+var evaluation = await controller.Boundary.Evaluate(new EvaluateRequest
 {
-    Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
-};
-request.Headers.Add("X-Admin-Key-Id",    headers.KeyId);
-request.Headers.Add("X-Admin-Signature", headers.Signature);
-request.Headers.Add("X-Admin-Timestamp", headers.Timestamp);
-request.Headers.Add("X-Admin-Nonce",     headers.Nonce);
-using var response = await http.SendAsync(request);
-response.EnsureSuccessStatusCode();
-
-using var result = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-var decision = result.RootElement.GetProperty("decision");
-var justificationProof = result.RootElement.GetProperty("justification_proof");
-Console.WriteLine($"authorized: {decision.GetProperty("authorized").GetBoolean()}");
+    AttestationId       = attestation.AttestationId,
+    RequestedCapability = "app.invoke",
+    Context = new EvaluationContext
+    {
+        RequestParameters = new Dictionary<string, object?> { ["lifetime_days"] = 30 },
+    },
+});
+Console.WriteLine($"authorized: {evaluation.Decision.Authorized} {evaluation.Decision.DenialReason}");
 ```
 
 The decision is signed by the NA: check it offline with
 `OfflineVerifier.VerifyBoundaryDecision` (see
-[Offline verification](#offline-verification)) before acting on it. With no
-active policy the decision rests on the attestation alone; publish and
-activate policies (`POST /admin/boundary-policies`, then
-`/admin/boundary-policies/<id>/activate`, privileged) to add their gates.
+[Offline verification](#offline-verification)) before acting on it. A denial
+is a signed decision with `Authorized` false, not an exception.
+`Boundary.Evaluate` refuses a context holding secret material
+(`SecretMaterialException`) before anything is signed or sent: put
+identifiers, versions and timestamps in it, never secret values.
 
 ## Client options
 
@@ -164,8 +172,10 @@ honour, for example when the NA's admin rate limit answers 429.
 
 ## Sub-clients
 
-The examples below use `client` from the quick start, with the privileged
-key. Counter, Accept, `Attestation.Issue`, `Revoke`, `SavePolicy` and
+The examples below use `client`, a client with the privileged key (as
+`admin` in the quick start), and `naKey`, the NA's public key
+(`network_authority.public_key` of its `/sovereign.json`, or
+`(await client.NA.KeyHistory()).Keys.Single(k => k.Current).PublicKey`). Counter, Accept, `Attestation.Issue`, `Revoke`, `SavePolicy` and
 `DataUsage.CreatePolicy` need a privileged key; with a standard key the NA
 answers 403 `insufficient_operator_tier`.
 
@@ -207,24 +217,49 @@ var check = await client.Agreement.Verify(new Dictionary<string, object?> { ["ag
 // check.Accepted
 ```
 
-`Accept` sends `{"offer": ...}`. To accept a counter-offer, send
-`{"counter": ..., "original_offer": ...}` to `POST /admin/agreements/accept`
-with a raw admin call.
+`Accept` sends `{"offer": ...}`. To accept a counter-offer, call
+`AcceptCounter(counter, originalOffer)`, which sends
+`{"counter": ..., "original_offer": ...}`.
 
 ### Boundary
 
-`Decide` (`POST /admin/boundary/decide`) applies only the built-in gates. A
-Network Authority that requires boundary policies
-(`BOUNDARY_POLICY_ENFORCEMENT=required`, which `genesis-mesh init` sets)
-refuses it with 409 `boundary_policy_required`. Call
-`POST /admin/boundary/evaluate` instead, as in the [quick start](#quick-start);
-this SDK has no method for it.
+`Evaluate` (`POST /admin/boundary/evaluate`, 1.9.0) applies the active
+boundary policies under exactly one basis, `AttestationId` or `Agreement`, as
+in the [quick start](#quick-start). `Decide` (`POST /admin/boundary/decide`)
+applies only the built-in gates: a Network Authority that requires boundary
+policies (`BOUNDARY_POLICY_ENFORCEMENT=required`, which `genesis-mesh init`
+sets) refuses it with 409 `boundary_policy_required`.
 
 ```csharp
-// Verify a boundary decision, here the one from the quick start (no auth required)
-var v = await client.Boundary.Verify(new Dictionary<string, object?> { ["decision"] = decision });
+// Verify a boundary decision, here the one from the quick start (no auth required).
+var v = await client.Boundary.Verify(new Dictionary<string, object?> { ["decision"] = evaluation.Decision });
 // v.Accepted
 ```
+
+A typed `BoundaryDecision` passed back keeps the form the NA signed. Before
+1.9.0 it dropped a null `denial_reason`, and the NA refused it.
+
+### Policy
+
+The boundary policy lifecycle (v0.58). `Publish`, `Activate` and
+`Deactivate` need a privileged key.
+
+```csharp
+var check = await client.Policy.Validate(intent);         // a dry run: check.Valid, check.Issues
+var v1 = await client.Policy.Publish(intent);             // a new inactive version, signed
+await client.Policy.Activate(v1.PolicyId, v1.Version);
+var active = await client.Policy.Active();                // the active set, its health, the enforcement mode
+var all = await client.Policy.List();                     // every version of every policy
+var history = await client.Policy.History(v1.PolicyId);   // newest first, with the signed bodies
+await client.Policy.Activate(v1.PolicyId, 1);             // activating an older version is the rollback
+await client.Policy.Deactivate(v1.PolicyId, v1.Version);
+var verified = await client.Policy.Verify(v1);            // public: the policy's signature
+```
+
+`Publish` refuses an invalid intent with 400 `boundary_policy_invalid`, its
+issues in the exception's `Details`. A gate runs in `enforce` mode unless its
+`Mode` is `observe`: an observed failure is reported in the decision but does
+not deny, so optional rules can be rolled out before they are enforced.
 
 ### Evidence
 
@@ -312,11 +347,13 @@ var dv = await client.Disclosure.Verify(new Dictionary<string, object?>
 ### Consensus
 
 Validators vote on a justification proof: the `justification_proof` returned
-with a decision by `POST /admin/boundary/evaluate` (see the
+with a decision by `Boundary.Evaluate` (see the
 [quick start](#quick-start)). Pass votes and proofs back unchanged; every
 field is covered by a signature.
 
 ```csharp
+var justificationProof = evaluation.JustificationProof;
+
 // Cast a validator vote, signed by the NA as validator (admin)
 var vote = await client.Consensus.Vote(new Dictionary<string, object?>
 {
@@ -540,9 +577,8 @@ signature vectors of the shared `grants` suite
 
 ## Raw admin calls
 
-For NA routes not covered by a sub-client, such as `/admin/boundary/evaluate`
-(see the [quick start](#quick-start)) or `/admin/recognition-treaties`, use
-`Auth.BuildAdminHeaders` directly. This one issues a recognition treaty for
+For NA routes not covered by a sub-client, such as `/admin/recognition-treaties`,
+use `Auth.BuildAdminHeaders` directly. This one issues a recognition treaty for
 `BETA-NA`, which `Agreement.Accept` needs (privileged):
 
 ```csharp
@@ -648,6 +684,10 @@ All of them derive from `GenesisMeshException` (`Status`, `Code`, `Detail`).
 - `Details` is the NA's `details` of the error, such as the failing checks of a not-ready NA.
 - A failure to read the NA's key from `/sovereign.json` is the exception for that answer's status with the code
   `na_public_key_unavailable`. Before 1.9 an answer without the key was an `InvalidOperationException`.
+
+A `SecretMaterialException` (1.9.0, code `evidence_secret_material`) is
+thrown before anything is signed or sent when an evaluation context holds
+secret material or more metadata than the NA accepts (`EvidenceMetadata`).
 
 A connection failure or timeout is a `NetworkException`. Its `ConnectFailed`
 is true when the request did not reach the NA, so sending it again cannot

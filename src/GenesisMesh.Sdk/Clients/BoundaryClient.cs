@@ -1,6 +1,6 @@
 namespace GenesisMesh;
 
-/// <summary>Capability boundary decisions — decide and verify.</summary>
+/// <summary>Capability boundary decisions — evaluate under policies, decide (legacy) and verify.</summary>
 public sealed class BoundaryClient
 {
     private readonly Transport _t;
@@ -12,6 +12,27 @@ public sealed class BoundaryClient
     /// </summary>
     public Task<BoundaryDecision> Decide(IDictionary<string, object?> body, CancellationToken ct = default) =>
         _t.AdminPostAsync<BoundaryDecision>("/admin/boundary/decide", body, ct);
+
+    /// <summary>
+    /// A policy-aware decision under exactly one basis, <see cref="EvaluateRequest.AttestationId"/> or
+    /// <see cref="EvaluateRequest.Agreement"/>: the signed decision and its justification proof. A denial is a signed
+    /// decision with <see cref="BoundaryDecision.Authorized"/> false, not an error. Verify the decision before acting
+    /// on it (<see cref="OfflineVerifier.VerifyBoundaryDecision"/>).
+    /// POST /admin/boundary/evaluate
+    /// </summary>
+    /// <exception cref="ArgumentException">Neither basis is set, or both are.</exception>
+    /// <exception cref="SecretMaterialException">
+    /// The context holds secret material, or more metadata than the NA accepts: nothing is signed or sent.
+    /// </exception>
+    public async Task<BoundaryEvaluation> Evaluate(EvaluateRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if ((request.AttestationId is null) == (request.Agreement is null))
+            throw new ArgumentException("genesismesh: set exactly one of AttestationId or Agreement", nameof(request));
+        if (EvidenceMetadata.CheckMetadataOnly(Transport.ToElement(request.Context ?? new EvaluationContext())) is { } reason)
+            throw new SecretMaterialException(reason);
+        return await _t.AdminPostAsync<BoundaryEvaluation>("/admin/boundary/evaluate", request, ct).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Verifies a boundary decision signature (public route).

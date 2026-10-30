@@ -23,7 +23,7 @@ public sealed class GenesisMeshClient : IDisposable
     /// <summary>Membership attestations — issue, revoke, recognition policy.</summary>
     public AttestationClient Attestation { get; }
 
-    /// <summary>Capability boundary decisions — decide, verify.</summary>
+    /// <summary>Capability boundary decisions — evaluate, decide, verify.</summary>
     public BoundaryClient Boundary { get; }
 
     /// <summary>Consensus voting and proofs — vote, proof, verify.</summary>
@@ -37,6 +37,9 @@ public sealed class GenesisMeshClient : IDisposable
 
     /// <summary>Trust evidence — build and verify.</summary>
     public EvidenceClient Evidence { get; }
+
+    /// <summary>The boundary policy lifecycle: validate, publish, activate, deactivate, list and verify (v0.58).</summary>
+    public PolicyClient Policy { get; }
 
     /// <summary>Liveness, readiness and health of the NA, and of each configured endpoint (v0.60).</summary>
     public HealthClient Health { get; }
@@ -56,6 +59,7 @@ public sealed class GenesisMeshClient : IDisposable
         DataUsage = new DataUsageClient(_transport);
         Disclosure = new DisclosureClient(_transport);
         Evidence = new EvidenceClient(_transport);
+        Policy = new PolicyClient(_transport);
         Health = new HealthClient(_transport);
         NA = new NetworkAuthorityClient(_transport);
     }

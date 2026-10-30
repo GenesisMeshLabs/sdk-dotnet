@@ -74,6 +74,21 @@ public sealed class NetworkException : Exception
     public bool ConnectFailed { get; }
 }
 
+/// <summary>
+/// Thrown before anything is signed or sent when a record or an evaluation context would carry secret material, or
+/// more metadata than the NA accepts (<see cref="EvidenceMetadata"/>): the NA would refuse it
+/// (<c>evidence_secret_material</c>).
+/// </summary>
+public sealed class SecretMaterialException : GenesisMeshException
+{
+    /// <summary>Metadata refused for <paramref name="reason"/>.</summary>
+    /// <param name="reason">Which field holds what, or the size over the limit.</param>
+    public SecretMaterialException(string reason)
+        : base(0, "evidence_secret_material", reason, "genesismesh: " + reason)
+    {
+    }
+}
+
 /// <summary>HTTP 400 — request body failed validation.</summary>
 public sealed class BadRequestException : GenesisMeshException
 {

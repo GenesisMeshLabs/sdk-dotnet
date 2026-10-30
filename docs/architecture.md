@@ -18,12 +18,12 @@ When you add a source file, add it to the module table there and here.
 | json | `StrictJson.cs` | The strict JSON reader every input goes through: refuses duplicate keys, integers outside 64 bits, `-0`, non-finite numbers, lone surrogates, nesting deeper than 64 and text that is not UTF-8, each by a named reason (`StrictJsonException.Reason`). |
 | canonical | `Canonical.cs` | Canonical JSON, byte-identical to the Python reference's `json.dumps(sort_keys=True, separators=(",", ":"))`: keys in code-point order, ASCII-only escapes, integers as written, other numbers in Python's float repr. |
 | registry | `StrictFields.cs`, `canonical_registry.json` | The field registry of signed records (embedded, generated from the core's `field_registry` suite): known fields per model, canonical timestamps, the signed form of each model. An unknown model name throws. |
-| verify | `OfflineVerifier.cs`, `KeyHistory.cs`, `Grants.cs`, `Vouching.cs` | Offline verification: agreements, boundary decisions, policies, data access intents, the NA key history, capability grants and the vouching horizon (1.8.0). One `partial class OfflineVerifier`; each result record sits in the file of its verifier. |
+| verify | `OfflineVerifier.cs`, `KeyHistory.cs`, `Grants.cs`, `Vouching.cs`, `Metadata.cs` | Offline verification: agreements, boundary decisions, policies, data access intents, the NA key history, capability grants and the vouching horizon (1.8.0). One `partial class OfflineVerifier`; each result record sits in the file of its verifier. `EvidenceMetadata` (1.9.0) is the NA's guard on metadata: size and secret material. |
 | models | `Models.cs` | The request and response types of the HTTP API, with snake_case `[JsonPropertyName]` names. Data only. |
 | errors | `Errors.cs` | `GenesisMeshException` and its subclasses, and the HTTP status to exception mapping (`ErrorMapping`). |
 | auth | `Auth.cs`, `Signer.cs` | Admin request signing (signature version 2): the signed payload, Ed25519 signing, the `X-Admin-*` headers, the read-only `SerializerOptions` every body is written and read with, and the operator signers (`ISigner`, `SeedSigner`). |
 | transport | `Transport.cs`, `ClientOptions.cs` | The only code that sends HTTP: the `HttpClient`, the NA's audience key from `/sovereign.json`, admin and public calls, failover across `BaseUrls`, retries, strict response reading, error mapping and cancellation; and the options it is built from (`ClientOptions`, `RetryOptions`). |
-| clients | `Clients/*.cs` | One sub-client per NA area (`Agreement`, `Attestation`, `Boundary`, `Consensus`, `DataUsage`, `Disclosure`, `Evidence`, `Health`, `NA`). A method names its route and calls the transport; one that verifies what the NA served calls the offline verifier. |
+| clients | `Clients/*.cs` | One sub-client per NA area (`Agreement`, `Attestation`, `Boundary`, `Consensus`, `DataUsage`, `Disclosure`, `Evidence`, `Health`, `NA`, `Policy`). A method names its route and calls the transport; one that verifies what the NA served calls the offline verifier. |
 | client | `GenesisMeshClient.cs` | The entry point: builds the transport and the sub-clients. |
 
 ## Layers
@@ -64,7 +64,7 @@ still uses no client.
 
 1. `new GenesisMeshClient(options)` builds one `Transport` (one `HttpClient`,
    the endpoints, the signer: `ClientOptions.Signer`, or a `SeedSigner` of the
-   seed from `Auth.LoadSeed`) and the nine sub-clients.
+   seed from `Auth.LoadSeed`) and the ten sub-clients.
 2. A sub-client method, such as `Boundary.Decide(body)`, calls
    `Transport.AdminPostAsync<BoundaryDecision>("/admin/boundary/decide", body)`.
 3. For an admin route, the transport reads the NA's public key once from

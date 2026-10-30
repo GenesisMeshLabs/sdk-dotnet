@@ -218,8 +218,10 @@ public sealed class BoundaryDecision : IJsonOnDeserialized
     public bool Authorized { get; set; }
 
     /// <summary>Why the request was denied; null when it is authorized.</summary>
+    // Written even when null (1.9.0): the NA signs the field as null, and a decision passed back without it fails its
+    // signature.
     [JsonPropertyName("denial_reason")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? DenialReason { get; set; }
 
     /// <summary>Each gate's result, in evaluation order.</summary>
@@ -997,6 +999,515 @@ public sealed class VerifyResult : IJsonOnDeserialized
         Accepted = ok;
         Reason ??= ViolationReason;
     }
+}
+
+// ── Boundary evaluation (v0.58) ───────────────────────────────────────────────
+
+/// <summary>
+/// Request body for POST /admin/boundary/evaluate: one basis, an <see cref="AttestationId"/> or an
+/// <see cref="Agreement"/>, and the request's context.
+/// </summary>
+public sealed class EvaluateRequest
+{
+    /// <summary>The capability requested, such as <c>sp-secret.rotate</c>. Required.</summary>
+    [JsonPropertyName("requested_capability")]
+    public string RequestedCapability { get; set; } = "";
+
+    /// <summary>The basis: an NA-issued membership attestation (v0.58.1). Set this or <see cref="Agreement"/>.</summary>
+    [JsonPropertyName("attestation_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AttestationId { get; set; }
+
+    /// <summary>
+    /// The basis: a signed agreement, as an <see cref="AgreementRecord"/> or its JSON as the NA returned it. Set this or
+    /// <see cref="AttestationId"/>.
+    /// </summary>
+    [JsonPropertyName("agreement")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public object? Agreement { get; set; }
+
+    /// <summary>The request's parameters and attributes, which the policy gates read. Never put secret values in it.</summary>
+    [JsonPropertyName("context")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EvaluationContext? Context { get; set; }
+}
+
+/// <summary>The context of a boundary evaluation (<see cref="EvaluateRequest.Context"/>).</summary>
+public sealed class EvaluationContext
+{
+    /// <summary>The request's parameters, such as <c>app_id</c> or <c>lifetime_days</c>; gates read them as <c>request_parameters.&lt;name&gt;</c>.</summary>
+    [JsonPropertyName("request_parameters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IDictionary<string, object?>? RequestParameters { get; set; }
+
+    /// <summary>Normalized facts for policy gates, such as <c>owner</c> or <c>environment</c>; gates read them as <c>attributes.&lt;name&gt;</c>.</summary>
+    [JsonPropertyName("attributes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IDictionary<string, object?>? Attributes { get; set; }
+
+    /// <summary>Who requests; defaults to the attestation's subject or the agreement's responder.</summary>
+    [JsonPropertyName("requester_sovereign_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RequesterSovereignId { get; set; }
+
+    /// <summary>Who provides the capability.</summary>
+    [JsonPropertyName("provider_sovereign_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProviderSovereignId { get; set; }
+
+    /// <summary>The context record's ID; the NA assigns one when unset.</summary>
+    [JsonPropertyName("context_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ContextId { get; set; }
+
+    /// <summary>The context's freshness sequence, for a basis that requires fresh context.</summary>
+    [JsonPropertyName("context_freshness_seq")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? ContextFreshnessSeq { get; set; }
+
+    /// <summary>An agreement basis only: <c>direct</c> (the default), <c>agreement</c> or <c>delegation</c>.</summary>
+    [JsonPropertyName("parent_kind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ParentKind { get; set; }
+}
+
+/// <summary>
+/// Returned by POST /admin/boundary/evaluate: the signed decision and its justification proof. A denial is a signed
+/// decision with <see cref="BoundaryDecision.Authorized"/> false, not an error.
+/// </summary>
+public sealed class BoundaryEvaluation
+{
+    /// <summary>The decision the NA signed, with its policy and attestation bindings.</summary>
+    [JsonPropertyName("decision")]
+    public BoundaryDecision Decision { get; set; } = new();
+
+    /// <summary>The signed trace of every gate the decision passed or failed, as received.</summary>
+    [JsonPropertyName("justification_proof")]
+    public JsonElement JustificationProof { get; set; }
+}
+
+// ── Boundary policies (v0.58) ─────────────────────────────────────────────────
+
+/// <summary>
+/// A boundary policy as declared, for validation and publication (POST /admin/boundary-policies): the NA assigns the
+/// version, the issuer and the signature.
+/// </summary>
+public sealed class BoundaryPolicyIntent
+{
+    /// <summary>The policy's ID; each publication adds a version of it. Required.</summary>
+    [JsonPropertyName("policy_id")]
+    public string PolicyId { get; set; } = "";
+
+    /// <summary>What the policy is for.</summary>
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    /// <summary>Start of the policy's validity (ISO 8601). Required.</summary>
+    [JsonPropertyName("valid_from")]
+    public string ValidFrom { get; set; } = "";
+
+    /// <summary>End of the policy's validity (ISO 8601). Required.</summary>
+    [JsonPropertyName("valid_until")]
+    public string ValidUntil { get; set; } = "";
+
+    /// <summary>Which requests the policy applies to; every request when unset.</summary>
+    [JsonPropertyName("selector")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PolicySelector? Selector { get; set; }
+
+    /// <summary>The gates a request must pass, in order.</summary>
+    [JsonPropertyName("gates")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<GateSpec>? Gates { get; set; }
+
+    /// <summary>Per gate ID (or <c>*</c>), what a DENY by that gate leads to (1.4.0).</summary>
+    [JsonPropertyName("remediation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IDictionary<string, object?>? Remediation { get; set; }
+
+    /// <summary>True when every change allowed under the policy is reviewed by a second holder (1.4.0).</summary>
+    [JsonPropertyName("review_required")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ReviewRequired { get; set; }
+
+    /// <summary>The policy's emergency capability (1.4.0).</summary>
+    [JsonPropertyName("emergency")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public object? Emergency { get; set; }
+}
+
+/// <summary>Which requests a policy applies to: a request matches when it matches every list that is not empty.</summary>
+public sealed class PolicySelector
+{
+    /// <summary>Capabilities, with <c>*</c> wildcards such as <c>sp-secret.*</c>.</summary>
+    [JsonPropertyName("capabilities")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<string>? Capabilities { get; set; }
+
+    /// <summary>Requesting sovereigns.</summary>
+    [JsonPropertyName("requester_sovereign_ids")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<string>? RequesterSovereignIds { get; set; }
+
+    /// <summary>Providing sovereigns.</summary>
+    [JsonPropertyName("provider_sovereign_ids")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<string>? ProviderSovereignIds { get; set; }
+
+    /// <summary>Agreements.</summary>
+    [JsonPropertyName("agreement_ids")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<string>? AgreementIds { get; set; }
+
+    /// <summary>The basis of the request: <c>attestation</c>, <c>direct</c>, <c>agreement</c> or <c>delegation</c>.</summary>
+    [JsonPropertyName("parent_kinds")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<string>? ParentKinds { get; set; }
+
+    /// <summary>Request parameters and the values they must equal.</summary>
+    [JsonPropertyName("parameter_equals")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IDictionary<string, IList<object?>>? ParameterEquals { get; set; }
+}
+
+/// <summary>One gate of a policy.</summary>
+public sealed class GateSpec
+{
+    /// <summary>The gate's ID within the policy.</summary>
+    [JsonPropertyName("gate_id")]
+    public string GateId { get; set; } = "";
+
+    /// <summary>A gate type installed on the NA, such as <c>attestation_claim.v1</c> or <c>max_value.v1</c>.</summary>
+    [JsonPropertyName("gate_type")]
+    public string GateType { get; set; } = "";
+
+    /// <summary>The gate's position: gates run in ascending order.</summary>
+    [JsonPropertyName("order")]
+    public int Order { get; set; }
+
+    /// <summary><c>enforce</c> (the default) or <c>observe</c>: an observed failure is reported but does not deny.</summary>
+    [JsonPropertyName("mode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Mode { get; set; }
+
+    /// <summary>The gate type's settings, such as <c>{"path": "request_parameters.lifetime_days", "max": 90}</c>.</summary>
+    [JsonPropertyName("config")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IDictionary<string, object?>? Config { get; set; }
+
+    /// <summary>True to show the gate's input in the justification proof.</summary>
+    [JsonPropertyName("disclose_input")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? DiscloseInput { get; set; }
+}
+
+/// <summary>
+/// A boundary policy version as the NA signed and stored it (POST /admin/boundary-policies). Pass it back unchanged:
+/// every field but the signature is signed.
+/// </summary>
+public sealed class BoundaryPolicy
+{
+    /// <summary>The policy's ID.</summary>
+    [JsonPropertyName("policy_id")]
+    public string PolicyId { get; set; } = "";
+
+    /// <summary>The version, from 1.</summary>
+    [JsonPropertyName("version")]
+    public int Version { get; set; }
+
+    /// <summary>What the policy is for.</summary>
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = "";
+
+    /// <summary>Start of the policy's validity.</summary>
+    [JsonPropertyName("valid_from")]
+    public string ValidFrom { get; set; } = "";
+
+    /// <summary>End of the policy's validity.</summary>
+    [JsonPropertyName("valid_until")]
+    public string ValidUntil { get; set; } = "";
+
+    /// <summary>Which requests the policy applies to, every list present.</summary>
+    [JsonPropertyName("selector")]
+    public PolicySelector Selector { get; set; } = new();
+
+    /// <summary>The gates, every field present.</summary>
+    [JsonPropertyName("gates")]
+    public IList<GateSpec> Gates { get; set; } = [];
+
+    /// <summary>What a DENY by a gate leads to (1.4.0); signed when present.</summary>
+    [JsonPropertyName("remediation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Remediation { get; set; }
+
+    /// <summary>Present (true) when changes under the policy need a second holder's review (1.4.0); signed when present.</summary>
+    [JsonPropertyName("review_required")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement ReviewRequired { get; set; }
+
+    /// <summary>The policy's emergency capability (1.4.0); signed when present.</summary>
+    [JsonPropertyName("emergency")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Emergency { get; set; }
+
+    /// <summary>When the NA signed this version.</summary>
+    [JsonPropertyName("issued_at")]
+    public string IssuedAt { get; set; } = "";
+
+    /// <summary>The NA's signing key ID.</summary>
+    [JsonPropertyName("issued_by")]
+    public string IssuedBy { get; set; } = "";
+
+    /// <summary>The NA's sovereign ID.</summary>
+    [JsonPropertyName("issuer_sovereign_id")]
+    public string IssuerSovereignId { get; set; } = "";
+
+    /// <summary>The NA's signature over the canonical policy.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
+/// <summary>Returned by POST /admin/boundary-policies/validate: a dry run against the NA's installed gate types.</summary>
+public sealed class PolicyValidation
+{
+    /// <summary>True when the intent would publish.</summary>
+    [JsonPropertyName("valid")]
+    public bool Valid { get; set; }
+
+    /// <summary>What would refuse it; empty when valid.</summary>
+    [JsonPropertyName("issues")]
+    public IList<PolicyIssue> Issues { get; set; } = [];
+
+    /// <summary>The policy's ID.</summary>
+    [JsonPropertyName("policy_id")]
+    public string PolicyId { get; set; } = "";
+
+    /// <summary>The version a publication would create.</summary>
+    [JsonPropertyName("next_version")]
+    public int NextVersion { get; set; }
+}
+
+/// <summary>One problem with a policy intent; publishing refuses the intent with these in the error's details.</summary>
+public sealed class PolicyIssue
+{
+    /// <summary>The problem's code, such as <c>unknown_gate_type</c>.</summary>
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = "";
+
+    /// <summary>What is wrong.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+
+    /// <summary>The gate the problem is in, if any.</summary>
+    [JsonPropertyName("gate_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? GateId { get; set; }
+}
+
+/// <summary>One stored version of a policy (GET /admin/boundary-policies and a policy's history).</summary>
+public sealed class PolicyVersionSummary
+{
+    /// <summary>The policy's ID.</summary>
+    [JsonPropertyName("policy_id")]
+    public string PolicyId { get; set; } = "";
+
+    /// <summary>The version.</summary>
+    [JsonPropertyName("version")]
+    public int Version { get; set; }
+
+    /// <summary>True when this version is active.</summary>
+    [JsonPropertyName("active")]
+    public bool Active { get; set; }
+
+    /// <summary>SHA-256 hex of the signed policy (<see cref="OfflineVerifier.PolicyDigest"/>).</summary>
+    [JsonPropertyName("policy_digest")]
+    public string PolicyDigest { get; set; } = "";
+
+    /// <summary>When the version was stored.</summary>
+    [JsonPropertyName("created_at")]
+    public string CreatedAt { get; set; } = "";
+
+    /// <summary>When it was last activated; null when never.</summary>
+    [JsonPropertyName("activated_at")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? ActivatedAt { get; set; }
+
+    /// <summary>When it was last deactivated; null when never.</summary>
+    [JsonPropertyName("deactivated_at")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? DeactivatedAt { get; set; }
+
+    /// <summary>False when the stored version no longer matches its signature or digest.</summary>
+    [JsonPropertyName("integrity_ok")]
+    public bool IntegrityOk { get; set; }
+
+    /// <summary>What the policy is for.</summary>
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    /// <summary>Start of the version's validity.</summary>
+    [JsonPropertyName("valid_from")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ValidFrom { get; set; }
+
+    /// <summary>End of the version's validity.</summary>
+    [JsonPropertyName("valid_until")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ValidUntil { get; set; }
+
+    /// <summary>How many gates the version has.</summary>
+    [JsonPropertyName("gate_count")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? GateCount { get; set; }
+
+    /// <summary>True when the version's selector matches every request.</summary>
+    [JsonPropertyName("global")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Global { get; set; }
+
+    /// <summary>The signed policy; in a policy's history only.</summary>
+    [JsonPropertyName("policy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BoundaryPolicy? Policy { get; set; }
+}
+
+/// <summary>Returned by GET /admin/boundary-policies/active: the active set, its health and the enforcement mode.</summary>
+public sealed class ActivePolicyStatus
+{
+    /// <summary><c>required</c> or <c>optional</c>: whether every boundary decision needs an active policy.</summary>
+    [JsonPropertyName("enforcement")]
+    public string Enforcement { get; set; } = "";
+
+    /// <summary>False when an active policy fails verification: every policy-aware evaluation then denies.</summary>
+    [JsonPropertyName("policy_set_healthy")]
+    public bool PolicySetHealthy { get; set; }
+
+    /// <summary>The active policies that fail verification, and why.</summary>
+    [JsonPropertyName("problems")]
+    public IList<PolicyProblem> Problems { get; set; } = [];
+
+    /// <summary>The gate types installed on the NA.</summary>
+    [JsonPropertyName("registry_gate_types")]
+    public IList<string> RegistryGateTypes { get; set; } = [];
+
+    /// <summary>The active policies.</summary>
+    [JsonPropertyName("active")]
+    public IList<ActivePolicy> Active { get; set; } = [];
+}
+
+/// <summary>An active policy that fails verification (<see cref="ActivePolicyStatus.Problems"/>).</summary>
+public sealed class PolicyProblem
+{
+    /// <summary>The policy, as <c>policy_id</c> and version.</summary>
+    [JsonPropertyName("policy")]
+    public string Policy { get; set; } = "";
+
+    /// <summary>Why it fails.</summary>
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+}
+
+/// <summary>One active policy (<see cref="ActivePolicyStatus.Active"/>).</summary>
+public sealed class ActivePolicy
+{
+    /// <summary>The policy's ID.</summary>
+    [JsonPropertyName("policy_id")]
+    public string PolicyId { get; set; } = "";
+
+    /// <summary>The active version.</summary>
+    [JsonPropertyName("version")]
+    public int Version { get; set; }
+
+    /// <summary>SHA-256 hex of the signed policy.</summary>
+    [JsonPropertyName("policy_digest")]
+    public string PolicyDigest { get; set; } = "";
+
+    /// <summary>Start of the version's validity.</summary>
+    [JsonPropertyName("valid_from")]
+    public string ValidFrom { get; set; } = "";
+
+    /// <summary>End of the version's validity.</summary>
+    [JsonPropertyName("valid_until")]
+    public string ValidUntil { get; set; } = "";
+
+    /// <summary>How many gates the version has.</summary>
+    [JsonPropertyName("gate_count")]
+    public int GateCount { get; set; }
+
+    /// <summary>Which requests it applies to.</summary>
+    [JsonPropertyName("selector")]
+    public PolicySelector Selector { get; set; } = new();
+
+    /// <summary>The signed policy.</summary>
+    [JsonPropertyName("policy")]
+    public BoundaryPolicy Policy { get; set; } = new();
+}
+
+/// <summary>Returned by GET /admin/boundary-policies/{policy_id}/history: every version, newest first.</summary>
+public sealed class PolicyHistory
+{
+    /// <summary>The policy's ID.</summary>
+    [JsonPropertyName("policy_id")]
+    public string PolicyId { get; set; } = "";
+
+    /// <summary>Every version, with its signed body.</summary>
+    [JsonPropertyName("versions")]
+    public IList<PolicyVersionSummary> Versions { get; set; } = [];
+}
+
+/// <summary>Returned by activating or deactivating a policy version.</summary>
+public sealed class PolicyActivation
+{
+    /// <summary>The policy's ID.</summary>
+    [JsonPropertyName("policy_id")]
+    public string PolicyId { get; set; } = "";
+
+    /// <summary>The version activated or deactivated.</summary>
+    [JsonPropertyName("version")]
+    public int Version { get; set; }
+
+    /// <summary>Activation only: the version that was active before; null when none was.</summary>
+    [JsonPropertyName("previous_version")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? PreviousVersion { get; set; }
+
+    /// <summary>True after an activation, false after a deactivation.</summary>
+    [JsonPropertyName("active")]
+    public bool Active { get; set; }
+}
+
+/// <summary>Returned by POST /boundary-policies/verify.</summary>
+public sealed class PolicyVerification
+{
+    /// <summary>True when the signature verifies.</summary>
+    [JsonPropertyName("valid")]
+    public bool Valid { get; set; }
+
+    /// <summary><c>valid</c>, or why the policy was refused, such as <c>invalid_signature</c>.</summary>
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    /// <summary>The policy's ID, when it could be read.</summary>
+    [JsonPropertyName("policy_id")]
+    public string? PolicyId { get; set; }
+
+    /// <summary>The policy's version, when it could be read.</summary>
+    [JsonPropertyName("version")]
+    public int? Version { get; set; }
+
+    /// <summary>SHA-256 hex of the policy as received, when it could be read.</summary>
+    [JsonPropertyName("policy_digest")]
+    public string? PolicyDigest { get; set; }
+}
+
+/// <summary>The body of GET /admin/boundary-policies.</summary>
+internal sealed class PolicyList
+{
+    [JsonPropertyName("policies")]
+    public IReadOnlyList<PolicyVersionSummary> Policies { get; set; } = [];
 }
 
 // ── Health (v0.60) ────────────────────────────────────────────────────────────
