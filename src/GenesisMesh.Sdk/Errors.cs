@@ -15,12 +15,34 @@ public class GenesisMeshException : Exception
     /// <summary>The NA's error message, or the response body when it is not an NA error.</summary>
     public string Detail { get; }
 
+    /// <summary>
+    /// The NA's <c>details</c> of the error, such as the failing checks of a not-ready NA; undefined
+    /// (<see cref="JsonValueKind.Undefined"/>) when it sent none.
+    /// </summary>
+    public JsonElement Details { get; internal set; }
+
+    /// <summary>
+    /// How long the NA asked the caller to wait before trying again (<c>Retry-After</c>), such as with a 429 or 503;
+    /// null when it named no wait.
+    /// </summary>
+    public TimeSpan? RetryAfter { get; internal set; }
+
     /// <summary>An error the NA answered with <paramref name="status"/>, <paramref name="code"/> and <paramref name="detail"/>.</summary>
     /// <param name="status">The HTTP status of the response.</param>
     /// <param name="code">The NA's error code.</param>
     /// <param name="detail">The NA's error message.</param>
     public GenesisMeshException(int status, string code, string detail)
-        : base($"genesismesh: HTTP {status} {code}: {detail}")
+        : this(status, code, detail, $"genesismesh: HTTP {status} {code}: {detail}")
+    {
+    }
+
+    /// <summary>An error with its own <paramref name="message"/>, for a refusal that is not an HTTP answer.</summary>
+    /// <param name="status">The HTTP status, or 0 when the refusal is the SDK's own.</param>
+    /// <param name="code">The reason code.</param>
+    /// <param name="detail">What was refused.</param>
+    /// <param name="message">The exception message.</param>
+    protected GenesisMeshException(int status, string code, string detail, string message)
+        : base(message)
     {
         Status = status;
         Code = code;
@@ -38,6 +60,18 @@ public sealed class NetworkException : Exception
     /// <param name="inner">The timeout or connection error.</param>
     public NetworkException(Exception inner)
         : base($"genesismesh: network error: {inner.Message}", inner) { }
+
+    internal NetworkException(string message, Exception? inner, bool connectFailed)
+        : base($"genesismesh: network error: {message}", inner)
+    {
+        ConnectFailed = connectFailed;
+    }
+
+    /// <summary>
+    /// True when the request did not reach the NA: the connection could not be made, or the request was not sent.
+    /// Such a request can be sent again without being applied twice.
+    /// </summary>
+    public bool ConnectFailed { get; }
 }
 
 /// <summary>HTTP 400 — request body failed validation.</summary>
@@ -143,21 +177,35 @@ internal static class ErrorMapping
         [JsonPropertyName("message")] public string? Message { get; set; }
         [JsonPropertyName("code")] public string? Code { get; set; }
         [JsonPropertyName("request_id")] public string? RequestId { get; set; }
+        [JsonPropertyName("details")] public JsonElement Details { get; set; }
     }
 
-    internal static GenesisMeshException Parse(int status, string body)
+    internal static GenesisMeshException Parse(int status, string body) => Parse(status, body, null);
+
+    /// <summary>The typed exception for an error response, with the wait it named (<c>Retry-After</c>).</summary>
+    internal static GenesisMeshException Parse(int status, string body, TimeSpan? retryAfter)
     {
         string code = "";
         string message = body;
+        JsonElement details = default;
         try
         {
             var env = JsonSerializer.Deserialize<ErrorEnvelope>(body);
             code = env?.Error?.Code ?? "";
             message = env?.Error?.Message ?? body;
+            if (env?.Error?.Details is { ValueKind: not JsonValueKind.Undefined } d) details = d.Clone();
         }
         catch { /* keep defaults */ }
 
-        return status switch
+        var error = ForStatus(status, code, message);
+        error.Details = details;
+        error.RetryAfter = retryAfter;
+        return error;
+    }
+
+    /// <summary>The exception type for <paramref name="status"/>.</summary>
+    internal static GenesisMeshException ForStatus(int status, string code, string message) =>
+        status switch
         {
             400 => new BadRequestException(status, code, message),
             401 => new UnauthorizedException(status, code, message),
@@ -172,5 +220,4 @@ internal static class ErrorMapping
             // Not an error status this SDK knows (a redirect it did not follow): the base type, with the raw status.
             _ => new GenesisMeshException(status, code, message),
         };
-    }
 }

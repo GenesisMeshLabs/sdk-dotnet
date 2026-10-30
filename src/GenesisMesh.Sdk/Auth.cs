@@ -130,6 +130,40 @@ public static class Auth
             Nonce = nonce,
         };
     }
+
+    /// <summary>
+    /// The four X-Admin-* request headers for one admin request, signed by <paramref name="signer"/> under its key ID
+    /// (<see cref="BuildAdminHeaders"/> with a seed).
+    /// </summary>
+    /// <param name="request">What the signature binds.</param>
+    /// <param name="signer">The operator key.</param>
+    /// <param name="timestamp">A fixed timestamp, to reproduce a signature; the current time when null.</param>
+    /// <param name="nonce">A fixed nonce, to reproduce a signature; a new one when null.</param>
+    /// <param name="cancellationToken">Passed to the signer.</param>
+    /// <exception cref="InvalidOperationException">The signer returned a signature that is not 64 bytes.</exception>
+    public static async Task<AdminHeaders> BuildAdminHeadersAsync(
+        AdminRequest request, ISigner signer, string? timestamp = null, string? nonce = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(signer);
+        timestamp ??= DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fff", CultureInfo.InvariantCulture) + "Z";
+        nonce ??= Guid.NewGuid().ToString();
+
+        // Read once: the header must name the key ID that was signed.
+        var keyId = signer.KeyId;
+        var canonical = AdminSigningPayload(request, keyId, timestamp, nonce);
+        var sig = await signer.SignAsync(canonical, cancellationToken).ConfigureAwait(false);
+        if (sig is not { Length: 64 })
+            throw new InvalidOperationException("genesismesh: the signer returned a signature that is not 64 bytes");
+
+        return new AdminHeaders
+        {
+            KeyId = keyId,
+            Signature = Convert.ToBase64String(sig),
+            Timestamp = timestamp,
+            Nonce = nonce,
+        };
+    }
 }
 
 /// <summary>

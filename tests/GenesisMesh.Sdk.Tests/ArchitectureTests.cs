@@ -32,7 +32,9 @@ public partial class ArchitectureTests
         ("Models.cs", "models"),
         ("Errors.cs", "errors"),
         ("Auth.cs", "auth"),
+        ("Signer.cs", "auth"),
         ("Transport.cs", "transport"),
+        ("ClientOptions.cs", "transport"),
         ("Clients/", "clients"),
         ("GenesisMeshClient.cs", "client"),
     ];
@@ -48,7 +50,7 @@ public partial class ArchitectureTests
         ["auth"] = ["canonical", "json"],
         ["verify"] = ["registry", "canonical", "json", "models"],
         ["transport"] = ["auth", "errors", "models", "canonical", "json"],
-        ["clients"] = ["transport", "models", "errors"],
+        ["clients"] = ["transport", "models", "errors", "verify"],
         ["client"] = ["json", "errors", "models", "canonical", "registry", "auth", "verify", "transport", "clients"],
     };
 
@@ -71,12 +73,7 @@ public partial class ArchitectureTests
     /// Source edges that break the table today, as "file -> type (module)". Only remove entries: when an edge is
     /// gone, delete its line; a new edge is a design change for the Maintainer, not a line to add.
     /// </summary>
-    private static readonly string[] AllowedSourceEdges =
-    [
-        // Transport reads ClientOptions, declared beside GenesisMeshClient. Moving ClientOptions into its own
-        // file in the transport module removes this edge.
-        "Transport.cs -> ClientOptions (client)",
-    ];
+    private static readonly string[] AllowedSourceEdges = [];
 
     /// <summary>Compiled edges of the offline modules that break the table today, as "type -> type (module)".</summary>
     private static readonly string[] AllowedCompiledEdges = [];

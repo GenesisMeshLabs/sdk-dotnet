@@ -32,7 +32,7 @@ changelog.d/               # changelog fragments, one per change
 docs/architecture.md       # modules, layers, flows, recipes
 ```
 
-**Do not mix layers.** Signing belongs in `Auth.cs`, HTTP in `Transport.cs`,
+**Do not mix layers.** Signing belongs in `Auth.cs` and `Signer.cs`, HTTP in `Transport.cs`,
 and the offline verifiers (`OfflineVerifier.cs`, `KeyHistory.cs`,
 `Grants.cs`) never touch HTTP.
 

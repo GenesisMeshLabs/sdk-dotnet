@@ -1,5 +1,5 @@
 {
-  "_comment": "Responses of a live 1.0.2 Network Authority to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests).",
+  "_comment": "Responses of a live Network Authority (1.0.2; the health and key history responses 1.8.1) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests).",
   "agreement_accept": {
     "agreed_terms": {
       "capabilities": [
@@ -440,5 +440,95 @@
     "issuer_sovereign_id": "contract-na",
     "reason": "accepted",
     "verdict": "allow"
+  },
+  "health_liveness": {
+    "status": "ok"
+  },
+  "health_readiness": {
+    "database": {
+      "backend": "sqlite",
+      "expected_schema_version": 20,
+      "schema_version": 20,
+      "writable": true
+    },
+    "db_path": "/tmp/gm-contract-xxxxxxxx/na.db",
+    "ha_mode": "off",
+    "instance": "host:b02a5b29",
+    "na_key": {
+      "key_sequence": 1,
+      "state": "signing"
+    },
+    "rate_limiter": "memory",
+    "reissue": {
+      "due": {
+        "attestations": 0,
+        "policy_manifest": false,
+        "treaties": 0
+      },
+      "reissue_pending": false
+    },
+    "signing_key": {
+      "fingerprint": "64bf43ce8b15ba4d001307b430049e66ccf4c5e960a4ec4e1a1bf08d16201598",
+      "key_id": "na-contract",
+      "provider": "file"
+    },
+    "status": "ready"
+  },
+  "health_status": {
+    "boundary_policies": "healthy",
+    "boundary_policy_enforcement": "optional",
+    "evidence_store": "on",
+    "network": "contract-na",
+    "status": "healthy",
+    "version": "v0.1"
+  },
+  "na_key_history": {
+    "genesis": {
+      "allowed_crypto_suites": [
+        "ed25519",
+        "x25519"
+      ],
+      "allowed_transports": [
+        "quic",
+        "wireguard"
+      ],
+      "bootstrap_anchors": [],
+      "network_authority": {
+        "public_key": "bPsnBlkvakRwfqL/Ctcg9Vf+7DN0ZlbjbkljtubXbE0=",
+        "valid_from": "2026-10-30T09:22:03.316944Z",
+        "valid_to": "2026-10-31T09:22:03.316944Z"
+      },
+      "network_name": "contract-na",
+      "network_version": "v0.1",
+      "policy_manifest": {
+        "hash": "sha256:test",
+        "url": null
+      },
+      "root_public_key": "bPsnBlkvakRwfqL/Ctcg9Vf+7DN0ZlbjbkljtubXbE0=",
+      "signatures": [
+        {
+          "key_id": "root",
+          "sig": "So7m/4mL0KHBAMQdCXq6ad8d3kSqYE7sxDDHT3dfWC0DGkhQ3+2Zi9PjzKS3YESOZYcujHhgTVC1rEbvM/wZBg=="
+        }
+      ]
+    },
+    "handover_seconds": 300,
+    "keys": [
+      {
+        "current": true,
+        "key_id": "na-contract",
+        "key_sequence": 1,
+        "public_key": "bPsnBlkvakRwfqL/Ctcg9Vf+7DN0ZlbjbkljtubXbE0=",
+        "succeeded_at": null,
+        "valid_from": null,
+        "valid_to": "2026-10-31T09:22:03.316944Z",
+        "valid_to_enforced": false
+      }
+    ],
+    "root_public_key": "bPsnBlkvakRwfqL/Ctcg9Vf+7DN0ZlbjbkljtubXbE0=",
+    "signing_key_sequence": 1,
+    "sovereign_id": "contract-na",
+    "successions": [],
+    "vouching_grace_seconds": 86400
   }
 }

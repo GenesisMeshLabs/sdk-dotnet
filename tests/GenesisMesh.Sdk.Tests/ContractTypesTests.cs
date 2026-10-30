@@ -59,6 +59,10 @@ public class ContractTypesTests
         { "consensus_proof", typeof(ConsensusProof) },
         { "consensus_verify", typeof(ConsensusVerification) },
         { "attestation_issue", typeof(MembershipAttestation) },
+        { "health_liveness", typeof(LivenessStatus) },
+        { "health_readiness", typeof(Readiness) },
+        { "health_status", typeof(HealthStatus) },
+        { "na_key_history", typeof(KeyHistoryView) },
     };
 
     [Theory]

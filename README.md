@@ -30,6 +30,11 @@ verification are not part of this SDK: they live in the core
 (`genesis-mesh audit pack`, `genesis-mesh audit verify`) and in the Rust
 SDK's standalone verifier `genesis-mesh-verify`.
 
+From 1.9 a client can serve several NA instances with failover, retry
+idempotent requests, and sign with a key it does not hold (see
+[Client options](#client-options)). It also reads the NA's health and its key
+history (see [Health](#health) and [NA](#na)).
+
 From 1.6 it checks a pre-issued grant's NA signature (see
 [Pre-issued grants](#pre-issued-grants)). Requesting grants, holding time
 tokens, acting within a grant offline, recording its uses and falling back to
@@ -122,6 +127,40 @@ The decision is signed by the NA: check it offline with
 active policy the decision rests on the attestation alone; publish and
 activate policies (`POST /admin/boundary-policies`, then
 `/admin/boundary-policies/<id>/activate`, privileged) to add their gates.
+
+## Client options
+
+`ClientOptions` beyond the URL and the key:
+
+| Option | What it does |
+|---|---|
+| `BaseUrls` | Several NA instances sharing one database, without a load balancer; set this or `BaseUrl`. Requests go to one instance. An idempotent request (a GET, a verification) moves to the next instance on a connection failure or a 502, 503 or 504. Any other request moves only when it never reached an instance: the connection could not be made, or the NA's key could not be read first because the instance did not answer or answered 502, 503 or 504. Otherwise it is not sent again, and the next request starts at the next instance. |
+| `Retry` | `new RetryOptions { Attempts = 3 }`: idempotent requests are tried again after a connection failure or a 429, 502, 503 or 504, waiting `BaseDelay` (200 ms) and doubling it each time. Off by default. A request that creates state is never retried. |
+| `Signer` | An `ISigner` for admin requests, used instead of `SigningKey` and `KeyId`: implement it for an HSM, or use `SeedSigner` for a key read at start. |
+| `Headers` | Extra headers on every request, such as for an API gateway in front of the NA. |
+| `HttpHandler` | The handler requests go through, such as a `SocketsHttpHandler` with a `PooledConnectionLifetime`, so that a long-lived client follows DNS changes. The client does not dispose it. |
+| `Timeout` | Each attempt's timeout (each request, and each read of the NA's key); 10 s by default. A call that fails over or retries can take longer. |
+
+```csharp
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
+using GenesisMesh;
+
+// Key Vault has no Ed25519 keys: the operator seed is a secret, read once at start and used in memory.
+var vault = new SecretClient(new Uri("https://my-vault.vault.azure.net/"), new DefaultAzureCredential());
+var seed = (await vault.GetSecretAsync("gm-controller-key")).Value.Value;
+
+using var client = new GenesisMeshClient(new ClientOptions
+{
+    BaseUrls = ["https://na-1.internal:9443", "https://na-2.internal:9443"],
+    Signer   = new SeedSigner(seed, "controller"),
+    Retry    = new RetryOptions { Attempts = 3 },
+});
+```
+
+A retry does not wait for a `Retry-After` the NA sends; the wait is on the
+exception (`RetryAfter`, see [Error handling](#error-handling)) for you to
+honour, for example when the NA's admin rate limit answers 429.
 
 ## Sub-clients
 
@@ -339,6 +378,40 @@ var dv2 = await client.DataUsage.Verify(new Dictionary<string, object?>
     ["policy"] = policy,
 });
 ```
+
+### Health
+
+```csharp
+var live  = await client.Health.Liveness();    // GET /healthz: the process answers ("ok")
+var ready = await client.Health.Readiness();   // GET /readyz
+if (!ready.Ready)
+    Console.WriteLine($"not ready: database writable {ready.Database.Writable}, {ready.Database.Error}");
+var health = await client.Health.Status();     // GET /health: network, version, policies, evidence store
+
+// With BaseUrls: each instance, asked directly, for monitoring.
+foreach (var e in await client.Health.Endpoints())
+    Console.WriteLine($"{e.BaseUrl}: reachable {e.Reachable}, ready {e.Ready} {e.Error}");
+```
+
+A not-ready NA (503 `service_not_ready`) is returned with `Ready` false and
+the failing checks, not thrown. `ready.NAKeyState.State` is the NA key's
+state (1.5.0): anything but `signing` is not ready.
+
+### NA
+
+The NA's key history (1.5.0): the signed genesis block, every key succession
+and each key's validity.
+
+```csharp
+var view = await client.NA.KeyHistory();                        // GET /na/key-history, as served
+var history = await client.NA.VerifiedKeyHistory(rootPublicKey); // verified from the root key you hold
+```
+
+`VerifiedKeyHistory` ignores the keys the NA lists and rebuilds the history
+from the genesis block, with the root key you hold out of band. It throws
+`KeyHistoryException` when the history does not verify: `Code` is the first
+failure's reason, and `Verification` has the details. Pass the history to the
+offline verifiers (see [NA key history](#na-key-history)).
 
 ## Offline verification
 
@@ -569,8 +642,16 @@ catch (GenesisMeshException ex)
 
 All of them derive from `GenesisMeshException` (`Status`, `Code`, `Detail`).
 `Detail` is the NA's message; `Message` is the formatted
-`genesismesh: HTTP <status> <code>: <detail>`.
-A connection failure or timeout is a `NetworkException`. A 2xx response that
+`genesismesh: HTTP <status> <code>: <detail>`. From 1.9:
+
+- `RetryAfter` is the wait the NA named (`Retry-After`), such as with a 429; null when it named none.
+- `Details` is the NA's `details` of the error, such as the failing checks of a not-ready NA.
+- A failure to read the NA's key from `/sovereign.json` is the exception for that answer's status with the code
+  `na_public_key_unavailable`. Before 1.9 an answer without the key was an `InvalidOperationException`.
+
+A connection failure or timeout is a `NetworkException`. Its `ConnectFailed`
+is true when the request did not reach the NA, so sending it again cannot
+apply it twice. A 2xx response that
 is not strict JSON (duplicate keys, `-0`, lone surrogates, ...) throws
 `StrictJsonException`, a `JsonException`, not a `GenesisMeshException`. Cancelling through
 your own `CancellationToken` throws `OperationCanceledException`.
@@ -593,7 +674,8 @@ client reads it (`network_authority.public_key`) once from the NA's public
 uses `ClientOptions.Audience`. `Auth.AdminSigningPayload` returns the signed bytes.
 
 
-The SDK handles all of this automatically when `SigningKey` is provided.
+The SDK handles all of this automatically when `SigningKey` or `Signer` is provided.
+`Auth.BuildAdminHeadersAsync` signs with an `ISigner`.
 
 ## Build and test
 

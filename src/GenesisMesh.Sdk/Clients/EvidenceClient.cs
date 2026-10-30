@@ -22,5 +22,5 @@ public sealed class EvidenceClient
     /// POST /trust-evidence/verify
     /// </summary>
     public Task<VerifyResult> Verify(IDictionary<string, object?> body, CancellationToken ct = default) =>
-        _t.PublicPostAsync<VerifyResult>("/trust-evidence/verify", body, ct);
+        _t.PublicPostAsync<VerifyResult>("/trust-evidence/verify", body, idempotent: true, ct);
 }

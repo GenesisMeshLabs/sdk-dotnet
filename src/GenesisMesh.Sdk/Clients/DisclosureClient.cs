@@ -25,12 +25,12 @@ public sealed class DisclosureClient
     /// POST /disclosure/prove
     /// </summary>
     public Task<CapabilityMembershipProof> Prove(IDictionary<string, object?> body, CancellationToken ct = default) =>
-        _t.PublicPostAsync<CapabilityMembershipProof>("/disclosure/prove", body, ct);
+        _t.PublicPostAsync<CapabilityMembershipProof>("/disclosure/prove", body, idempotent: true, ct);
 
     /// <summary>
     /// Verifies a capability membership proof (public route).
     /// POST /disclosure/verify
     /// </summary>
     public Task<VerifyResult> Verify(IDictionary<string, object?> body, CancellationToken ct = default) =>
-        _t.PublicPostAsync<VerifyResult>("/disclosure/verify", body, ct);
+        _t.PublicPostAsync<VerifyResult>("/disclosure/verify", body, idempotent: true, ct);
 }

@@ -1,31 +1,83 @@
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
+using System.Net.Sockets;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace GenesisMesh;
 
 internal sealed class Transport : IDisposable
 {
+    /// <summary>Statuses a retry may outlast: the NA is busy or an instance is down.</summary>
+    private static readonly HashSet<int> RetryableStatus = [429, 502, 503, 504];
+
+    /// <summary>Statuses that move the next attempt to another instance.</summary>
+    private static readonly HashSet<int> FailoverStatus = [502, 503, 504];
+
+    private const string LookupUnavailable = "na_public_key_unavailable";
+
     private readonly HttpClient _http;
-    private readonly string _baseUrl;
-    private readonly byte[]? _seed;
-    private readonly string _keyId;
-    private readonly SemaphoreSlim _audienceLock = new(1, 1);
-    private string? _audience;
+    private readonly string[] _baseUrls;
+    private int _active;
+    private readonly ISigner? _signer;
+    private readonly int _retryAttempts;
+    private readonly TimeSpan _retryBaseDelay;
+    private readonly KeyValuePair<string, string>[] _headers;
+    private readonly object _audienceGate = new();
+    private Task<string>? _audienceLookup;
+    private volatile string? _audience;
 
     internal Transport(ClientOptions opts)
     {
-        _baseUrl = opts.BaseUrl.TrimEnd('/');
-        _keyId = opts.KeyId ?? "";
-        _http = opts.HttpHandler is not null
-            ? new HttpClient(opts.HttpHandler, disposeHandler: false) { Timeout = opts.Timeout > TimeSpan.Zero ? opts.Timeout : TimeSpan.FromSeconds(10) }
-            : new HttpClient { Timeout = opts.Timeout > TimeSpan.Zero ? opts.Timeout : TimeSpan.FromSeconds(10) };
+        if (opts.BaseUrls is not null)
+        {
+            if (!string.IsNullOrEmpty(opts.BaseUrl))
+                throw new ArgumentException("genesismesh: set BaseUrl or BaseUrls, not both", nameof(opts));
+            if (opts.BaseUrls.Count == 0 || opts.BaseUrls.Any(u => !IsHttpUrl(u)))
+                throw new ArgumentException("genesismesh: BaseUrls must give at least one http(s) URL", nameof(opts));
+            _baseUrls = opts.BaseUrls.Select(u => u.TrimEnd('/')).ToArray();
+        }
+        else
+        {
+            _baseUrls = [opts.BaseUrl.TrimEnd('/')];
+        }
 
-        if (!string.IsNullOrEmpty(opts.SigningKey))
-            _seed = Auth.LoadSeed(opts.SigningKey);
+        var retry = opts.Retry ?? new RetryOptions();
+        if (retry.Attempts is < 0 or > 10 || retry.BaseDelay < TimeSpan.Zero || retry.BaseDelay > TimeSpan.FromMinutes(1))
+            throw new ArgumentOutOfRangeException(nameof(opts), "genesismesh: Retry needs 0 to 10 attempts and a BaseDelay of 0 to 60 s");
+        _retryAttempts = retry.Attempts;
+        _retryBaseDelay = retry.BaseDelay;
+
+        var timeout = opts.Timeout > TimeSpan.Zero ? opts.Timeout : TimeSpan.FromSeconds(10);
+        _http = opts.HttpHandler is not null
+            ? new HttpClient(opts.HttpHandler, disposeHandler: false) { Timeout = timeout }
+            : new HttpClient { Timeout = timeout };
+        _headers = opts.Headers?.ToArray() ?? [];
+
+        _signer = opts.Signer
+            ?? (string.IsNullOrEmpty(opts.SigningKey) ? null : new SeedSigner(Auth.LoadSeed(opts.SigningKey), opts.KeyId ?? ""));
         _audience = string.IsNullOrEmpty(opts.Audience) ? null : opts.Audience;
+    }
+
+    private static bool IsHttpUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    /// <summary>Every configured NA endpoint, in preference order.</summary>
+    internal IReadOnlyList<string> BaseUrls => _baseUrls;
+
+    /// <summary>The endpoint requests go to now.</summary>
+    internal string BaseUrl => Endpoint(Volatile.Read(ref _active));
+
+    private string Endpoint(int position) => _baseUrls[(uint)position % (uint)_baseUrls.Length];
+
+    /// <summary>
+    /// Move past the endpoint at <paramref name="used"/>, the position a failed attempt was sent to. Attempts that
+    /// failed at the same endpoint at the same time move once together; one that failed at an endpoint already left
+    /// behind moves nothing.
+    /// </summary>
+    private void MoveFrom(int used)
+    {
+        if (_baseUrls.Length > 1) Interlocked.CompareExchange(ref _active, used + 1, used);
     }
 
     /// <summary>
@@ -46,125 +98,328 @@ internal sealed class Transport : IDisposable
         return value;
     }
 
-    /// <summary>The NA's public key for admin signatures, read once from /sovereign.json.</summary>
+    /// <summary>
+    /// The NA's public key for admin signatures, read once from /sovereign.json. Requests that need it at the same
+    /// time share one lookup. A lookup that gets no answer throws <see cref="NetworkException"/>; an answer without
+    /// the key throws <c>na_public_key_unavailable</c> with the answer's status. A failed lookup is tried again by the
+    /// next request.
+    /// </summary>
     private async Task<string> AudienceAsync(CancellationToken ct)
     {
-        if (_audience is not null) return _audience;
-        await _audienceLock.WaitAsync(ct).ConfigureAwait(false);
+        if (_audience is { } known) return known;
+        Task<string> lookup;
+        lock (_audienceGate) lookup = _audienceLookup ??= LookupAsync();
         try
         {
-            if (_audience is null)
-            {
-                var meta = await DoAsync<SovereignMetadata>(HttpMethod.Get, "/sovereign.json", null, null, ct).ConfigureAwait(false);
-                var key = meta?.NetworkAuthority?.PublicKey;
-                if (string.IsNullOrEmpty(key))
-                    throw new InvalidOperationException("genesismesh: /sovereign.json has no network_authority.public_key");
-                _audience = key;
-            }
-            return _audience;
+            return await lookup.WaitAsync(ct).ConfigureAwait(false);
         }
-        finally
+        catch when (lookup.IsCompleted)
         {
-            _audienceLock.Release();
+            lock (_audienceGate)
+            {
+                if (ReferenceEquals(_audienceLookup, lookup)) _audienceLookup = null;
+            }
+            throw;
         }
     }
 
-    private sealed class SovereignMetadata
+    /// <summary>
+    /// One read of the NA's key from the active endpoint, bounded by the request timeout rather than one caller's
+    /// cancellation, since several requests wait for it. An endpoint that does not answer, or answers 502, 503 or
+    /// 504, is moved past.
+    /// </summary>
+    private async Task<string> LookupAsync()
     {
-        [JsonPropertyName("network_authority")]
-        public AuthorityMetadata? NetworkAuthority { get; set; }
+        var used = Volatile.Read(ref _active);
+        int status;
+        byte[] body;
+        try
+        {
+            (status, body) = await GetAtAsync(Endpoint(used), "/sovereign.json", CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (NetworkException)
+        {
+            MoveFrom(used);
+            throw;
+        }
+        string? key = null;
+        try
+        {
+            using var doc = StrictJsonReader.Parse(StrictJsonReader.DecodeUtf8(body));
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("network_authority", out var authority)
+                && authority.ValueKind == JsonValueKind.Object
+                && authority.TryGetProperty("public_key", out var publicKey)
+                && publicKey.ValueKind == JsonValueKind.String)
+                key = publicKey.GetString();
+        }
+        catch (Exception e) when (e is JsonException or FormatException) { /* no key */ }
+        if (status != 200 || string.IsNullOrEmpty(key))
+        {
+            if (FailoverStatus.Contains(status)) MoveFrom(used);
+            throw ErrorMapping.ForStatus(status, LookupUnavailable,
+                $"Could not read the NA public key from /sovereign.json (HTTP {status})");
+        }
+        _audience = key;
+        return key;
     }
 
-    private sealed class AuthorityMetadata
-    {
-        [JsonPropertyName("public_key")]
-        public string? PublicKey { get; set; }
-    }
+    /// <summary>A signed admin POST, sent again only when <paramref name="idempotent"/>.</summary>
+    internal async Task<T> AdminPostAsync<T>(string path, object? body, bool idempotent, CancellationToken ct) =>
+        Parse<T>(await SendAsync(new Spec(HttpMethod.Post, path, null, body, Admin: true, idempotent), ct).ConfigureAwait(false));
 
-    internal async Task<T> AdminPostAsync<T>(string path, object? body, CancellationToken ct = default)
-    {
-        if (_seed is null)
-            throw new InvalidOperationException($"genesismesh: signing key required for admin route {path}");
+    internal Task<T> AdminPostAsync<T>(string path, object? body, CancellationToken ct = default) =>
+        AdminPostAsync<T>(path, body, idempotent: false, ct);
 
-        var request = new AdminRequest("POST", path, await AudienceAsync(ct).ConfigureAwait(false), body);
-        var headers = Auth.BuildAdminHeaders(request, _keyId, _seed);
-        return await DoAsync<T>(HttpMethod.Post, path, body, headers, ct).ConfigureAwait(false);
-    }
+    internal async Task AdminPostAsync(string path, object? body, CancellationToken ct = default) =>
+        Parse<object?>(await SendAsync(new Spec(HttpMethod.Post, path, null, body, Admin: true, Idempotent: false), ct).ConfigureAwait(false));
 
-    internal async Task AdminPostAsync(string path, object? body, CancellationToken ct = default)
-    {
-        if (_seed is null)
-            throw new InvalidOperationException($"genesismesh: signing key required for admin route {path}");
+    /// <summary>A signed admin GET (the NA verifies the signature over an empty body).</summary>
+    internal async Task<T> AdminGetAsync<T>(string path, IReadOnlyDictionary<string, string>? query, CancellationToken ct) =>
+        Parse<T>(await SendAsync(new Spec(HttpMethod.Get, path, query, null, Admin: true, Idempotent: true), ct).ConfigureAwait(false));
 
-        var request = new AdminRequest("POST", path, await AudienceAsync(ct).ConfigureAwait(false), body);
-        var headers = Auth.BuildAdminHeaders(request, _keyId, _seed);
-        await DoAsync<object?>(HttpMethod.Post, path, body, headers, ct).ConfigureAwait(false);
-    }
+    /// <summary>A signed admin GET whose body is returned as text, such as an NDJSON export.</summary>
+    internal async Task<string> AdminGetTextAsync(string path, IReadOnlyDictionary<string, string>? query, CancellationToken ct) =>
+        Text(await SendAsync(new Spec(HttpMethod.Get, path, query, null, Admin: true, Idempotent: true), ct).ConfigureAwait(false));
 
-    internal async Task<T> PublicPostAsync<T>(string path, object? body, CancellationToken ct = default) =>
-        await DoAsync<T>(HttpMethod.Post, path, body, null, ct).ConfigureAwait(false);
+    /// <summary>
+    /// An unauthenticated POST, sent again only when <paramref name="idempotent"/>: every verification route, and
+    /// <c>/disclosure/prove</c>, which reads no NA state, is.
+    /// </summary>
+    internal async Task<T> PublicPostAsync<T>(string path, object? body, bool idempotent, CancellationToken ct) =>
+        Parse<T>(await SendAsync(new Spec(HttpMethod.Post, path, null, body, Admin: false, idempotent), ct).ConfigureAwait(false));
 
     internal async Task<T> PublicGetAsync<T>(string path, CancellationToken ct = default) =>
-        await DoAsync<T>(HttpMethod.Get, path, null, null, ct).ConfigureAwait(false);
+        Parse<T>(await SendAsync(new Spec(HttpMethod.Get, path, null, null, Admin: false, Idempotent: true), ct).ConfigureAwait(false));
 
-    private async Task<T> DoAsync<T>(
-        HttpMethod method,
-        string path,
-        object? body,
-        AdminHeaders? adminHeaders,
-        CancellationToken ct)
+    /// <summary>An unauthenticated GET whose body is returned as text, for a caller that verifies it as received.</summary>
+    internal async Task<string> PublicGetTextAsync(string path, CancellationToken ct) =>
+        Text(await SendAsync(new Spec(HttpMethod.Get, path, null, null, Admin: false, Idempotent: true), ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// An unauthenticated GET to one endpoint, without failover or retries: its status, and the body read as
+    /// <typeparamref name="T"/> when the status is 200, or the error's <c>details</c> otherwise (undefined when it
+    /// sent none).
+    /// </summary>
+    /// <exception cref="JsonException">A 200 answer whose body is not strict JSON.</exception>
+    internal async Task<(int Status, T? Body, JsonElement Details)> PublicGetAtAsync<T>(string baseUrl, string path, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(method, _baseUrl + path);
-
-        if (body is not null)
+        var (status, bytes) = await GetAtAsync(baseUrl.TrimEnd('/'), path, ct).ConfigureAwait(false);
+        if (status == 200)
         {
-            var json = JsonSerializer.Serialize(body, Auth.SerializerOptions);
+            var text = StrictJsonReader.DecodeUtf8(bytes);
+            StrictJsonReader.Check(text);
+            return (status, JsonSerializer.Deserialize<T>(text, Auth.SerializerOptions), default);
+        }
+        try
+        {
+            using var doc = StrictJsonReader.Parse(StrictJsonReader.DecodeUtf8(bytes));
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object
+                && error.TryGetProperty("details", out var details))
+                return (status, default, details.Clone());
+        }
+        catch (JsonException) { /* an answer without details */ }
+        return (status, default, default);
+    }
+
+    /// <summary><paramref name="element"/> read as <typeparamref name="T"/>, as responses are read.</summary>
+    internal static T? Read<T>(JsonElement element) => element.Deserialize<T>(Auth.SerializerOptions);
+
+    private readonly record struct Spec(
+        HttpMethod Method, string Path, IReadOnlyDictionary<string, string>? Query, object? Body, bool Admin, bool Idempotent);
+
+    private sealed record Answer(int Status, byte[] Body, TimeSpan? RetryAfter)
+    {
+        public bool Ok => Status is >= 200 and < 300;
+    }
+
+    /// <summary>
+    /// One request with failover and retries. An idempotent request may try every other endpoint once, plus the
+    /// configured retries with backoff. Any other request moves to another endpoint only when it was never sent;
+    /// after any other failure it is not sent again, and the next request starts at another endpoint.
+    /// </summary>
+    private async Task<Answer> SendAsync(Spec spec, CancellationToken ct)
+    {
+        var failovers = _baseUrls.Length - 1;
+        var retries = spec.Idempotent ? _retryAttempts : 0;
+        var failoversLeft = failovers;
+        var retriesUsed = 0;
+        while (true)
+        {
+            Answer? answer = null;
+            Exception? error = null;
+            int? used = null;
+            try
+            {
+                var headers = spec.Admin ? await SignAsync(spec, ct).ConfigureAwait(false) : null;
+                // Read after the key lookup, which may have moved past a down instance.
+                used = Volatile.Read(ref _active);
+                answer = await AttemptAsync(spec, headers, Endpoint(used.Value), ct).ConfigureAwait(false);
+            }
+            catch (NetworkException e)
+            {
+                error = e;
+            }
+            catch (GenesisMeshException e) when (e.Code == LookupUnavailable && RetryableStatus.Contains(e.Status))
+            {
+                // The NA's key could not be read from a busy or down instance: the request was never sent.
+                error = e;
+            }
+            var status = answer?.Status ?? (error as GenesisMeshException)?.Status;
+            var failoverWorthy = error is NetworkException || (status is { } s && FailoverStatus.Contains(s));
+            // A failed key lookup has moved past its endpoint already.
+            if (failoverWorthy && used is { } position) MoveFrom(position);
+            // A request that may have reached an instance is sent elsewhere only when it is idempotent; one that was
+            // never sent can always move on.
+            var mayMove = spec.Idempotent || (error is NetworkException network ? network.ConnectFailed : error is not null);
+            if (failoverWorthy && mayMove && failoversLeft > 0)
+            {
+                failoversLeft--;
+                continue;
+            }
+            var retryable = error is NetworkException || (status is { } r && RetryableStatus.Contains(r));
+            if (retryable && retriesUsed < retries)
+            {
+                await Task.Delay(Backoff(retriesUsed), ct).ConfigureAwait(false);
+                retriesUsed++;
+                failoversLeft = failovers;
+                continue;
+            }
+            if (error is not null) ExceptionDispatchInfo.Throw(error);
+            return answer!;
+        }
+    }
+
+    private TimeSpan Backoff(int attempt)
+    {
+        var delay = _retryBaseDelay.TotalMilliseconds * Math.Pow(2, attempt);
+        return TimeSpan.FromMilliseconds(Math.Min(delay, 60_000));
+    }
+
+    /// <summary>The admin headers of one attempt, signed afresh, after the NA's key is known.</summary>
+    private async Task<AdminHeaders> SignAsync(Spec spec, CancellationToken ct)
+    {
+        if (_signer is null)
+            throw new InvalidOperationException($"genesismesh: signing key required for admin route {spec.Path}");
+        string audience;
+        try
+        {
+            audience = await AudienceAsync(ct).ConfigureAwait(false);
+        }
+        catch (NetworkException e)
+        {
+            // The request itself was not sent, so it may move to another instance, idempotent or not.
+            throw new NetworkException($"{spec.Method} {spec.Path} not sent: {e.Message}", e, connectFailed: true);
+        }
+        var query = spec.Query?.ToDictionary(p => p.Key, p => (IReadOnlyList<string>)[p.Value]);
+        var signed = new AdminRequest(spec.Method.Method, spec.Path, audience,
+            spec.Method == HttpMethod.Get ? null : spec.Body, query);
+        return await Auth.BuildAdminHeadersAsync(signed, _signer, cancellationToken: ct).ConfigureAwait(false);
+    }
+
+    /// <summary>One request to <paramref name="baseUrl"/>.</summary>
+    private async Task<Answer> AttemptAsync(Spec spec, AdminHeaders? admin, string baseUrl, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(spec.Method, baseUrl + PathWithQuery(spec.Path, spec.Query));
+        foreach (var (name, value) in _headers) req.Headers.TryAddWithoutValidation(name, value);
+        if (admin is not null)
+        {
+            req.Headers.Add("X-Admin-Key-Id", admin.KeyId);
+            req.Headers.Add("X-Admin-Signature", admin.Signature);
+            req.Headers.Add("X-Admin-Timestamp", admin.Timestamp);
+            req.Headers.Add("X-Admin-Nonce", admin.Nonce);
+        }
+
+        if (spec.Body is not null)
+        {
+            var json = JsonSerializer.Serialize(spec.Body, Auth.SerializerOptions);
             req.Content = new StringContent(json, Encoding.UTF8, new MediaTypeHeaderValue("application/json"));
         }
 
-        if (adminHeaders is not null)
-        {
-            req.Headers.Add("X-Admin-Key-Id", adminHeaders.KeyId);
-            req.Headers.Add("X-Admin-Signature", adminHeaders.Signature);
-            req.Headers.Add("X-Admin-Timestamp", adminHeaders.Timestamp);
-            req.Headers.Add("X-Admin-Nonce", adminHeaders.Nonce);
-        }
+        // The body is read in full before SendAsync returns, so a dropped body is a NetworkException there.
+        using var resp = await SendOnceAsync(req, ct).ConfigureAwait(false);
+        // The bytes, so a body that is not UTF-8 is refused rather than repaired.
+        var bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        return new Answer((int)resp.StatusCode, bytes, RetryAfter(resp.Headers.RetryAfter));
+    }
 
-        HttpResponseMessage resp;
+    /// <summary>An unauthenticated GET to one endpoint: its status and body bytes.</summary>
+    private async Task<(int Status, byte[] Body)> GetAtAsync(string baseUrl, string path, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, baseUrl + path);
+        foreach (var (name, value) in _headers) req.Headers.TryAddWithoutValidation(name, value);
+        using var resp = await SendOnceAsync(req, ct).ConfigureAwait(false);
+        return ((int)resp.StatusCode, await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false));
+    }
+
+    private async Task<HttpResponseMessage> SendOnceAsync(HttpRequestMessage req, CancellationToken ct)
+    {
         try
         {
-            resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            return await _http.SendAsync(req, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw; // 1.8.0: the caller cancelled; not a network error
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (HttpRequestException e)
         {
-            throw new NetworkException(ex);
+            throw new NetworkException($"{req.Method} {req.RequestUri?.AbsolutePath} failed: {e.Message}", e, ConnectFailed(e));
         }
-
-        using (resp)
+        catch (TaskCanceledException e)
         {
-            // The bytes, so a body that is not UTF-8 is refused rather than repaired.
-            var bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode)
-                throw ErrorMapping.Parse((int)resp.StatusCode, Encoding.UTF8.GetString(bytes));
-            var raw = StrictJsonReader.DecodeUtf8(bytes);
-
-            if (typeof(T) == typeof(object) || string.IsNullOrWhiteSpace(raw))
-                return default!;
-
-            // v1.2.0: refuse JSON every implementation would not read alike.
-            StrictJsonReader.Check(raw);
-            return JsonSerializer.Deserialize<T>(raw, Auth.SerializerOptions)
-                ?? throw new InvalidOperationException("genesismesh: empty response");
+            throw new NetworkException(e); // the timeout: the request may have reached the NA
         }
     }
 
-    public void Dispose()
+    /// <summary>True when no connection was made, so the request was never sent.</summary>
+    private static bool ConnectFailed(HttpRequestException e) =>
+        e.HttpRequestError is HttpRequestError.ConnectionError or HttpRequestError.NameResolutionError
+        || e.InnerException is SocketException
+        {
+            SocketErrorCode: SocketError.ConnectionRefused or SocketError.HostNotFound or SocketError.HostUnreachable
+                or SocketError.NetworkUnreachable or SocketError.TryAgain,
+        };
+
+    /// <summary>The wait a <c>Retry-After</c> header names, as a delay or a date; null without one.</summary>
+    internal static TimeSpan? RetryAfter(RetryConditionHeaderValue? header, DateTimeOffset? now = null)
     {
-        _http.Dispose();
-        _audienceLock.Dispose();
+        if (header?.Delta is { } delta) return delta;
+        if (header?.Date is { } date)
+        {
+            var wait = date - (now ?? DateTimeOffset.UtcNow);
+            return wait > TimeSpan.Zero ? TimeSpan.FromSeconds(Math.Ceiling(wait.TotalSeconds)) : TimeSpan.Zero;
+        }
+        return null;
     }
+
+    private static string PathWithQuery(string path, IReadOnlyDictionary<string, string>? query) =>
+        query is null || query.Count == 0
+            ? path
+            : path + "?" + string.Join('&', query.Select(p => Uri.EscapeDataString(p.Key) + "=" + Uri.EscapeDataString(p.Value)));
+
+    private static T Parse<T>(Answer answer)
+    {
+        if (!answer.Ok)
+            throw ErrorMapping.Parse(answer.Status, Encoding.UTF8.GetString(answer.Body), answer.RetryAfter);
+        var raw = StrictJsonReader.DecodeUtf8(answer.Body);
+
+        if (typeof(T) == typeof(object) || string.IsNullOrWhiteSpace(raw))
+            return default!;
+
+        // v1.2.0: refuse JSON every implementation would not read alike.
+        StrictJsonReader.Check(raw);
+        return JsonSerializer.Deserialize<T>(raw, Auth.SerializerOptions)
+            ?? throw new InvalidOperationException("genesismesh: empty response");
+    }
+
+    private static string Text(Answer answer)
+    {
+        if (!answer.Ok)
+            throw ErrorMapping.Parse(answer.Status, Encoding.UTF8.GetString(answer.Body), answer.RetryAfter);
+        return StrictJsonReader.DecodeUtf8(answer.Body);
+    }
+
+    public void Dispose() => _http.Dispose();
 }
