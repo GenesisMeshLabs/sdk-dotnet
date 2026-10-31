@@ -592,6 +592,40 @@ From 1.8.0, `Revoke` refuses an ID that is not one path segment (empty, `.`,
 `..`, or containing `/`, `\`, `?`, `#`, `%` or a control character) before
 anything is signed or sent: it throws `ArgumentException`.
 
+#### Reading and verifying attestations
+
+From 1.9 the client reads attestations, the recognition policy and the NA's
+revocation feed, and asks the NA to verify an attestation:
+
+```csharp
+var record = await client.Attestation.Get(att.AttestationId);    // record.Status is what holds now
+var list = await admin.Attestation.List(new ListAttestationsParams { SubjectId = "node-xyz" });
+// list.Attestations, for a signed request; unsigned, list.Count only
+
+var policy = await client.Attestation.GetPolicy();                 // the NA's active recognition policy
+var check = await client.Attestation.Verify(new VerifyAttestationRequest
+{
+    Attestation = record.Attestation,
+    RecognitionPolicy = policy,                                    // null for the NA's active policy
+});
+// check.Accepted, check.Reason: invalid_signature, unknown_issuer, role_not_allowed, locally_revoked, ...
+
+var feed = await client.Attestation.RevocationFeed();              // the NA's signed feed of revoked attestations
+// feed.RevokedAttestationIds, feed.RevocationReasons
+```
+
+- `Get`, `GetPolicy`, `Verify` and `RevocationFeed` need no key. The signed
+  body of an attestation keeps the status it was issued with:
+  `AttestationRecord.Status` is what holds now, with `RevokedAt` and, from NA
+  1.8.0, the copy it re-issues or that re-issued it (`ReissuedFrom`,
+  `SupersededBy`).
+- `List` signs the request when the client has a key (read tier or above) and
+  gets the attestations. Without a key it gets only the count, and the NA
+  refuses a filter by subject or issuer (401 `admin_auth_failed`): it would
+  tell who is a member.
+- A typed attestation or policy passed back keeps what was signed and stored,
+  so `Verify` reads it as the NA does.
+
 ### Disclosure
 
 ```csharp

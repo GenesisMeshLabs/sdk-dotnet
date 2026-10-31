@@ -245,6 +245,13 @@ internal sealed class Transport : IDisposable
 
     internal Task<T> PublicGetAsync<T>(string path, CancellationToken ct = default) => PublicGetAsync<T>(path, retry: true, ct);
 
+    /// <summary>An unauthenticated GET with a query (1.9.0).</summary>
+    internal async Task<T> PublicGetAsync<T>(string path, IReadOnlyDictionary<string, string>? query, CancellationToken ct) =>
+        Parse<T>(await SendAsync(new Spec(HttpMethod.Get, path, query, null, Admin: false, Idempotent: true), ct).ConfigureAwait(false));
+
+    /// <summary>True when the client holds a signing key, so it can make admin requests (1.9.0).</summary>
+    internal bool CanSign => _signer is not null;
+
     /// <summary>An unauthenticated GET; without <paramref name="retry"/>, failover only, as a probe needs.</summary>
     internal async Task<T> PublicGetAsync<T>(string path, bool retry, CancellationToken ct) =>
         Parse<T>(await SendAsync(new Spec(HttpMethod.Get, path, null, null, Admin: false, Idempotent: true, NoRetry: !retry), ct)

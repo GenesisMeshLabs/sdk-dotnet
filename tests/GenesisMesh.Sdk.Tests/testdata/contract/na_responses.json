@@ -1,5 +1,5 @@
 {
-  "_comment": "Responses of a live Network Authority (1.0.2; the health, key history, policy and evaluation responses 1.8.1; the evidence store responses 1.8.1 with this SDK's execution evidence) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests). evidence_execution_record is the first stored record of evidence_search. evidence_executor_key_record is the first key of GET /admin/evidence/executor-keys and evidence_export_event the first line of GET /admin/evidence/export (1.8.1).",
+  "_comment": "Responses of a live Network Authority (1.0.2; the health, key history, policy and evaluation responses 1.8.1; the evidence store responses 1.8.1 with this SDK's execution evidence) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests). evidence_execution_record is the first stored record of evidence_search. evidence_executor_key_record is the first key of GET /admin/evidence/executor-keys and evidence_export_event the first line of GET /admin/evidence/export (1.8.1). attestation_count is GET /attestations unsigned (1.8.1).",
   "agreement_accept": {
     "agreed_terms": {
       "capabilities": [
@@ -221,6 +221,37 @@
     "agreement_id": "a1be997d-07cf-4ca8-8515-b2889b20b14f",
     "reason": "accepted"
   },
+  "attestation_count": {
+    "count": 3
+  },
+  "attestation_get": {
+    "attestation": {
+      "attestation_id": "ca39be8f-58a3-4d67-903f-a5c294295740",
+      "claims": {},
+      "expires_at": "2026-11-07T11:34:03.448059Z",
+      "issued_at": "2026-10-31T11:34:03.448059Z",
+      "issued_by": "na-contract",
+      "issuer_sovereign_id": "contract-na",
+      "roles": [
+        "role:client"
+      ],
+      "signatures": [
+        {
+          "key_id": "na-contract",
+          "sig": "27Gh0WJTdvBBi2hEK+bNV8OL3gjJAH8udtRPrt2UDPypNOE8qmUTzpaGuNbCS3PfvTtj2gY/ssQVF/jmzwNsBA=="
+        }
+      ],
+      "status": "active",
+      "subject_id": "vendor-feed",
+      "subject_public_key": null,
+      "valid_from": "2026-10-31T11:34:03.448059Z"
+    },
+    "reissued_from": null,
+    "revocation_reason": null,
+    "revoked_at": null,
+    "status": "active",
+    "superseded_by": null
+  },
   "attestation_issue": {
     "attestation_id": "91dd1726-3333-4639-b3bb-3ae119c76360",
     "claims": {},
@@ -241,6 +272,45 @@
     "subject_id": "vendor-contract",
     "subject_public_key": null,
     "valid_from": "2026-10-05T09:02:32.452474Z"
+  },
+  "attestation_list": {
+    "attestations": [
+      {
+        "attestation": {
+          "attestation_id": "ca39be8f-58a3-4d67-903f-a5c294295740",
+          "claims": {},
+          "expires_at": "2026-11-07T11:34:03.448059Z",
+          "issued_at": "2026-10-31T11:34:03.448059Z",
+          "issued_by": "na-contract",
+          "issuer_sovereign_id": "contract-na",
+          "roles": [
+            "role:client"
+          ],
+          "signatures": [
+            {
+              "key_id": "na-contract",
+              "sig": "27Gh0WJTdvBBi2hEK+bNV8OL3gjJAH8udtRPrt2UDPypNOE8qmUTzpaGuNbCS3PfvTtj2gY/ssQVF/jmzwNsBA=="
+            }
+          ],
+          "status": "active",
+          "subject_id": "vendor-feed",
+          "subject_public_key": null,
+          "valid_from": "2026-10-31T11:34:03.448059Z"
+        },
+        "reissued_from": null,
+        "revocation_reason": null,
+        "revoked_at": null,
+        "status": "active",
+        "superseded_by": null
+      }
+    ],
+    "count": 1
+  },
+  "attestation_verification": {
+    "accepted": true,
+    "attestation_id": "ca39be8f-58a3-4d67-903f-a5c294295740",
+    "issuer_sovereign_id": "contract-na",
+    "reason": "accepted"
   },
   "boundary_decide": {
     "agreement_id": "a1be997d-07cf-4ca8-8515-b2889b20b14f",
@@ -4704,5 +4774,42 @@
     "reason": "valid",
     "valid": true,
     "version": 1
+  },
+  "recognition_policy": {
+    "local_sovereign_id": "contract-na",
+    "recognized_issuers": [
+      {
+        "accepted_statuses": [
+          "active"
+        ],
+        "allowed_roles": [
+          "role:client"
+        ],
+        "public_keys": [
+          "oaTt9pIM6wdsUZUeCR0ObNTsZxfxMmYB99ioongw/H4="
+        ],
+        "sovereign_id": "contract-na"
+      }
+    ],
+    "revoked_attestation_ids": []
+  },
+  "revocation_feed": {
+    "feed_id": "1e387294-b1dd-4e2b-9787-989516d0e295",
+    "issued_at": "2026-10-31T11:34:03.534041Z",
+    "issued_by": "na-contract",
+    "issuer_sovereign_id": "contract-na",
+    "revocation_reasons": {
+      "ca39be8f-58a3-4d67-903f-a5c294295740": "offboarded"
+    },
+    "revoked_attestation_ids": [
+      "ca39be8f-58a3-4d67-903f-a5c294295740"
+    ],
+    "sequence": 1,
+    "signatures": [
+      {
+        "key_id": "na-contract",
+        "sig": "qACr/q103yn2eydHMuklTADFCaS4/kEw3oYBJ7VztxFxx8EcaIdMRmtcy/hUF/1WF7vxGiKNqRFSMq4Ds7qtCQ=="
+      }
+    ]
   }
 }
