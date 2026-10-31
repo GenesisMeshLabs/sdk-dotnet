@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using NSec.Cryptography;
 
 namespace GenesisMesh;
@@ -457,7 +456,7 @@ public static partial class OfflineVerifier
     /// Parses <c>gm.evidence.event</c> JSON Lines, such as an export (<see cref="EvidenceStoreClient.ExportText"/>) or a
     /// file a SIEM pipeline kept. Blank lines are skipped. Each line must be strict JSON and an event of schema version 1
     /// with exactly the envelope fields the reference writes, as every implementation reads it: an integer written as a
-    /// float (<c>7.0</c>) is refused. The payload is kept as received, for verification.
+    /// float (<c>7.0</c>), or beyond 2^53 - 1 either way, is refused. The payload is kept as received, for verification.
     /// </summary>
     /// <param name="text">The lines, separated by <c>\n</c> (a <c>\r</c> before it is ignored).</param>
     /// <exception cref="StrictJsonException">A line is not strict JSON.</exception>
@@ -519,26 +518,69 @@ public static partial class OfflineVerifier
             && (!Present("observation_sequence", out _) || NullOrInteger("observation_sequence", 1));
     }
 
-    /// <summary>The value of an integer written as one (not <c>7.0</c> or <c>7e0</c>), or null.</summary>
-    private static long? Integer(JsonElement value) =>
-        value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var n) ? n : null;
+    /// <summary>The largest integer every implementation reads exactly (JavaScript's safe integers).</summary>
+    private const long MaxSafeInteger = (1L << 53) - 1;
 
-    [GeneratedRegex(@"^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]{1,6})?(?:Z|[+-]([0-9]{2}):([0-9]{2}))?\z",
-        RegexOptions.CultureInvariant)]
-    private static partial Regex TimestampForm();
+    /// <summary>The value of an integer written as one (not <c>7.0</c> or <c>7e0</c>) and within 2^53 - 1, or null.</summary>
+    private static long? Integer(JsonElement value) =>
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var n) && n is >= -MaxSafeInteger and <= MaxSafeInteger
+            ? n
+            : null;
 
     /// <summary>
-    /// An ISO 8601 timestamp as the reference reads one: to the microsecond at most, a valid date and time, and UTC, an
-    /// offset under 24 hours, or none (UTC).
+    /// An ISO 8601 timestamp as the reference reads one: <c>YYYY-MM-DDTHH:MM:SS</c> with ASCII digits, up to six fraction
+    /// digits, and <c>Z</c>, an offset <c>+HH:MM</c> under 24 hours, or none (UTC); a valid date and time.
     /// </summary>
     private static bool IsTimestamp(string value)
     {
-        var m = TimestampForm().Match(value);
-        if (!m.Success) return false;
-        int Group(int i) => m.Groups[i].Success ? int.Parse(m.Groups[i].ValueSpan, CultureInfo.InvariantCulture) : 0;
-        int year = Group(1), month = Group(2), day = Group(3);
-        return year >= 1 && month is >= 1 and <= 12 && day >= 1 && day <= DateTime.DaysInMonth(year, month)
-            && Group(4) < 24 && Group(5) < 60 && Group(6) < 60 && Group(7) < 24 && Group(8) < 60;
+        var at = 0;
+        int Number(int digits)
+        {
+            if (at + digits > value.Length) return -1;
+            var n = 0;
+            for (var end = at + digits; at < end; at++)
+            {
+                if (value[at] is < '0' or > '9') return -1;
+                n = n * 10 + value[at] - '0';
+            }
+            return n;
+        }
+        bool Next(char c)
+        {
+            if (at >= value.Length || value[at] != c) return false;
+            at++;
+            return true;
+        }
+        var year = Number(4);
+        var month = Next('-') ? Number(2) : -1;
+        var day = Next('-') ? Number(2) : -1;
+        var hour = Next('T') ? Number(2) : -1;
+        var minute = Next(':') ? Number(2) : -1;
+        var second = Next(':') ? Number(2) : -1;
+        if (year < 1 || month is < 1 or > 12 || day < 1 || day > DateTime.DaysInMonth(year, month)
+            || hour is < 0 or > 23 || minute is < 0 or > 59 || second is < 0 or > 59)
+            return false;
+        if (Next('.'))
+        {
+            var digits = 0;
+            while (at < value.Length && value[at] is >= '0' and <= '9' && digits <= 6)
+            {
+                at++;
+                digits++;
+            }
+            if (digits is 0 or > 6) return false;
+        }
+        if (Next('+') || Next('-'))
+        {
+            var offsetHour = Number(2);
+            var offsetMinute = Next(':') ? Number(2) : -1;
+            if (offsetHour is < 0 or > 23 || offsetMinute is < 0 or > 59) return false;
+        }
+        else
+        {
+            Next('Z');
+        }
+        return at == value.Length;
     }
 
     // ── data usage ─────────────────────────────────────────────────────────

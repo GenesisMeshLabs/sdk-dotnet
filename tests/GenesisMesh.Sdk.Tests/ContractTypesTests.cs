@@ -47,8 +47,9 @@ public class ContractTypesTests
 
     /// <summary>
     /// Where <paramref name="raw"/> differs from <paramref name="type"/> at any depth (1.9.0): a key no model declares,
-    /// or a key a model requires that was not sent. Models are followed through their properties, lists and
-    /// dictionaries; a <see cref="JsonElement"/> is not looked into.
+    /// or a key a model requires that was not sent. A model requires a key it always writes: one without a
+    /// <see cref="JsonIgnoreAttribute"/>, or written even when null (<see cref="JsonIgnoreCondition.Never"/>). Models are
+    /// followed through their properties, lists and dictionaries; a <see cref="JsonElement"/> is not looked into.
     /// </summary>
     internal static List<string> Unmodeled(JsonNode? raw, Type type, string path = "$")
     {
@@ -82,7 +83,7 @@ public class ContractTypesTests
             var name = prop.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name;
             var ignore = prop.GetCustomAttribute<JsonIgnoreAttribute>();
             if (name is null || ignore?.Condition == JsonIgnoreCondition.Always) continue;
-            declared[name] = (prop.PropertyType, ignore is null);
+            declared[name] = (prop.PropertyType, ignore is null || ignore.Condition == JsonIgnoreCondition.Never);
         }
         foreach (var (key, value) in obj)
         {

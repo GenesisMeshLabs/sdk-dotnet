@@ -8,7 +8,9 @@ namespace GenesisMesh;
 /// <summary>
 /// The NA's evidence store (v0.59; 1.9.0 in this SDK): a controller submits the execution evidence it signed and reads
 /// where each resource's chain ends; an operator searches, verifies and exports what is stored. Reads need an operator
-/// key of the read tier or above; registering and retiring keys and applying retention need a privileged one.
+/// key of the read tier or above; registering and retiring keys and applying retention need a privileged one. With the
+/// store off, every call but <see cref="Status"/> is refused with 404 <c>evidence_store_disabled</c>
+/// (<see cref="NotFoundException"/>).
 /// </summary>
 public sealed class EvidenceStoreClient
 {
@@ -326,6 +328,10 @@ public sealed class EvidenceStoreClient
     /// the private key; the platform team registers the public key, optionally limited to a resource prefix.
     /// POST /admin/evidence/executor-keys
     /// </summary>
+    /// <remarks>
+    /// Give the key an ID that is one path segment: one holding '/', '\', '?', '#', '%' or a control character cannot be
+    /// retired with <see cref="RetireExecutorKey"/>.
+    /// </remarks>
     /// <exception cref="ConflictException">The key ID is already registered (<c>executor_key_exists</c>).</exception>
     public async Task<ExecutorKeyState> RegisterExecutorKey(RegisterExecutorKeyRequest request, CancellationToken ct = default)
     {
@@ -356,7 +362,7 @@ public sealed class EvidenceStoreClient
     /// </summary>
     /// <exception cref="NotFoundException">
     /// The store holds no record of the resource (<c>resource_not_found</c>), also when retention removed them all;
-    /// <see cref="ResourceHead"/> still reads where its chain ends.
+    /// <see cref="ResourceHead"/> still reads where its chain ends. Or the store is off (<c>evidence_store_disabled</c>).
     /// </exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="resourceId"/> cannot be sent as a path (see <see cref="ResourceHead"/>): nothing is sent.
@@ -371,14 +377,17 @@ public sealed class EvidenceStoreClient
     /// (<see cref="GenesisMesh.VendorHistory.Truncated"/>).
     /// GET /admin/evidence/vendors/&lt;vendor_id&gt;
     /// </summary>
-    /// <exception cref="NotFoundException">The store holds no decision for the vendor (<c>vendor_not_found</c>).</exception>
+    /// <exception cref="NotFoundException">
+    /// The store holds no decision for the vendor (<c>vendor_not_found</c>), or the store is off
+    /// (<c>evidence_store_disabled</c>).
+    /// </exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="vendorId"/> is not one path segment: it is empty, a dot segment, or holds '/', '\', '?', '#', '%'
-    /// or a control character. Nothing is sent.
+    /// <paramref name="vendorId"/> is not one path segment: it is empty, a dot segment, holds '/', '\', '?', '#', '%' or
+    /// a control character, or starts or ends with white space. Nothing is sent.
     /// </exception>
     public async Task<VendorHistory> VendorHistory(string vendorId, CancellationToken ct = default) =>
         await _t.AdminGetAsync<VendorHistory>(
-            "/admin/evidence/vendors/" + Transport.PathSegment(vendorId, nameof(vendorId)), null, ct).ConfigureAwait(false);
+            "/admin/evidence/vendors/" + Transport.LastPathSegment(vendorId, nameof(vendorId)), null, ct).ConfigureAwait(false);
 
     /// <summary>
     /// One page of the store as <c>gm.evidence.event</c> JSON Lines, unparsed: what a SIEM pipeline keeps. Read it with
@@ -452,7 +461,10 @@ public sealed class EvidenceStoreClient
     /// The key is retired already (<c>executor_key_retired</c>), or (v1.7.0) it is an edge node's key, retired by
     /// revoking the node (<c>executor_key_is_edge_node</c>).
     /// </exception>
-    /// <exception cref="ArgumentException"><paramref name="keyId"/> is not one path segment (see <see cref="VendorHistory"/>): nothing is sent.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="keyId"/> is not one path segment: it is empty, a dot segment, or holds '/', '\', '?', '#', '%' or a
+    /// control character. Nothing is sent.
+    /// </exception>
     public async Task<ExecutorKeyState> RetireExecutorKey(string keyId, CancellationToken ct = default) =>
         await _t.AdminPostAsync<ExecutorKeyState>(
             $"/admin/evidence/executor-keys/{Transport.PathSegment(keyId, nameof(keyId))}/retire",
@@ -471,11 +483,14 @@ public sealed class EvidenceStoreClient
     /// <param name="ct">Cancels the request.</param>
     /// <exception cref="ArgumentException">Neither <paramref name="olderThanDays"/> nor <paramref name="throughSequence"/> is given: nothing is sent.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A value given is less than 1: nothing is sent.</exception>
-    /// <exception cref="ValidationException">
+    /// <exception cref="BadRequestException">
     /// The NA refused the request (<c>invalid_retention</c>): for example, with out-of-band records, an
     /// <paramref name="olderThanDays"/> within the observation backlog.
     /// </exception>
-    /// <exception cref="ConflictException">Retention is running on another instance (<c>retention_in_progress</c>).</exception>
+    /// <exception cref="ConflictException">
+    /// Retention is running on another instance (<c>retention_in_progress</c>), or the NA cannot sign over the entries it
+    /// would remove, which do not verify, and removed nothing (<c>evidence_retention_refused</c>).
+    /// </exception>
     public async Task<RetentionResult> ApplyRetention(int? olderThanDays, long? throughSequence = null, CancellationToken ct = default)
     {
         if (olderThanDays is null && throughSequence is null)

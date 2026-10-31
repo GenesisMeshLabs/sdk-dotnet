@@ -73,6 +73,11 @@ public class ExportLinesTests
     [InlineData("entry.entry_kind", "null")]
     [InlineData("entry.capability", "7")]
     [InlineData("entry.exec_sequence_no", "1.0")]
+    [InlineData("entry.store_sequence", "9007199254740992")]
+    [InlineData("entry.store_sequence", "9223372036854775807")]
+    [InlineData("entry.exec_sequence_no", "-9007199254740992")]
+    [InlineData("entry.resource_sequence", "9007199254740992")]
+    [InlineData("entry.observation_sequence", "9007199254740992")]
     [InlineData("entry.resource_sequence", "\"2\"")]
     [InlineData("entry.observation_sequence", "0")]
     [InlineData("entry.record_id", "7")]
@@ -83,6 +88,18 @@ public class ExportLinesTests
     [InlineData("entry.recorded_at", "\"2026-10-31T08:00:00+24:00\"")]
     [InlineData("entry.recorded_at", "\"٢٠٢٦-10-31T08:00:00Z\"")]
     [InlineData("entry.recorded_at", "\"2026-10-31T08:00:00Z\\n\"")]
+    [InlineData("entry.recorded_at", "\"2026-10-31T08:00:00z\"")]
+    [InlineData("entry.recorded_at", "\"2026-10-31T08:00Z\"")]
+    [InlineData("entry.recorded_at", "\"2026-10-31T08:00:00.Z\"")]
+    [InlineData("entry.recorded_at", "\"2026-10-31T08:00:00+01\"")]
+    [InlineData("entry.recorded_at", "\"2026-10-31T08:00:00+0100\"")]
+    [InlineData("entry.recorded_at", "\"2026-10-31T08:00:00-01:60\"")]
+    [InlineData("entry.recorded_at", "\"2026-10-31T08:00:00ZZ\"")]
+    [InlineData("entry.recorded_at", "\"0000-10-31T08:00:00Z\"")]
+    [InlineData("entry.recorded_at", "\"2026-13-01T08:00:00Z\"")]
+    [InlineData("entry.recorded_at", "\"2026-10-31T08:60:00Z\"")]
+    [InlineData("entry.recorded_at", "\"2026-10-31T08:00:60Z\"")]
+    [InlineData("entry.recorded_at", "\"2026\"")]
     public void RefusesALineThatIsNotAnEventOfSchemaVersion1(string path, string? json)
     {
         var text = Lines()[0] + "\n\n" + Changed(path, json);
@@ -95,10 +112,13 @@ public class ExportLinesTests
     [InlineData("entry.recorded_at", "\"2026-10-31T08:00:00\"")]
     [InlineData("entry.recorded_at", "\"2026-10-31T08:00:00.5+23:59\"")]
     [InlineData("entry.recorded_at", "\"2024-02-29T08:00:00-05:00\"")]
+    [InlineData("entry.recorded_at", "\"2026-10-31T23:59:59.123456Z\"")]
     [InlineData("entry.record_id", "null")]
     [InlineData("entry.record_id", "\"rec-1\"")]
     [InlineData("entry.observation_sequence", "3")]
     [InlineData("entry.exec_sequence_no", "-1")]
+    [InlineData("entry.store_sequence", "9007199254740991")]
+    [InlineData("entry.exec_sequence_no", "-9007199254740991")]
     [InlineData("payload", "{}")]
     public void ReadsEveryFormTheReferenceReads(string path, string json) =>
         Assert.Single(OfflineVerifier.ParseExportLines(Changed(path, json)));
@@ -110,5 +130,19 @@ public class ExportLinesTests
         var duplicated = "{\"schema\":\"gm.evidence.event\"," + line[1..];
         Assert.Equal("duplicate_key", Assert.Throws<StrictJsonException>(() => OfflineVerifier.ParseExportLines(duplicated)).Reason);
         Assert.ThrowsAny<JsonException>(() => OfflineVerifier.ParseExportLines(line + "x"));
+    }
+
+    [Theory]
+    [InlineData("\u00a0")]
+    [InlineData("\f")]
+    [InlineData("\v")]
+    [InlineData("\u2028")]
+    [InlineData("\ufeff")]
+    public void TrimsOnlyJsonWhiteSpace(string space)
+    {
+        // Every implementation trims a line of JSON white space only; other spaces are no JSON.
+        var line = Lines()[0];
+        Assert.ThrowsAny<JsonException>(() => OfflineVerifier.ParseExportLines(space + line));
+        Assert.ThrowsAny<JsonException>(() => OfflineVerifier.ParseExportLines(line + space));
     }
 }

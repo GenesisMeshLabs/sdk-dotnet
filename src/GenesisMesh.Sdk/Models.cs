@@ -2305,7 +2305,7 @@ public sealed class EvidenceStoreStatus
     /// null before the first retention. Read the checkpoint itself with <see cref="EvidenceStoreClient.LatestCheckpoint"/>.
     /// </summary>
     [JsonPropertyName("retention_checkpoint")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public long? RetentionCheckpoint { get; set; }
 
     /// <summary>v1.2.0: the latest store anchor; null before the first.</summary>
@@ -2689,7 +2689,7 @@ public sealed class RetentionResult
 
     /// <summary>The checkpoint the NA signed over what it removed; null when it removed nothing.</summary>
     [JsonPropertyName("checkpoint")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public RetentionCheckpoint? Checkpoint { get; set; }
 
     /// <summary>v1.3.1: why retention stopped short of what was asked, when it did; null otherwise.</summary>

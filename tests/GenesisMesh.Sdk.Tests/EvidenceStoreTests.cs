@@ -428,7 +428,12 @@ public class EvidenceStoreTests
 
         await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.VendorHistory("vendor/1"));
         await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.VendorHistory("vendor%2F1"));
+        // The URI drops white space at the end of the path: the request would sign one path and send another.
+        await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.VendorHistory("vendor-1 "));
+        await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.VendorHistory(" vendor-1"));
         Assert.Single(sent);
+        await gm.EvidenceStore.VendorHistory("vendor.1.");
+        Assert.Equal("/admin/evidence/vendors/vendor.1.", sent[1].Path);
         using var none = Client([], _ => Error(404, "vendor_not_found"));
         Assert.Equal("vendor_not_found", (await Assert.ThrowsAsync<NotFoundException>(() => none.EvidenceStore.VendorHistory("v"))).Code);
     }
@@ -615,6 +620,106 @@ public class EvidenceStoreTests
         signed["observation_heads"] = new JsonObject { ["kv:vault/a"] = 2 };
         typed = JsonSerializer.Deserialize<RetentionCheckpoint>(signed.ToJsonString(), Auth.SerializerOptions)!;
         Assert.True(JsonNode.DeepEquals(signed, JsonNode.Parse(JsonSerializer.Serialize(typed, Auth.SerializerOptions))));
+    }
+
+    [Fact]
+    public async Task LatestCheckpoint_FollowsThePages()
+    {
+        var later = JsonNode.Parse(Checkpoint())!.AsObject();
+        later["checkpoint_id"] = "later";
+        var sent = new List<Sent>();
+        using var gm = Client(sent, req => Json(200, req.RequestUri!.Query.Contains("after_sequence=0")
+            ? Page(3, (3, "retention_checkpoint", Checkpoint()))
+            : Page(null, (9, "retention_checkpoint", later.ToJsonString()))));
+        Assert.Equal("later", (await gm.EvidenceStore.LatestCheckpoint())!.CheckpointId);
+        Assert.Equal(2, sent.Count);
+    }
+
+    /// <summary>Each 1.9.0 store call, as an operator makes it.</summary>
+    public static TheoryData<string> StoreCalls() => new(StoreCall.Keys);
+
+    private static readonly Dictionary<string, Func<GenesisMeshClient, Task>> StoreCall = new()
+    {
+        ["Status"] = gm => gm.EvidenceStore.Status(),
+        ["Verify"] = gm => gm.EvidenceStore.Verify(),
+        ["ResourceHistory"] = gm => gm.EvidenceStore.ResourceHistory("kv:vault/secret"),
+        ["VendorHistory"] = gm => gm.EvidenceStore.VendorHistory("vendor-1"),
+        ["ExportText"] = gm => gm.EvidenceStore.ExportText(),
+        ["Export"] = gm => gm.EvidenceStore.Export(),
+        ["ExportAll"] = async gm =>
+        {
+            await foreach (var _ in gm.EvidenceStore.ExportAll()) { }
+        },
+        ["ListExecutorKeys"] = gm => gm.EvidenceStore.ListExecutorKeys(),
+        ["RetireExecutorKey"] = gm => gm.EvidenceStore.RetireExecutorKey("portal-executor"),
+        ["ApplyRetention"] = gm => gm.EvidenceStore.ApplyRetention(30),
+        ["LatestCheckpoint"] = gm => gm.EvidenceStore.LatestCheckpoint(),
+    };
+
+    [Theory]
+    [MemberData(nameof(StoreCalls))]
+    public async Task EveryStoreCall_NeedsASigningKey(string call)
+    {
+        var sent = new List<Sent>();
+        using var gm = new GenesisMeshClient(new ClientOptions
+        {
+            BaseUrl = "http://localhost",
+            HttpHandler = new FuncHandler(req =>
+            {
+                sent.Add(new Sent(req.Method.Method, req.RequestUri!.PathAndQuery, null, false));
+                return Json(200, "{}");
+            }),
+        });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => StoreCall[call](gm));
+        Assert.Empty(sent);
+    }
+
+    [Theory]
+    [MemberData(nameof(StoreCalls))]
+    public async Task EveryStoreCall_ThrowsTheNAsRefusal(string call)
+    {
+        // With the store off, every call but Status gets 404 evidence_store_disabled; Status, a 403.
+        var (status, code) = call == "Status" ? (403, "insufficient_operator_tier") : (404, "evidence_store_disabled");
+        using var gm = Client([], _ => Error(status, code));
+        var refused = await Assert.ThrowsAnyAsync<GenesisMeshException>(() => StoreCall[call](gm));
+        Assert.Equal((status, code), (refused.Status, refused.Code));
+        Assert.IsType(call == "Status" ? typeof(ForbiddenException) : typeof(NotFoundException), refused);
+    }
+
+    [Fact]
+    public async Task ApplyRetention_ThrowsTheNAsRefusals()
+    {
+        using var invalid = Client([], _ => Error(400, "invalid_retention"));
+        Assert.Equal("invalid_retention", (await Assert.ThrowsAsync<BadRequestException>(() => invalid.EvidenceStore.ApplyRetention(1))).Code);
+        using var refused = Client([], _ => Error(409, "evidence_retention_refused"));
+        Assert.Equal("evidence_retention_refused",
+            (await Assert.ThrowsAsync<ConflictException>(() => refused.EvidenceStore.ApplyRetention(1))).Code);
+    }
+
+    [Theory]
+    [InlineData("RetireExecutorKey", 1)]
+    [InlineData("ApplyRetention", 1)]
+    [InlineData("Status", 3)]
+    [InlineData("ExportText", 3)]
+    public async Task OnlyReadsAreSentAgain(string call, int attempts)
+    {
+        // A retirement or a retention run changes the store: an answer lost on the way may mean it happened.
+        var sent = 0;
+        using var gm = new GenesisMeshClient(new ClientOptions
+        {
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
+            KeyId = "ops",
+            Audience = "TEST",
+            Retry = new RetrySettings { Attempts = 2, BaseDelay = TimeSpan.Zero },
+            HttpHandler = new FuncHandler(_ =>
+            {
+                sent++;
+                return Error(503, "unavailable");
+            }),
+        });
+        await Assert.ThrowsAsync<ServerException>(() => StoreCall[call](gm));
+        Assert.Equal(attempts, sent);
     }
 
     [Fact]
