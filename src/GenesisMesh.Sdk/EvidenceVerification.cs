@@ -28,16 +28,19 @@ public sealed class EvidenceVerifyOptions
     public IReadOnlyList<ExecutorKeyRecord> ExecutorKeys { get; init; } = [];
 
     /// <summary>
-    /// True (the default) for an unbroken run of the store: an export from entry 1, or from right after a retention
-    /// checkpoint. False for a history (<see cref="ResourceHistory"/>, <see cref="VendorHistory"/>), whose store links
-    /// are checked only between adjacent positions.
+    /// True (the default) for an unbroken run of the store: an export, whole or from a position
+    /// (<see cref="EvidenceStoreClient.ExportAll"/> with a cursor). False for a history (<see cref="ResourceHistory"/>,
+    /// <see cref="VendorHistory"/>), whose store links are checked only between adjacent positions and whose record times
+    /// are not compared. A run that starts at neither entry 1 nor right after the <see cref="Checkpoint"/> takes the first
+    /// record it holds of a resource as that chain's start.
     /// </summary>
     public bool Contiguous { get; init; } = true;
 
     /// <summary>
     /// The retention checkpoint JSON as received, for a run that starts after the entries it removed: the run's first
-    /// entry continues from its last removed entry, and each resource chain from its head. It must be signed by the NA
-    /// (<c>invalid_signature</c>, and nothing else is checked).
+    /// entry continues from its last removed entry, and each resource chain from its head. It must be a checkpoint signed
+    /// by the NA (with <see cref="KeyHistory"/>, by the key valid at its <c>created_at</c>; <c>invalid_signature</c>), with
+    /// no field this SDK does not know (<c>unknown_field</c>); otherwise nothing of the run is checked.
     /// </summary>
     public string? Checkpoint { get; init; }
 }
@@ -51,8 +54,8 @@ public static partial class OfflineVerifier
     /// </summary>
     internal static readonly string[] VerifiedEntryKinds = ["decision", "justification", "execution", "retention_checkpoint"];
 
-    /// <summary>How far before an earlier entry of a run an entry may be recorded (v1.5.0, the reference's tolerance).</summary>
-    private static readonly TimeSpan RecordTimeTolerance = TimeSpan.FromSeconds(300);
+    /// <summary>How far before an earlier entry of a run an entry may be recorded, in microseconds (v1.5.0, the reference's tolerance).</summary>
+    private const long RecordTimeTolerance = 300_000_000;
 
     /// <summary>v1.5.0: the kinds retention appends again after its checkpoint, each with the time it was first recorded.</summary>
     private static readonly HashSet<string> CarriedKinds = new(StringComparer.Ordinal) { "registry", "key_succession", "archive" };
@@ -79,8 +82,8 @@ public static partial class OfflineVerifier
     /// and its payload's, the store chain, every signature (the NA's on decisions, justification proofs and retention
     /// checkpoints, the executor's on execution evidence), each execution record against its decision, and the decision
     /// and resource chains. Pass an export (<see cref="ParseExportLines(string)"/>, <see cref="EvidenceStoreClient.ExportAll"/>)
-    /// or, with <see cref="EvidenceVerifyOptions.Contiguous"/> false, a history. Nothing is thrown for a bad entry: each
-    /// finding is a failure, with the reason codes every implementation uses.
+    /// or, with <see cref="EvidenceVerifyOptions.Contiguous"/> false, a history. Nothing is thrown for a bad entry, or an
+    /// event built by hand that is not one: each finding is a failure, with the reason codes every implementation uses.
     /// </summary>
     /// <remarks>
     /// This SDK verifies the kinds a governed store holds: <c>decision</c>, <c>justification</c>, <c>execution</c> and
@@ -89,14 +92,25 @@ public static partial class OfflineVerifier
     /// </remarks>
     /// <param name="events">The entries, in store order.</param>
     /// <param name="options">The keys, and what the run is.</param>
-    /// <exception cref="ArgumentException">Both <see cref="EvidenceVerifyOptions.NAPublicKeys"/> and <see cref="EvidenceVerifyOptions.KeyHistory"/> are given.</exception>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="events"/>, <paramref name="options"/>, its <see cref="EvidenceVerifyOptions.NAPublicKeys"/> or its
+    /// <see cref="EvidenceVerifyOptions.ExecutorKeys"/> is null.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// Both <see cref="EvidenceVerifyOptions.NAPublicKeys"/> and <see cref="EvidenceVerifyOptions.KeyHistory"/> are given, or
+    /// <see cref="EvidenceVerifyOptions.ExecutorKeys"/> holds a null.
+    /// </exception>
     /// <exception cref="StrictJsonException"><see cref="EvidenceVerifyOptions.Checkpoint"/> is not strict JSON.</exception>
     public static EvidenceStoreVerification VerifyEvidenceEvents(IEnumerable<EvidenceEvent> events, EvidenceVerifyOptions options)
     {
         ArgumentNullException.ThrowIfNull(events);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options.NAPublicKeys, nameof(options));
+        ArgumentNullException.ThrowIfNull(options.ExecutorKeys, nameof(options));
         if (options.KeyHistory is not null && options.NAPublicKeys.Count > 0)
             throw new ArgumentException("pass NAPublicKeys or KeyHistory, not both", nameof(options));
+        if (options.ExecutorKeys.Any(k => k is null))
+            throw new ArgumentException("ExecutorKeys holds a null", nameof(options));
         using var checkpoint = options.Checkpoint is { } json ? StrictJsonReader.Parse(json) : null;
         var run = new EventRun(options, checkpoint?.RootElement);
         if (run.CheckpointAccepted())
@@ -125,7 +139,7 @@ public static partial class OfflineVerifier
     {
         ArgumentNullException.ThrowIfNull(keyHistory);
         return SignedRecord("RetentionCheckpoint", checkpointJson, c =>
-            Str(c, "created_at") is { } created && TryReadTimestamp(created, out var at) ? keyHistory.KeysAt(at) : []);
+            Str(c, "created_at") is { } created && TryReadTimestamp(created, out var at) ? keyHistory.KeysAt(Instant(at)) : []);
     }
 
     /// <summary><c>EvidenceStoreEntry.digest()</c>: SHA-256 hex of the envelope's canonical form.</summary>
@@ -157,8 +171,8 @@ public static partial class OfflineVerifier
         private JsonElement? _previous;
         private long _previousSequence;
         private string _previousKind = "";
-        /// <summary>v1.5.0: the latest <c>recorded_at</c> of the run so far.</summary>
-        private DateTimeOffset? _clock;
+        /// <summary>v1.5.0: the latest <c>recorded_at</c> of the run so far (<see cref="TryReadTimestamp"/>).</summary>
+        private long? _clock;
         /// <summary>v1.5.0: whether the entries just visited are a block retention carried forward.</summary>
         private bool _carrying;
 
@@ -172,13 +186,9 @@ public static partial class OfflineVerifier
             foreach (var key in options.ExecutorKeys) _executorKeys[key.KeyId] = key;
             _contiguous = options.Contiguous;
             _checkpoint = checkpoint?.Clone();
-            if (_checkpoint is { } cp && IsObject(cp, "resource_heads", out var heads))
-                foreach (var head in heads.EnumerateObject())
-                    if (PayloadInteger(head.Value, "resource_sequence") is { } sequence && Str(head.Value, "record_digest") is { } digest)
-                        _resourceHeads[head.Name] = (sequence, digest);
         }
 
-        private IReadOnlyList<string> KeysAt(DateTimeOffset at) => _history?.KeysAt(at) ?? _naKeys;
+        private IReadOnlyList<string> KeysAt(long at) => _history?.KeysAt(Instant(at)) ?? _naKeys;
 
         private void Fail(long? sequence, string reason, string detail = "")
         {
@@ -205,6 +215,9 @@ public static partial class OfflineVerifier
                 Fail(null, "unknown_field", string.Join(", ", unknown));
                 return false;
             }
+            // The chains it removed records from continue from its heads.
+            foreach (var head in cp.GetProperty("resource_heads").EnumerateObject())
+                _resourceHeads[head.Name] = (PayloadInteger(head.Value, "resource_sequence")!.Value, Str(head.Value, "record_digest")!);
             return true;
         }
 
@@ -222,7 +235,7 @@ public static partial class OfflineVerifier
             // v1.5.0: in a contiguous run an entry is not recorded more than the tolerance before an earlier one
             // (carried entries keep their first time), and an NA key must also be valid at the latest earlier time.
             TryReadTimestamp(e.Entry.RecordedAt, out var recordedAt);
-            DateTimeOffset? notBefore = null;
+            long? notBefore = null;
             if (_contiguous)
             {
                 var adjacent = _previous is not null && seq == _previousSequence + 1;
@@ -231,7 +244,7 @@ public static partial class OfflineVerifier
                 {
                     if (_clock is { } clock && recordedAt < clock - RecordTimeTolerance)
                         Fail(seq, "recorded_at_out_of_order",
-                            $"recorded at {Canonical.Timestamp(recordedAt)}, after an entry recorded at {Canonical.Timestamp(clock)}");
+                            $"recorded at {Canonical.Timestamp(Instant(recordedAt))}, after an entry recorded at {Canonical.Timestamp(Instant(clock))}");
                     notBefore = _clock;
                     if (_clock is null || recordedAt > _clock) _clock = recordedAt;
                 }
@@ -294,6 +307,15 @@ public static partial class OfflineVerifier
             if (e?.Entry is null || e.Schema != "gm.evidence.event" || e.SchemaVersion != 1 || e.EntryDigest is null
                 || e.Payload.ValueKind != JsonValueKind.Object)
                 return null;
+            // A payload built by hand from JSON that is not strict (a duplicate key, 1e400, a lone surrogate) is no record.
+            try
+            {
+                StrictJsonReader.Check(e.Payload.GetRawText());
+            }
+            catch (StrictJsonException)
+            {
+                return null;
+            }
             var entry = JsonSerializer.SerializeToElement(e.Entry);
             return IsEntry(entry) ? entry : null;
         }
@@ -345,7 +367,7 @@ public static partial class OfflineVerifier
         };
 
         /// <summary>One entry's record, checked once its envelope and payload are.</summary>
-        private sealed class RecordCheck(EventRun run, long seq, string kind, DateTimeOffset recordedAt, DateTimeOffset? notBefore,
+        private sealed class RecordCheck(EventRun run, long seq, string kind, long recordedAt, long? notBefore,
             JsonElement payload, JsonElement record)
         {
             private EvidenceStoreVerification Result => run.Result;
@@ -417,7 +439,7 @@ public static partial class OfflineVerifier
                 var signer = valid?.FirstOrDefault(k => SignedAsReceived("BoundaryDecision", record, [k]));
                 if (signer is not null && run._history is { } history
                     && TryReadTimestamp(Str(record, "decision_valid_until")!, out var validUntil)
-                    && history.DecisionOutlivesKey(signer, validUntil))
+                    && history.DecisionOutlivesKey(signer, Instant(validUntil)))
                     Fail("decision_outlives_key", decisionId);
                 Result.Decisions++;
                 run._decisions[decisionId] = record.Clone();
@@ -481,8 +503,9 @@ public static partial class OfflineVerifier
                 var authentic = Result.Failures.Count == failures;
                 // v1.3.1: a checkpoint removed as many entries as positions, counted from the checkpoint before it when
                 // the run holds that one, or from entry 1 when there is none.
+                // An empty ID names no checkpoint, as TypeScript reads it.
                 var previous = Str(payload, "previous_checkpoint_id");
-                var hasBefore = previous is not null && run._checkpoints.ContainsKey(previous);
+                var hasBefore = previous is { Length: > 0 } && run._checkpoints.ContainsKey(previous);
                 if (previous is null || hasBefore)
                 {
                     var start = hasBefore ? PayloadInteger(run._checkpoints[previous!], "removed_through_sequence") ?? 0 : 0;

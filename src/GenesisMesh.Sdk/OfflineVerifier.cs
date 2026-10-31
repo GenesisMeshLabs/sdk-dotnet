@@ -534,12 +534,13 @@ public static partial class OfflineVerifier
     private static bool IsTimestamp(string value) => TryReadTimestamp(value, out _);
 
     /// <summary>
-    /// As <see cref="IsTimestamp"/>, with the instant it names, in UTC. The offset is applied here: the reference
-    /// reads offsets of 14 hours and more, which <see cref="DateTimeOffset"/> cannot hold.
+    /// As <see cref="IsTimestamp"/>, with the instant it names: microseconds from 0001-01-01T00:00:00Z, as TypeScript
+    /// compares times. The offset is applied here, so an instant may fall before the year 1 or after 9999 in UTC; the
+    /// reference reads offsets of 14 hours and more, which <see cref="DateTimeOffset"/> cannot hold.
     /// </summary>
-    private static bool TryReadTimestamp(string value, out DateTimeOffset instant)
+    private static bool TryReadTimestamp(string value, out long instant)
     {
-        instant = default;
+        instant = 0;
         var at = 0;
         int Number(int digits)
         {
@@ -594,12 +595,14 @@ public static partial class OfflineVerifier
             Next('Z');
         }
         if (at != value.Length) return false;
-        var local = new DateTime(year, month, day, hour, minute, second, DateTimeKind.Unspecified).AddTicks(micros * 10);
-        // An instant before the year 1 or after 9999 in UTC is read at the end of the range.
-        var utcTicks = Math.Clamp(local.Ticks - offset.Ticks, DateTime.MinValue.Ticks, DateTime.MaxValue.Ticks);
-        instant = new DateTimeOffset(utcTicks, TimeSpan.Zero);
+        instant = new DateTime(year, month, day, hour, minute, second, DateTimeKind.Unspecified).Ticks / 10 + micros
+            - offset.Ticks / 10;
         return true;
     }
+
+    /// <summary>An instant of <see cref="TryReadTimestamp"/> as a time, at the end of the range when outside it.</summary>
+    private static DateTimeOffset Instant(long micros) =>
+        new(Math.Clamp(micros, DateTime.MinValue.Ticks / 10, DateTime.MaxValue.Ticks / 10) * 10, TimeSpan.Zero);
 
     // ── data usage ─────────────────────────────────────────────────────────
 
