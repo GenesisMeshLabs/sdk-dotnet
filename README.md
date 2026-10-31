@@ -21,10 +21,13 @@ and vendor histories, the export, executor keys and retention (see
 [EvidenceStore](#evidencestore)). It runs governed actions with the evidence
 outbox and reconciliation (see [Governed actions](#governed-actions)), and
 verifies an export offline (see [Verifying an export](#verifying-an-export)).
-Not yet here: verifying the store's 1.3.0 and later entry kinds offline, store
-anchors, none of the 1.3.0 changes outside the controlled path (observations,
-break-glass records, the record outbox), and none of the 1.4.0 remediation and
-review APIs (remediation records, the due queue, reviews, urgent actions).
+It signs observations and break-glass records, the changes made outside the
+governed path, submits and judges them, and reads each resource's changes (see
+[Changes outside the governed path](#changes-outside-the-governed-path)).
+Not yet here: verifying the store's 1.3.0 and later entry kinds in an export,
+store anchors, the record outbox, break-glass in governed actions, and none of
+the 1.4.0 remediation and review APIs (remediation records, the due queue,
+reviews, urgent actions).
 Those live in the [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript)
 and the [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust). The embedded
 field registry lists their records.
