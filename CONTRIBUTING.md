@@ -40,11 +40,13 @@ If the break is intended, see "A breaking change" in
 
 `dotnet test` runs the tests once per target framework of the test project.
 
-### Live contract test
+### Live tests
 
 `LiveContractTests` calls every client method against a real, disposable
 Network Authority (`scripts/contract_na.py`) and compares each typed result
-with the JSON the NA sent. It needs a Python with the genesis-mesh core
+with the JSON the NA sent. `PartnerLifecycleTests` runs a partner credential
+controller's lifecycle on a standard key, against an NA started with
+`--policy-enforcement required`. They need a Python with the genesis-mesh core
 installed:
 
 ```sh
@@ -52,7 +54,7 @@ pip install -e ../genesismesh
 GM_E2E_PYTHON=python dotnet test -c Release --filter "Category=Live"
 ```
 
-Without `GM_E2E_PYTHON` the test returns at once. CI sets
+Without `GM_E2E_PYTHON` the tests return at once. CI sets
 `GM_E2E_REQUIRED=1`, and checks the TRX results (`scripts/check_trx.py`), so
 there a run that checked nothing fails instead of passing.
 

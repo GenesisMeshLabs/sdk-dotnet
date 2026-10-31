@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -11,7 +10,7 @@ namespace GenesisMesh.Tests;
 /// <summary>
 /// Live contract check: every client method against a running Network Authority, each
 /// typed result compared with the JSON the NA sent. Runs when GM_E2E_PYTHON names a Python
-/// with the genesis-mesh core installed (scripts/contract_na.py starts a disposable NA):
+/// with the genesis-mesh core installed (<see cref="LiveNa"/> starts a disposable NA):
 /// <code>GM_E2E_PYTHON=python dotnet test --filter Category=Live</code>
 /// CI runs it in its own job, against the core branch of the same name or main, with
 /// <c>GM_E2E_REQUIRED=1</c>: then a run without <c>GM_E2E_PYTHON</c> fails rather than passes.
@@ -34,34 +33,14 @@ public class LiveContractTests
         }
     }
 
-    private static string ContractScript()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            var script = Path.Combine(dir.FullName, "scripts", "contract_na.py");
-            if (File.Exists(script)) return script;
-        }
-        throw new FileNotFoundException("scripts/contract_na.py not found above " + AppContext.BaseDirectory);
-    }
-
     [Fact]
     public async Task EveryCallReturnsWhatTheNASent()
     {
-        var python = Environment.GetEnvironmentVariable("GM_E2E_PYTHON");
-        if (string.IsNullOrEmpty(python))
-        {
-            // 1.8.0: where the live check is required (CI sets GM_E2E_REQUIRED=1), an unconfigured run fails
-            // instead of passing green without an NA.
-            if (Environment.GetEnvironmentVariable("GM_E2E_REQUIRED") == "1")
-                throw new InvalidOperationException("GM_E2E_REQUIRED=1 but GM_E2E_PYTHON is not set: no NA to check against");
-            return; // not configured here; CI runs it in its own job
-        }
-
-        using var na = Process.Start(new ProcessStartInfo(python, ContractScript()) { RedirectStandardOutput = true })!;
+        var na = await LiveNa.Start();
+        if (na is null) return;
         try
         {
-            var line = await na.StandardOutput.ReadLineAsync() ?? throw new InvalidOperationException("the NA did not start");
-            var inputs = JsonNode.Parse(line)!.AsObject();
+            var inputs = na.Inputs;
             string baseUrl = (string)inputs["baseUrl"]!, seed = (string)inputs["seed"]!, keyId = (string)inputs["keyId"]!;
             string naKey = (string)inputs["naPublicKey"]!, network = (string)inputs["networkName"]!;
             var proofInput = JsonSerializer.Deserialize<object>(inputs["justificationProof"]!.ToJsonString());
@@ -421,7 +400,7 @@ public class LiveContractTests
         }
         finally
         {
-            na.Kill(entireProcessTree: true);
+            na.Dispose();
         }
     }
 }

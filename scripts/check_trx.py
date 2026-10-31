@@ -5,12 +5,12 @@ skipped test without failing. CI writes TRX files (``--logger trx``) and this
 script reads them:
 
     python3 scripts/check_trx.py RESULTS_DIR --project tests/GenesisMesh.Sdk.Tests/GenesisMesh.Sdk.Tests.csproj --min-tests 100
-    python3 scripts/check_trx.py RESULTS_DIR --project ... --only-test EveryCallReturnsWhatTheNASent
+    python3 scripts/check_trx.py RESULTS_DIR --project ... --only-test EveryCallReturnsWhatTheNASent --only-test ...
 
 It fails unless there is one TRX file per target framework of the test
 project, each with at least ``--min-tests`` tests, every one of them run and
-passed (none failed, skipped or not executed). ``--only-test NAME`` also
-requires that NAME is the only test in each run.
+passed (none failed, skipped or not executed). ``--only-test NAME``, once or
+more, also requires that each run consists of exactly the tests named.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def framework_of(trx: Path, root: ET.Element, names: list[str]) -> str | None:
     return None
 
 
-def check(results: Path, project: Path, min_tests: int, only_test: str | None) -> list[str]:
+def check(results: Path, project: Path, min_tests: int, only_tests: list[str] | None) -> list[str]:
     expected = frameworks(project)
     problems: list[str] = []
     seen: dict[str, Path] = {}
@@ -80,11 +80,12 @@ def check(results: Path, project: Path, min_tests: int, only_test: str | None) -
         not_passed = [r.get("testName", "?") for r in results_ if r.get("outcome") != "Passed"]
         if not_passed:
             problems.append(f"{label}: {len(not_passed)} not passed: {', '.join(not_passed[:10])}")
-        if only_test is not None:
+        if only_tests:
             names = [r.get("testName", "") for r in results_]
-            if len(names) != 1 or not names[0].endswith("." + only_test):
+            ran_each = sorted(next((t for t in only_tests if n.endswith("." + t)), n) for n in names)
+            if ran_each != sorted(only_tests):
                 ran = ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "") or "none"
-                problems.append(f"{label}: expected exactly the test {only_test}, ran {ran}")
+                problems.append(f"{label}: expected exactly the tests {', '.join(only_tests)}, ran {ran}")
     missing = [f for f in expected if f not in seen]
     if missing:
         problems.append(f"no test run for {', '.join(missing)} (target frameworks of {project.name}: {', '.join(expected)})")
@@ -96,7 +97,7 @@ def main() -> int:
     parser.add_argument("results", type=Path, help="the --results-directory of dotnet test")
     parser.add_argument("--project", type=Path, required=True, help="the test project (its target frameworks)")
     parser.add_argument("--min-tests", type=int, default=1)
-    parser.add_argument("--only-test", help="the one test each run must consist of")
+    parser.add_argument("--only-test", action="append", help="a test each run must consist of (repeat for more)")
     args = parser.parse_args()
     problems = check(args.results, args.project, args.min_tests, args.only_test)
     for problem in problems:

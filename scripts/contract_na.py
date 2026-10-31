@@ -1,12 +1,18 @@
-"""A live, disposable Network Authority for the SDK's live contract check.
+"""A live, disposable Network Authority for the SDK's live tests.
 
 Needs the genesis-mesh core installed (CI installs the core branch of the same
 name, or main). Prints one JSON line with the connection details and the
-inputs the check needs, then serves until stopped. Real routes, signatures and
+inputs the tests need, then serves until stopped. Real routes, signatures and
 SQLite store; only the rate limiter is off. Prerequisites the SDK has no call
 for (a recognition treaty for "sovereign-b", a signed justification proof) are
 set up here.
+
+Two operator keys: "ops" (privileged) and "controller" (standard), as a
+platform team and a controller hold them. ``--policy-enforcement required``
+starts the NA as a governed deployment runs it: every evaluation needs an
+active policy, and the legacy decide route is refused.
 """
+import argparse
 import json
 import signal
 import sys
@@ -24,8 +30,12 @@ from genesis_mesh.na_service.server import NetworkAuthorityService
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--policy-enforcement", choices=("optional", "required"), default="optional")
+    options = parser.parse_args()
     root = generate_keypair()
     operator = generate_keypair()
+    controller = generate_keypair()
     now = datetime.now(timezone.utc)
     genesis = GenesisBlock(
         network_name="contract-na", network_version="v0.1", root_public_key=root.public_key_b64,
@@ -37,8 +47,10 @@ def main() -> None:
     tmp = tempfile.mkdtemp(prefix="gm-contract-")
     service = NetworkAuthorityService(
         genesis_block=genesis, na_private_key=root.private_key, key_id="na-contract",
-        db_path=str(Path(tmp) / "na.db"), operator_public_keys={"ops": operator.public_key_b64},
-        operator_key_tiers={"ops": "privileged"}, evidence_store="on",
+        db_path=str(Path(tmp) / "na.db"),
+        operator_public_keys={"ops": operator.public_key_b64, "controller": controller.public_key_b64},
+        operator_key_tiers={"ops": "privileged", "controller": "standard"}, evidence_store="on",
+        boundary_policy_enforcement=options.policy_enforcement,
     )
     service.rate_limiter.allow = lambda *args, **kwargs: True
 
@@ -66,6 +78,7 @@ def main() -> None:
     print(json.dumps({
         "baseUrl": f"http://127.0.0.1:{server.server_port}",
         "seed": operator.private_key_b64, "keyId": "ops", "naPublicKey": root.public_key_b64,
+        "controllerSeed": controller.private_key_b64, "controllerKeyId": "controller",
         "networkName": "contract-na", "justificationProof": json.loads(proof.model_dump_json()),
     }), flush=True)
     try:
