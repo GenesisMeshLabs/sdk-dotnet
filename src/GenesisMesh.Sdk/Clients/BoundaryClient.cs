@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace GenesisMesh;
 
 /// <summary>Capability boundary decisions — evaluate under policies, decide (legacy) and verify.</summary>
@@ -26,14 +28,26 @@ public sealed class BoundaryClient
     /// <see cref="EvidenceMetadata.MaxMetadataBytes"/>: nothing is signed or sent. This is the SDK's own guard (the NA
     /// does not check contexts); put identifiers, versions and timestamps in a context, never secret values.
     /// </exception>
-    public async Task<BoundaryEvaluation> Evaluate(EvaluateRequest request, CancellationToken ct = default)
+    public async Task<BoundaryEvaluation> Evaluate(EvaluateRequest request, CancellationToken ct = default) =>
+        (await EvaluateAsReceived(request, ct).ConfigureAwait(false)).Evaluation;
+
+    /// <summary>
+    /// <see cref="Evaluate"/>, with the decision's JSON as the NA sent it: verified as received, a field this SDK does
+    /// not know is refused by name (<c>unknown_field</c>) rather than dropped.
+    /// </summary>
+    internal async Task<(BoundaryEvaluation Evaluation, string DecisionJson)> EvaluateAsReceived(
+        EvaluateRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
         if ((request.AttestationId is null) == (request.Agreement is null))
             throw new ArgumentException("genesismesh: set exactly one of AttestationId or Agreement", nameof(request));
         if (EvidenceMetadata.CheckMetadataOnly(Transport.ToElement(request.Context ?? new EvaluationContext())) is { } reason)
             throw new SecretMaterialException(reason);
-        return await _t.AdminPostAsync<BoundaryEvaluation>("/admin/boundary/evaluate", request, ct).ConfigureAwait(false);
+        var raw = await _t.AdminPostAsync<JsonElement>("/admin/boundary/evaluate", request, ct).ConfigureAwait(false);
+        var evaluation = Transport.Read<BoundaryEvaluation>(raw)
+            ?? throw new InvalidOperationException("genesismesh: empty response");
+        var decision = raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty("decision", out var d) ? d.GetRawText() : "null";
+        return (evaluation, decision);
     }
 
     /// <summary>

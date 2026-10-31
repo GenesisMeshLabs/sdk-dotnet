@@ -1889,6 +1889,7 @@ public sealed class ExecutionEvidence
 
     /// <summary>What was used, as metadata (an object); the NA refuses secret material in it.</summary>
     [JsonPropertyName("execution_parameters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public JsonElement ExecutionParameters { get; set; }
 
     /// <summary>When it was executed, in canonical form; never before the decision.</summary>
@@ -2255,6 +2256,209 @@ public sealed class EvidenceSubmission
     /// <summary>SHA-256 hex of the envelope's canonical JSON.</summary>
     [JsonPropertyName("entry_digest")]
     public string EntryDigest { get; set; } = "";
+}
+
+// ── The evidence outbox (1.9.0) ───────────────────────────────────────────────
+
+/// <summary>The states of an outbox entry (<see cref="OutboxEntry.State"/>).</summary>
+public static class OutboxStates
+{
+    /// <summary>To submit: <see cref="EvidenceStoreClient.FlushPending"/> submits it.</summary>
+    public const string Pending = "pending";
+    /// <summary>Refused for good: kept with the refusal, never dropped and never submitted again.</summary>
+    public const string DeadLetter = "dead_letter";
+}
+
+/// <summary>Why the NA, or the transport, refused a submission (<see cref="OutboxEntry.LastError"/>).</summary>
+public sealed class SubmissionFailure
+{
+    /// <summary>The HTTP status; 0 when no answer came (a network error or a timeout) or this SDK refused the record.</summary>
+    [JsonPropertyName("status")]
+    public int Status { get; init; }
+
+    /// <summary>
+    /// The NA's code; <c>network_error</c> when the NA could not be reached, <c>local_error</c> for an exception in
+    /// this process before any request (<see cref="EvidenceOutbox.LocalError"/>).
+    /// </summary>
+    [JsonPropertyName("code")]
+    public string Code { get; init; } = "";
+
+    /// <summary>The NA's message, or the exception's.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; init; } = "";
+
+    /// <summary>The NA's quarantine entry, when it kept the refused record as one (<c>error.details.quarantine_id</c>).</summary>
+    [JsonPropertyName("quarantine_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? QuarantineId { get; init; }
+}
+
+/// <summary>An entry an outbox stores (<see cref="IOutbox{TEntry}"/>), found by its ID.</summary>
+public interface IOutboxEntry
+{
+    /// <summary>The entry's ID: the ID of the record it holds.</summary>
+    string Id { get; }
+}
+
+/// <summary>
+/// One signed execution record in the evidence outbox (1.9.0), until the NA admits it. The TypeScript and Rust SDKs
+/// read and write the same JSON. Entries do not change: the client stores a new one (<c>with</c>) for each attempt.
+/// </summary>
+public sealed record OutboxEntry : IOutboxEntry
+{
+    /// <summary>The record's <see cref="ExecutionEvidence.EvidenceId"/>.</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = "";
+
+    /// <summary>The signed record, exactly as it will be submitted.</summary>
+    [JsonPropertyName("evidence")]
+    public ExecutionEvidence Evidence { get; init; } = new();
+
+    /// <summary>A value of <see cref="OutboxStates"/>.</summary>
+    [JsonPropertyName("state")]
+    public string State { get; init; } = OutboxStates.Pending;
+
+    /// <summary>Submissions attempted so far.</summary>
+    [JsonPropertyName("attempts")]
+    public int Attempts { get; init; }
+
+    /// <summary>When the record was handed to the outbox, ISO 8601.</summary>
+    [JsonPropertyName("queued_at")]
+    public string QueuedAt { get; init; } = "";
+
+    /// <summary>The earliest time a flush retries it, ISO 8601; null while no attempt has failed.</summary>
+    [JsonPropertyName("next_attempt_at")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? NextAttemptAt { get; init; }
+
+    /// <summary>Why the last attempt failed; null while none has.</summary>
+    [JsonPropertyName("last_error")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public SubmissionFailure? LastError { get; init; }
+}
+
+/// <summary>
+/// Durable storage for outbox entries (1.9.0), such as a database table or a Cosmos DB container when the
+/// <see cref="FileOutbox"/> does not fit. Each method is durable once its task completes, <see cref="List"/> returns
+/// the entries in the order they were added, and one store serves one process at a time. The entries hold signed
+/// metadata only, never secret values, but the store must be private.
+/// </summary>
+/// <typeparam name="TEntry">The entries stored.</typeparam>
+public interface IOutbox<TEntry> where TEntry : class, IOutboxEntry
+{
+    /// <summary>Stores a new entry; refuses an <see cref="IOutboxEntry.Id"/> already stored.</summary>
+    Task Add(TEntry entry, CancellationToken ct = default);
+
+    /// <summary>Replaces the stored entry with the same ID; does nothing when it is gone.</summary>
+    Task Update(TEntry entry, CancellationToken ct = default);
+
+    /// <summary>Removes an entry; does nothing when it is gone.</summary>
+    Task Remove(string id, CancellationToken ct = default);
+
+    /// <summary>Every entry, in the order added.</summary>
+    Task<IReadOnlyList<TEntry>> List(CancellationToken ct = default);
+}
+
+/// <summary>
+/// What became of a record handed to the outbox (<see cref="EvidenceStoreClient.Enqueue"/>): the NA's acknowledgement
+/// when it admitted the record, otherwise the entry holding it (<see cref="OutboxStates.Pending"/> or
+/// <see cref="OutboxStates.DeadLetter"/>).
+/// </summary>
+public sealed class Delivery
+{
+    /// <summary>The NA's acknowledgement; null when it did not admit the record.</summary>
+    public EvidenceSubmission? Submission { get; init; }
+
+    /// <summary>The entry holding the record; null when the NA admitted it.</summary>
+    public OutboxEntry? Queued { get; init; }
+}
+
+/// <summary>What one <see cref="EvidenceStoreClient.FlushPending"/> run did.</summary>
+public sealed class FlushResult
+{
+    /// <summary>Entries the NA admitted (or already held), now removed from the outbox.</summary>
+    public IReadOnlyList<OutboxEntry> Admitted { get; init; } = [];
+
+    /// <summary>Entries still pending, in order: not yet due, behind a pending record, or failed again.</summary>
+    public IReadOnlyList<OutboxEntry> Pending { get; init; } = [];
+
+    /// <summary>Entries this run moved to the dead letters.</summary>
+    public IReadOnlyList<OutboxEntry> DeadLettered { get; init; } = [];
+}
+
+/// <summary>Options of <see cref="EvidenceStoreClient.FlushPending"/>.</summary>
+public sealed class FlushOptions
+{
+    /// <summary>Also retries entries whose backoff has not run out, such as right after the NA is back.</summary>
+    public bool IgnoreBackoff { get; init; }
+}
+
+// ── Reconciliation (1.9.0) ────────────────────────────────────────────────────
+
+/// <summary>One resource as seen in the cloud, such as a Key Vault secret or an application's credential.</summary>
+public sealed class ObservedResource
+{
+    /// <summary>The resource's ID, as its records name it.</summary>
+    public string ResourceId { get; init; } = "";
+
+    /// <summary>False when the resource was looked up and is gone.</summary>
+    public bool Exists { get; init; }
+
+    /// <summary>The version seen in the cloud, compared with the recorded version (<see cref="ReconcileOptions.VersionKey"/>).</summary>
+    public string? Version { get; init; }
+
+    /// <summary>Anything the controller wants back with the finding; never secret values.</summary>
+    public IReadOnlyDictionary<string, object?>? Metadata { get; init; }
+}
+
+/// <summary>The values of <see cref="ReconciliationFinding.Status"/>.</summary>
+public static class ReconciliationStatuses
+{
+    /// <summary>Exists in the cloud with no successful governed change.</summary>
+    public const string Unmanaged = "unmanaged";
+    /// <summary>The cloud version differs from the last governed change.</summary>
+    public const string Drifted = "drifted";
+    /// <summary>Still present after a governed revoke or delete.</summary>
+    public const string PresentAfterRevoke = "present_after_revoke";
+    /// <summary>Governed as live, but not found in the cloud.</summary>
+    public const string Missing = "missing";
+    /// <summary>The cloud agrees with the governed history.</summary>
+    public const string InSync = "in_sync";
+}
+
+/// <summary>One resource compared with its governed history (<see cref="Governance.ReconcileResources"/>).</summary>
+public sealed class ReconciliationFinding
+{
+    /// <summary>The resource.</summary>
+    public string ResourceId { get; init; } = "";
+
+    /// <summary>A value of <see cref="ReconciliationStatuses"/>.</summary>
+    public string Status { get; init; } = "";
+
+    /// <summary>The resource as observed; null when the inventory does not list it.</summary>
+    public ObservedResource? Observed { get; init; }
+
+    /// <summary>The resource's governed state; null when it has none.</summary>
+    public ResourceState? Recorded { get; init; }
+
+    /// <summary>What differs, or why it agrees.</summary>
+    public string Detail { get; init; } = "";
+}
+
+/// <summary>Options of <see cref="Governance.ReconcileResources"/>.</summary>
+public sealed class ReconcileOptions
+{
+    /// <summary>The execution parameter holding the version the controller recorded. Default <c>secret_version</c>.</summary>
+    public string VersionKey { get; init; } = "secret_version";
+
+    /// <summary>
+    /// The inventory lists every governed resource in scope, so a resource governed as live and absent from it is
+    /// <see cref="ReconciliationStatuses.Missing"/>.
+    /// </summary>
+    public bool CompleteInventory { get; init; }
+
+    /// <summary>With <see cref="CompleteInventory"/>: only resources whose ID starts with this, such as <c>kv:vault/</c>.</summary>
+    public string? ScopePrefix { get; init; }
 }
 
 internal static class ModelHelpers

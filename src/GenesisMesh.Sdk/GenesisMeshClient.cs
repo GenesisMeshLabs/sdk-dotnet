@@ -39,8 +39,9 @@ public sealed class GenesisMeshClient : IDisposable
     public EvidenceClient Evidence { get; }
 
     /// <summary>
-    /// The evidence store (1.9.0): submit signed execution evidence, read where a resource's chain ends, search what is
-    /// stored and register executor keys.
+    /// The evidence store (1.9.0): submit signed execution evidence, directly or through the outbox
+    /// (<see cref="ClientOptions.Outbox"/>), read where a resource's chain ends, search what is stored and register
+    /// executor keys.
     /// </summary>
     public EvidenceStoreClient EvidenceStore { get; }
 
@@ -65,7 +66,7 @@ public sealed class GenesisMeshClient : IDisposable
         DataUsage = new DataUsageClient(_transport);
         Disclosure = new DisclosureClient(_transport);
         Evidence = new EvidenceClient(_transport);
-        EvidenceStore = new EvidenceStoreClient(_transport);
+        EvidenceStore = new EvidenceStoreClient(_transport, opts.Outbox);
         Policy = new PolicyClient(_transport);
         Health = new HealthClient(_transport);
         NA = new NetworkAuthorityClient(_transport);

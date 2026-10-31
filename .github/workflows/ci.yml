@@ -62,6 +62,7 @@ jobs:
           --file StrictFields.cs=100 --file OfflineVerifier.cs=92
           --file KeyHistory.cs=94 --file Grants.cs=100 --file Transport.cs=97 --file Metadata.cs=96
           --file Execution.cs=98 --file Clients/EvidenceStoreClient.cs=100
+          --file Governance.cs=99 --file Outbox.cs=97
 
       # Package validation: the public API against the baseline release in
       # the csproj; a removed or changed member fails (see the "API
