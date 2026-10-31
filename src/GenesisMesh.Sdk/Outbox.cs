@@ -8,9 +8,9 @@ using System.Text.RegularExpressions;
 namespace GenesisMesh;
 
 /// <summary>
-/// An outbox refused the operation (1.9.0): none is configured (<c>outbox_required</c>), a file of the outbox could
-/// not be read and was moved aside (<c>outbox_file_unreadable</c>), or a file is of another outbox format
-/// (<c>outbox_file_other_format</c>).
+/// An outbox refused the operation (1.9.0): none is configured (<c>outbox_required</c>, <c>record_outbox_required</c>),
+/// a file of the outbox could not be read and was moved aside (<c>outbox_file_unreadable</c>), or a file is of another
+/// outbox format (<c>outbox_file_other_format</c>).
 /// </summary>
 public sealed class OutboxException : GenesisMeshException
 {
@@ -24,9 +24,10 @@ public sealed class OutboxException : GenesisMeshException
 }
 
 /// <summary>
-/// The rules the evidence outbox follows (1.9.0), as <see cref="EvidenceStoreClient.Enqueue"/> and
-/// <see cref="EvidenceStoreClient.FlushPending"/> apply them: which refusals are final, and when a record is tried again.
-/// The TypeScript and Rust SDKs follow the same rules.
+/// The rules the evidence outbox and the record outbox follow (1.9.0), as <see cref="EvidenceStoreClient.Enqueue"/>,
+/// <see cref="EvidenceStoreClient.FlushPending"/>, <see cref="EvidenceStoreClient.EnqueueRecord(ObservationRecord, CancellationToken)"/>
+/// and <see cref="EvidenceStoreClient.FlushRecords"/> apply them: which refusals are final, and when a record is tried
+/// again. The TypeScript and Rust SDKs follow the same rules.
 /// </summary>
 public static class EvidenceOutbox
 {
@@ -68,6 +69,72 @@ public static class EvidenceOutbox
         "evidence_secret_material",
     }.ToFrozenSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The NA's refusals of a record in the record outbox that no retry overcomes. Every other failure is retried, as
+    /// for <see cref="PermanentRefusals"/>, and so are an observer or executor key not registered yet, a remediation's
+    /// subject or forward rotation the NA does not hold yet, a grant use behind one it does not hold yet or dated ahead
+    /// of its clock, and disabled out-of-band records, remediation or grants.
+    /// </summary>
+    public static IReadOnlySet<string> RecordPermanentRefusals { get; } = new[]
+    {
+        // A batch the NA's strict reader refuses whole is split until the record it refuses is found.
+        "invalid_json",
+        "invalid_observation",
+        "observation_malformed",
+        "observation_invalid_signature",
+        "observation_key_retired",
+        "observation_out_of_scope",
+        "observation_secret_material",
+        "observation_conflict",
+        "invalid_break_glass",
+        "break_glass_malformed",
+        "break_glass_invalid_signature",
+        "break_glass_key_retired",
+        "break_glass_out_of_scope",
+        "break_glass_secret_material",
+        "break_glass_conflict",
+        // Remediation records: the NA keeps an authentic one it refuses for good as a quarantine entry.
+        "invalid_remediation",
+        "remediation_malformed",
+        "remediation_invalid_signature",
+        "remediation_key_retired",
+        "remediation_out_of_scope",
+        "remediation_secret_material",
+        "remediation_subject_mismatch",
+        "remediation_steps_mismatch",
+        "remediation_rotation_mismatch",
+        "remediation_rotation_before_change",
+        "remediation_rotation_other_executor",
+        "remediation_rotation_reused",
+        "remediation_not_due",
+        "remediation_already_recorded",
+        "remediation_conflict",
+        // Grant uses: the NA keeps an authentic use it refuses for good as a quarantine entry.
+        "invalid_grant_use",
+        "grant_use_malformed",
+        "grant_not_found",
+        "grant_use_invalid_signature",
+        "grant_bearer_mismatch",
+        "grant_use_secret_material",
+        "grant_bearer_key_retired",
+        "grant_mismatch",
+        "grant_use_conflict",
+        "grant_use_chain_mismatch",
+        "grant_capability_mismatch",
+        "grant_envelope_mismatch",
+        "grant_budget_exhausted",
+        "grant_time_token_invalid",
+        "grant_time_token_mismatch",
+        "grant_time_token_regressed",
+        "grant_time_token_exhausted",
+        "grant_use_before_time_token",
+        "grant_use_out_of_order",
+        "grant_use_outside_validity",
+        "grant_use_uploaded_late",
+        "grant_revoked",
+        "grant_use_out_of_scope",
+    }.ToFrozenSet(StringComparer.Ordinal);
+
     private static readonly TimeSpan FirstRetry = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan MaxRetry = TimeSpan.FromMinutes(15);
 
@@ -76,13 +143,20 @@ public static class EvidenceOutbox
     /// refusal is final only when the NA (or this SDK, before sending) refused the record with a code of
     /// <see cref="PermanentRefusals"/>; JSON this SDK could not read is not one, since the NA may have admitted the record.
     /// </summary>
-    public static (SubmissionFailure Failure, bool Transient) Classify(Exception error)
+    public static (SubmissionFailure Failure, bool Transient) Classify(Exception error) => Classify(error, PermanentRefusals);
+
+    /// <summary>
+    /// <see cref="Classify(Exception)"/> for a record of the record outbox, whose final refusals are <see cref="RecordPermanentRefusals"/>.
+    /// </summary>
+    public static (SubmissionFailure Failure, bool Transient) ClassifyRecord(Exception error) => Classify(error, RecordPermanentRefusals);
+
+    private static (SubmissionFailure Failure, bool Transient) Classify(Exception error, IReadOnlySet<string> refusals)
     {
         ArgumentNullException.ThrowIfNull(error);
         switch (error)
         {
             case GenesisMeshException e:
-                var refused = PermanentRefusals.Contains(e.Code) && (e.Status == 0 || e.Status is >= 400 and < 500);
+                var refused = refusals.Contains(e.Code) && (e.Status == 0 || e.Status is >= 400 and < 500);
                 return (new SubmissionFailure
                 {
                     Status = e.Status,
@@ -136,6 +210,30 @@ public static class EvidenceOutbox
             QueuedAt = Time(now ?? DateTimeOffset.UtcNow),
         };
     }
+
+    /// <summary>A new pending record outbox entry for a signed observation.</summary>
+    public static RecordOutboxEntry RecordEntry(ObservationRecord observation, DateTimeOffset? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        return RecordEntry(RecordOutboxKinds.Observation, observation.ObservationId, observation, now);
+    }
+
+    /// <summary>A new pending record outbox entry for a signed break-glass record.</summary>
+    public static RecordOutboxEntry RecordEntry(BreakGlassRecord record, DateTimeOffset? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return RecordEntry(RecordOutboxKinds.BreakGlass, record.BreakGlassId, record, now);
+    }
+
+    private static RecordOutboxEntry RecordEntry(string kind, string id, object record, DateTimeOffset? now) => new()
+    {
+        Id = id,
+        Kind = kind,
+        Record = JsonSerializer.SerializeToElement(record, record.GetType(), Auth.SerializerOptions),
+        State = OutboxStates.Pending,
+        Attempts = 0,
+        QueuedAt = Time(now ?? DateTimeOffset.UtcNow),
+    };
 
     /// <summary>A time as entries store it: ISO 8601 in UTC with milliseconds, as JavaScript writes it.</summary>
     internal static string Time(DateTimeOffset value) =>
@@ -256,6 +354,53 @@ public sealed class FileOutbox : IOutbox<OutboxEntry>
     /// </summary>
     private static bool KnownFields(JsonElement entry) =>
         StrictFields.UnknownFields("ExecutionEvidence", entry.GetProperty("evidence")).Count == 0;
+}
+
+/// <summary>
+/// The default record outbox (1.9.0): signed observations and break-glass records, and the remediation records and
+/// grant uses another SDK kept, stored as <see cref="FileOutbox"/> stores execution records, in a directory of its own
+/// (<c>gm.evidence.record-outbox.v1</c>). The TypeScript and Rust SDKs read and write the same files. Each record is
+/// kept as it was read, fields this SDK does not know included, so it still matches its signature. A file of another
+/// kind of record is moved aside, as an unreadable file is.
+/// </summary>
+public sealed class FileRecordOutbox : IOutbox<RecordOutboxEntry>
+{
+    internal const string Format = "gm.evidence.record-outbox.v1";
+    private static readonly FrozenSet<string> Kinds = new[]
+    {
+        RecordOutboxKinds.Observation, RecordOutboxKinds.BreakGlass, RecordOutboxKinds.Remediation, RecordOutboxKinds.GrantExecution,
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    private readonly JsonFileOutbox<RecordOutboxEntry> _files;
+
+    /// <summary>A record outbox in <paramref name="directory"/>, created on first use: not the evidence outbox's.</summary>
+    /// <param name="directory">The directory; private to the controller, on durable storage.</param>
+    public FileRecordOutbox(string directory)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(directory);
+        DirectoryPath = directory;
+        _files = new JsonFileOutbox<RecordOutboxEntry>(directory, Format, IsEntry, _ => true);
+    }
+
+    /// <summary>The outbox's directory.</summary>
+    public string DirectoryPath { get; }
+
+    /// <inheritdoc/>
+    public Task Add(RecordOutboxEntry entry, CancellationToken ct = default) => _files.Add(entry, ct);
+
+    /// <inheritdoc/>
+    public Task Update(RecordOutboxEntry entry, CancellationToken ct = default) => _files.Update(entry, ct);
+
+    /// <inheritdoc/>
+    public Task Remove(string id, CancellationToken ct = default) => _files.Remove(id, ct);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<RecordOutboxEntry>> List(CancellationToken ct = default) => _files.List(ct);
+
+    /// <summary>An entry holds a record object of a kind the record outbox keeps.</summary>
+    private static bool IsEntry(JsonElement entry) =>
+        entry.TryGetProperty("kind", out var kind) && kind.ValueKind == JsonValueKind.String && Kinds.Contains(kind.GetString()!)
+        && entry.TryGetProperty("record", out var record) && record.ValueKind == JsonValueKind.Object;
 }
 
 /// <summary>Copies of entries, through their JSON: an outbox never shares an entry with its caller.</summary>

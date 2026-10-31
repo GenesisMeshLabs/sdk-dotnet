@@ -3880,11 +3880,103 @@ public sealed class FlushResult
     public IReadOnlyList<OutboxEntry> DeadLettered { get; init; } = [];
 }
 
-/// <summary>Options of <see cref="EvidenceStoreClient.FlushPending"/>.</summary>
+/// <summary>Options of <see cref="EvidenceStoreClient.FlushPending"/> and <see cref="EvidenceStoreClient.FlushRecords"/>.</summary>
 public sealed class FlushOptions
 {
     /// <summary>Also retries entries whose backoff has not run out, such as right after the NA is back.</summary>
     public bool IgnoreBackoff { get; init; }
+}
+
+// ── The record outbox (1.9.0) ─────────────────────────────────────────────────
+
+/// <summary>The kinds of record the record outbox keeps (<see cref="RecordOutboxEntry.Kind"/>), each an entry kind.</summary>
+public static class RecordOutboxKinds
+{
+    /// <summary>An observation (<see cref="ObservationRecord"/>).</summary>
+    public const string Observation = "observation";
+    /// <summary>A break-glass record (<see cref="BreakGlassRecord"/>).</summary>
+    public const string BreakGlass = "break_glass";
+    /// <summary>
+    /// A remediation record. This SDK does not sign them yet; one another SDK kept in a shared outbox is submitted.
+    /// </summary>
+    public const string Remediation = "remediation";
+    /// <summary>A grant use. This SDK does not sign them yet; one another SDK kept in a shared outbox is submitted.</summary>
+    public const string GrantExecution = "grant_execution";
+}
+
+/// <summary>
+/// One signed record in the record outbox (1.9.0), until the NA admits it: an observation or a break-glass record, or
+/// a remediation record or grant use another SDK kept. The TypeScript and Rust SDKs read and write the same JSON.
+/// Entries do not change: the client stores a new one (<c>with</c>) for each attempt.
+/// </summary>
+public sealed record RecordOutboxEntry : IOutboxEntry
+{
+    /// <summary>The record's ID: its <c>observation_id</c>, <c>break_glass_id</c>, <c>remediation_id</c> or <c>use_id</c>.</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = "";
+
+    /// <summary>A value of <see cref="RecordOutboxKinds"/>.</summary>
+    [JsonPropertyName("kind")]
+    public string Kind { get; init; } = "";
+
+    /// <summary>
+    /// The signed record, exactly as it will be submitted: kept as JSON, so a record another SDK wrote keeps the form
+    /// it was signed over. Read an observation or a break-glass record with <c>Record.Deserialize&lt;ObservationRecord&gt;()</c>.
+    /// </summary>
+    [JsonPropertyName("record")]
+    public JsonElement Record { get; init; }
+
+    /// <summary>A value of <see cref="OutboxStates"/>.</summary>
+    [JsonPropertyName("state")]
+    public string State { get; init; } = OutboxStates.Pending;
+
+    /// <summary>Submissions attempted so far.</summary>
+    [JsonPropertyName("attempts")]
+    public int Attempts { get; init; }
+
+    /// <summary>When the record was handed to the outbox, ISO 8601.</summary>
+    [JsonPropertyName("queued_at")]
+    public string QueuedAt { get; init; } = "";
+
+    /// <summary>The earliest time a flush retries it, ISO 8601; null while no attempt has failed.</summary>
+    [JsonPropertyName("next_attempt_at")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? NextAttemptAt { get; init; }
+
+    /// <summary>Why the last attempt failed; null while none has.</summary>
+    [JsonPropertyName("last_error")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public SubmissionFailure? LastError { get; init; }
+}
+
+/// <summary>
+/// What became of a record handed to the record outbox (<see cref="EvidenceStoreClient.EnqueueRecord(ObservationRecord, CancellationToken)"/>):
+/// the NA's acknowledgement when it admitted the record, otherwise the entry holding it
+/// (<see cref="OutboxStates.Pending"/> or <see cref="OutboxStates.DeadLetter"/>).
+/// </summary>
+public sealed class RecordDelivery
+{
+    /// <summary>The NA's acknowledgement; null when it did not admit the record.</summary>
+    public RecordSubmission? Submission { get; init; }
+
+    /// <summary>The entry holding the record; null when the NA admitted it.</summary>
+    public RecordOutboxEntry? Queued { get; init; }
+}
+
+/// <summary>What one <see cref="EvidenceStoreClient.FlushRecords"/> run did.</summary>
+public sealed class RecordFlushResult
+{
+    /// <summary>Entries the NA admitted (or already held), now removed from the record outbox.</summary>
+    public IReadOnlyList<RecordOutboxEntry> Admitted { get; init; } = [];
+
+    /// <summary>Of those, the ones the NA kept as quarantine entries, such as an observation outside its time bounds.</summary>
+    public IReadOnlyList<RecordOutboxEntry> Quarantined { get; init; } = [];
+
+    /// <summary>Entries still pending: not yet due, after the run stopped, or failed again.</summary>
+    public IReadOnlyList<RecordOutboxEntry> Pending { get; init; } = [];
+
+    /// <summary>Entries this run moved to the dead letters.</summary>
+    public IReadOnlyList<RecordOutboxEntry> DeadLettered { get; init; } = [];
 }
 
 // ── Reconciliation (1.9.0) ────────────────────────────────────────────────────
