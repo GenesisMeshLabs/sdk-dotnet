@@ -11,6 +11,11 @@ Two operator keys: "ops" (privileged) and "controller" (standard), as a
 platform team and a controller hold them. ``--policy-enforcement required``
 starts the NA as a governed deployment runs it: the policy-free decide route
 is refused, so every decision comes from the evaluate route.
+
+``--out-of-band on`` keeps the records of changes outside the governed path
+(observations, break-glass records, judgements). It adds a second privileged
+key, "ops2", and names the holders of both privileged keys, so a holder change
+can be proposed by one holder and approved by the other.
 """
 import argparse
 import json
@@ -32,10 +37,19 @@ from genesis_mesh.na_service.server import NetworkAuthorityService
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--policy-enforcement", choices=("optional", "required"), default="optional")
+    parser.add_argument("--out-of-band", choices=("off", "on"), default="off")
     options = parser.parse_args()
     root = generate_keypair()
     operator = generate_keypair()
     controller = generate_keypair()
+    second = generate_keypair()
+    keys = {"ops": operator.public_key_b64, "controller": controller.public_key_b64}
+    tiers = {"ops": "privileged", "controller": "standard"}
+    holders: dict[str, str] = {}
+    if options.out_of_band == "on":
+        keys["ops2"] = second.public_key_b64
+        tiers["ops2"] = "privileged"
+        holders = {"ops": "platform-team", "ops2": "security-team"}
     now = datetime.now(timezone.utc)
     genesis = GenesisBlock(
         network_name="contract-na", network_version="v0.1", root_public_key=root.public_key_b64,
@@ -48,9 +62,8 @@ def main() -> None:
     service = NetworkAuthorityService(
         genesis_block=genesis, na_private_key=root.private_key, key_id="na-contract",
         db_path=str(Path(tmp) / "na.db"),
-        operator_public_keys={"ops": operator.public_key_b64, "controller": controller.public_key_b64},
-        operator_key_tiers={"ops": "privileged", "controller": "standard"}, evidence_store="on",
-        boundary_policy_enforcement=options.policy_enforcement,
+        operator_public_keys=keys, operator_key_tiers=tiers, operator_key_holders=holders, evidence_store="on",
+        boundary_policy_enforcement=options.policy_enforcement, evidence_out_of_band=options.out_of_band,
     )
     service.rate_limiter.allow = lambda *args, **kwargs: True
 
@@ -75,12 +88,15 @@ def main() -> None:
 
     server = make_server("127.0.0.1", 0, service.app, threaded=True)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    print(json.dumps({
+    inputs = {
         "baseUrl": f"http://127.0.0.1:{server.server_port}",
         "seed": operator.private_key_b64, "keyId": "ops", "naPublicKey": root.public_key_b64,
         "controllerSeed": controller.private_key_b64, "controllerKeyId": "controller",
         "networkName": "contract-na", "justificationProof": json.loads(proof.model_dump_json()),
-    }), flush=True)
+    }
+    if options.out_of_band == "on":
+        inputs.update({"secondSeed": second.private_key_b64, "secondKeyId": "ops2", "holders": holders})
+    print(json.dumps(inputs), flush=True)
     try:
         server.serve_forever()
     finally:

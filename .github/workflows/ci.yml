@@ -63,6 +63,7 @@ jobs:
           --file KeyHistory.cs=94 --file Grants.cs=100 --file Transport.cs=97 --file Metadata.cs=96
           --file Execution.cs=98 --file Clients/EvidenceStoreClient.cs=100
           --file Governance.cs=99 --file Outbox.cs=97
+          --file OutOfBand.cs=100 --file OutOfBandVerification.cs=100
 
       # Package validation: the public API against the baseline release in
       # the csproj; a removed or changed member fails (see the "API
@@ -105,7 +106,7 @@ jobs:
             10.0.4xx
       # GM_E2E_REQUIRED=1: the live tests fail, rather than pass, when they
       # find no NA to check against.
-      - name: Typed results match a live Network Authority, and the partner lifecycle holds
+      - name: Typed results match a live Network Authority, the partner lifecycle holds, and changes outside the governed path are judged
         run: dotnet test tests/GenesisMesh.Sdk.Tests --configuration Release --filter "Category=Live" --logger "console;verbosity=normal" --logger trx --results-directory TestResults/live
         env:
           GM_E2E_PYTHON: python
@@ -115,6 +116,7 @@ jobs:
         run: >-
           python3 scripts/check_trx.py TestResults/live --project tests/GenesisMesh.Sdk.Tests/GenesisMesh.Sdk.Tests.csproj
           --only-test EveryCallReturnsWhatTheNASent --only-test APartnerControllerRunsTheLifecycleOnAStandardKey
+          --only-test ChangesOutsideTheGovernedPathAreRecordedAndJudged
 
   release-train:
     runs-on: ubuntu-latest

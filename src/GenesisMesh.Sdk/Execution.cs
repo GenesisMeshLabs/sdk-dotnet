@@ -147,6 +147,28 @@ public sealed class ExecutionRecorder
         return record;
     }
 
+    /// <summary>
+    /// A signed record of a change made while evaluation failed transiently (1.9.0): break-glass, with the caller's
+    /// justification. Only the digest of the failed evaluation request is recorded. Refused before signing as the NA
+    /// would refuse it, in its order: a value it could not read, a record its model does not take, then secret
+    /// material.
+    /// </summary>
+    /// <exception cref="ArgumentException">The evaluation request is missing.</exception>
+    /// <exception cref="OutOfBandRecordException">
+    /// <c>break_glass_malformed</c>: the justification is empty or over 1024 characters, the outcome detail is over
+    /// 1024, or a field is empty, too long or not one the NA takes. <c>break_glass_secret_material</c>: the parameters,
+    /// attributes, outcome detail or justification hold secret material, or together exceed
+    /// <see cref="EvidenceMetadata.MaxMetadataBytes"/>.
+    /// </exception>
+    /// <exception cref="StrictJsonException">The record holds a value the NA would refuse as <c>invalid_json</c>.</exception>
+    public async Task<BreakGlassRecord> SignBreakGlass(BreakGlassInput input, CancellationToken ct = default)
+    {
+        var record = OutOfBandRecords.BreakGlass(input, ExecutorSovereignId);
+        var unsigned = OutOfBandRecords.CheckBreakGlass(record);
+        record.Signature = await OutOfBandRecords.Sign(unsigned, _signer, ct).ConfigureAwait(false);
+        return record;
+    }
+
     /// <summary>The record's <c>digest()</c>, as the next record links to it (<see cref="OfflineVerifier.ExecutionDigest"/>).</summary>
     public static string Digest(ExecutionEvidence evidence)
     {
@@ -214,7 +236,7 @@ public sealed class ExecutionRecorder
     /// <paramref name="value"/> as JSON, as request bodies are written; a value JSON cannot hold is <c>invalid_json</c>,
     /// and a string with an unpaired surrogate <c>lone_surrogate</c>.
     /// </summary>
-    private static JsonElement Element(object value)
+    internal static JsonElement Element(object value)
     {
         try
         {

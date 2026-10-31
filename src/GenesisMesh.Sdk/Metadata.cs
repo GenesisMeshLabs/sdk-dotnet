@@ -46,6 +46,87 @@ public static class EvidenceMetadata
     }
 
     /// <summary>
+    /// Why named values would be refused as secret material, or null (1.9.0): the reference's <c>metadata_problem</c>,
+    /// which the NA applies to observations and break-glass records. Their canonical JSON, with non-ASCII characters
+    /// escaped as the reference counts them, is at most <see cref="MaxMetadataBytes"/>; then, value by value in the
+    /// order given, no field named like a secret and no PEM block, key or token (<see cref="SecretMaterial(JsonElement)"/>).
+    /// </summary>
+    /// <param name="values">A JSON object: each value by its name.</param>
+    /// <exception cref="ArgumentException"><paramref name="values"/> is not an object.</exception>
+    public static string? MetadataProblem(JsonElement values)
+    {
+        if (values.ValueKind != JsonValueKind.Object)
+            throw new ArgumentException("genesismesh: the values must be a JSON object", nameof(values));
+        return MetadataProblem(values.EnumerateObject().Select(p => (p.Name, p.Value)).ToList());
+    }
+
+    /// <summary>
+    /// Why the NA would refuse an observation as secret material, or null (1.9.0): <see cref="MetadataProblem(JsonElement)"/>
+    /// over its metadata and the source's own strings (<c>actor</c>, <c>source_event_id</c>, <c>version_id</c>; absent
+    /// ones left out), as the reference's <c>check_observation</c> gathers them. An actor is a pseudonym, never a
+    /// credential.
+    /// </summary>
+    public static string? ObservationProblem(ObservationRecord observation)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        var values = new List<(string, JsonElement)> { ("metadata", ObjectOrEmpty(observation.Metadata)) };
+        if (observation.Actor is not null) values.Add(("actor", Element(observation.Actor)));
+        values.Add(("source_event_id", Element(observation.SourceEventId)));
+        if (observation.VersionId is not null) values.Add(("version_id", Element(observation.VersionId)));
+        return MetadataProblem(values);
+    }
+
+    /// <summary>
+    /// Why the NA would refuse a break-glass record as secret material, or null (1.9.0):
+    /// <see cref="MetadataProblem(JsonElement)"/> over its execution parameters, request parameters, attributes, outcome
+    /// detail and justification, as the reference's <c>check_break_glass</c> gathers them.
+    /// </summary>
+    public static string? BreakGlassProblem(BreakGlassRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return MetadataProblem(
+        [
+            ("execution_parameters", ObjectOrEmpty(record.ExecutionParameters)),
+            ("request_parameters", ObjectOrEmpty(record.RequestParameters)),
+            ("attributes", ObjectOrEmpty(record.Attributes)),
+            ("outcome_detail", Element(record.OutcomeDetail ?? "")),
+            ("justification", Element(record.Justification)),
+        ]);
+    }
+
+    private static string? MetadataProblem(IReadOnlyList<(string Name, JsonElement Value)> values)
+    {
+        var sb = new StringBuilder("{");
+        var first = true;
+        foreach (var (name, value) in values.OrderBy(v => v.Name, Canonical.CodePointComparer.Instance))
+        {
+            if (!first) sb.Append(',');
+            first = false;
+            Canonical.WriteString(sb, name);
+            sb.Append(':');
+            Canonical.Write(sb, value, null, null);
+        }
+        var size = sb.Append('}').Length;
+        if (size > MaxMetadataBytes)
+            return $"metadata is {size} bytes, over the {MaxMetadataBytes}-byte limit";
+        foreach (var (name, value) in values)
+        {
+            var found = value.ValueKind is JsonValueKind.Object or JsonValueKind.Array ? Find(value, name + ".")
+                : SecretKeys.Contains(Normalise(name)) ? $"field '{name}' is not allowed in evidence metadata"
+                : value.ValueKind == JsonValueKind.String ? SecretMaterial(name, value.GetString()!)
+                : null;
+            if (found is not null) return found;
+        }
+        return null;
+    }
+
+    /// <summary>A record's object field, or <c>{}</c> where it is not set, as the reference fills it.</summary>
+    private static JsonElement ObjectOrEmpty(JsonElement value) =>
+        value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null ? Element(new Dictionary<string, object?>()) : value;
+
+    private static JsonElement Element<T>(T value) => JsonSerializer.SerializeToElement(value);
+
+    /// <summary>
     /// The first field of <paramref name="value"/> named like a secret (<c>password</c>, <c>client_secret</c>,
     /// <c>accessToken</c>, ...), or holding a PEM block, a long opaque key or a JWT; null when there is none.
     /// </summary>

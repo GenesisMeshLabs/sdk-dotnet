@@ -110,6 +110,23 @@ public sealed class SecretMaterialException : GenesisMeshException
     }
 }
 
+/// <summary>
+/// Thrown before anything is signed when the NA would refuse a record of a change outside the governed path (1.9.0):
+/// <c>observation_malformed</c> or <c>break_glass_malformed</c> (a field it does not take, an impossible change time),
+/// or <c>observation_secret_material</c> or <c>break_glass_secret_material</c>. A value the NA would refuse to read
+/// throws <see cref="StrictJsonException"/> instead.
+/// </summary>
+public sealed class OutOfBandRecordException : GenesisMeshException
+{
+    /// <summary>A record refused with <paramref name="code"/> for <paramref name="detail"/>.</summary>
+    /// <param name="code">The code the NA would refuse it with.</param>
+    /// <param name="detail">What is refused.</param>
+    public OutOfBandRecordException(string code, string detail)
+        : base(0, code, detail, "genesismesh: " + detail)
+    {
+    }
+}
+
 /// <summary>HTTP 400 — request body failed validation.</summary>
 public sealed class BadRequestException : GenesisMeshException
 {

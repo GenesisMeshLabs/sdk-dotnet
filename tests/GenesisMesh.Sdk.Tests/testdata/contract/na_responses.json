@@ -1,5 +1,5 @@
 {
-  "_comment": "Responses of a live Network Authority (1.0.2; the health, key history, policy and evaluation responses 1.8.1; the evidence store responses 1.8.1 with this SDK's execution evidence) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests). evidence_execution_record is the first stored record of evidence_search. evidence_executor_key_record is the first key of GET /admin/evidence/executor-keys and evidence_export_event the first line of GET /admin/evidence/export (1.8.1). attestation_count is GET /attestations unsigned (1.8.1).",
+  "_comment": "Responses of a live Network Authority (1.0.2; the health, key history, policy and evaluation responses 1.8.1; the evidence store responses 1.8.1 with this SDK's execution evidence) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests). evidence_execution_record is the first stored record of evidence_search. evidence_executor_key_record is the first key of GET /admin/evidence/executor-keys and evidence_export_event the first line of GET /admin/evidence/export (1.8.1). attestation_count is GET /attestations unsigned (1.8.1). The out-of-band responses (1.8.1) come from an NA with its out-of-band records on: observation_batch and observation_batch_refused are two results of one batch, operator_holders the first holder of GET /admin/evidence/operator-holders, and judgement_record the judgement of observation_judgement.",
   "agreement_accept": {
     "agreed_terms": {
       "capabilities": [
@@ -826,6 +826,100 @@
     "authorized": true,
     "decision_id": "cb8bb4a7-d882-40c5-8d82-e803f09da4f2",
     "reason": "authorized"
+  },
+  "break_glass_submission": {
+    "entry": {
+      "attestation_id": null,
+      "capability": "partner-secret.rotate",
+      "context_id": null,
+      "decision_id": null,
+      "entry_kind": "break_glass",
+      "evidence_id": null,
+      "exec_sequence_no": null,
+      "executor_sovereign_id": "executor-a",
+      "outcome": "success",
+      "payload_digest": "725d1d1a34d151c79e6274c6f3503dea253081e05cb5013dc3c42cdf870989a3",
+      "prev_entry_digest": "db31ea30bb79f69d709a79208618d5f18a6821a1c0023c5cb6e2934aee0cf106",
+      "record_id": "3ecb6e42-5b0b-4c15-8840-3962bd96663d",
+      "recorded_at": "2026-10-31T14:31:00.811096Z",
+      "resource_action": "rotate",
+      "resource_id": "partner:app-2/secret",
+      "resource_sequence": null,
+      "store_sequence": 12,
+      "vendor_id": null
+    },
+    "entry_digest": "166825244d70657725ca6ee5f3057dcd1445c793e49406a08593d366b651b730",
+    "judgement": {
+      "entry": {
+        "attestation_id": null,
+        "capability": "partner-secret.rotate",
+        "context_id": null,
+        "decision_id": null,
+        "entry_kind": "judgement",
+        "evidence_id": null,
+        "exec_sequence_no": null,
+        "executor_sovereign_id": null,
+        "outcome": "indeterminate",
+        "payload_digest": "601e045f4caec473ccd504da3fd020884c574025a762e62fc39aafde6d7782ef",
+        "prev_entry_digest": "166825244d70657725ca6ee5f3057dcd1445c793e49406a08593d366b651b730",
+        "record_id": "d101acef-f464-4cbe-8dc8-3e0485ccc6c4",
+        "recorded_at": "2026-10-31T14:31:00.814825Z",
+        "resource_action": "rotate",
+        "resource_id": "partner:app-2/secret",
+        "resource_sequence": null,
+        "store_sequence": 13,
+        "subject_id": "3ecb6e42-5b0b-4c15-8840-3962bd96663d",
+        "vendor_id": null
+      },
+      "entry_digest": "48c3131b61ccfe2024a0d5c7135b65050d91f4ad57ba04ac382955d21141f07b",
+      "payload": {
+        "action": "rotate",
+        "capability": "partner-secret.rotate",
+        "evaluated_as_of": "2026-10-31T14:30:30.631129Z",
+        "gate_results": [],
+        "governed_by": "after_the_fact",
+        "issued_by": "na-contract",
+        "issuer_sovereign_id": "contract-na",
+        "judged_at": "2026-10-31T14:31:00.814825Z",
+        "judgement_id": "d101acef-f464-4cbe-8dc8-3e0485ccc6c4",
+        "reason": "the break-glass record names no attestation; the NA cannot judge the evaluation it skipped",
+        "resource_id": "partner:app-2/secret",
+        "signature": {
+          "key_id": "na-contract",
+          "sig": "HRs+DRUtFdEEBBf+0G8LyDntWUxtlK67Sr5FOEXU+5c70NNS/tUJHoECTNPExL02rl5expoXgo/Ya/i589rwDw=="
+        },
+        "subject_digest": "725d1d1a34d151c79e6274c6f3503dea253081e05cb5013dc3c42cdf870989a3",
+        "subject_id": "3ecb6e42-5b0b-4c15-8840-3962bd96663d",
+        "subject_kind": "break_glass",
+        "subject_store_sequence": 12,
+        "verdict": "indeterminate"
+      },
+      "status": "judged"
+    },
+    "payload": {
+      "attributes": {},
+      "break_glass_id": "3ecb6e42-5b0b-4c15-8840-3962bd96663d",
+      "capability": "partner-secret.rotate",
+      "evaluation_failure": "network_error",
+      "evaluation_request_digest": "263071aa2c374b0e7c16a4a89569bd7ffac4513742abc5387302754ba460eec7",
+      "executed_at": "2026-10-31T14:30:30.631129Z",
+      "execution_parameters": {
+        "secret_version": "v3"
+      },
+      "executor_sovereign_id": "executor-a",
+      "justification": "NA unreachable during an incident; rotating the leaked secret",
+      "outcome": "success",
+      "request_parameters": {
+        "app_id": "app-2"
+      },
+      "resource_action": "rotate",
+      "resource_id": "partner:app-2/secret",
+      "signature": {
+        "key_id": "executor-key",
+        "sig": "29285eXSA6oVzhpBW/qn9LYD/wuJ7tfGnjrTkskxDRU/+6H6iqWIYMdXWfFeFBRAx/4bADlv+gMSOpbw9QUDCQ=="
+      }
+    },
+    "status": "recorded"
   },
   "consensus_proof": {
     "cascade_assessment_digest": "e3b104309f8fec479fd9639729e1060a1ae850c93a48f44a8dd56b1f4d31eb88",
@@ -1816,6 +1910,22 @@
     "rejections": 3,
     "retention_checkpoint": null,
     "unanchored_entries": 24,
+    "unjudged_records": 0
+  },
+  "evidence_status_out_of_band": {
+    "active_executor_keys": 0,
+    "entries": 4,
+    "evidence_grants": "off",
+    "evidence_remediation": "off",
+    "evidence_store": "on",
+    "last_store_sequence": 4,
+    "latest_anchor": null,
+    "policy_history_started": "2026-10-31T14:31:00.289172+00:00",
+    "registry_healthy": true,
+    "registry_problems": [],
+    "rejections": 0,
+    "retention_checkpoint": null,
+    "unanchored_entries": 4,
     "unjudged_records": 0
   },
   "evidence_submit": {
@@ -4374,6 +4484,37 @@
     "status": "healthy",
     "version": "v0.1"
   },
+  "holder_proposal": {
+    "approved": false,
+    "holder": "controller-team",
+    "key_id": "controller",
+    "proposal_id": "299ec4be-218f-43ac-917d-821426d41a8a",
+    "proposed_by": "ops"
+  },
+  "judgement_record": {
+    "action": "rotate",
+    "capability": "partner-secret.rotate",
+    "current_policy_set_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "current_verdict": "indeterminate",
+    "evaluated_as_of": "2026-10-31T14:29:00.631129Z",
+    "gate_results": [],
+    "governed_by": "after_the_fact",
+    "issued_by": "na-contract",
+    "issuer_sovereign_id": "contract-na",
+    "judged_at": "2026-10-31T14:31:00.700703Z",
+    "judgement_id": "9a4b2b17-1877-45c1-b09d-9ea71f49ee67",
+    "reason": "the store's policy history starts at 2026-10-31T14:31:00.289172+00:00, after this change",
+    "resource_id": "partner:app-1/secret",
+    "signature": {
+      "key_id": "na-contract",
+      "sig": "7fr3I6RRmYweJg/Lvr6mFi+n9BzOLGuiBevjO0GZgvmttm838cwR3DicHVJFXBZ9+Bbj4eUhQ6kJirrUtTiMDQ=="
+    },
+    "subject_digest": "de7ff3fd856b9262d1186e04f55743fa47b778c63826cec0f1f3c48fd3b12ad7",
+    "subject_id": "2b4a23e501ab23d18518a488b7683e4b677a85b1c4101bc46f09fe308080392a",
+    "subject_kind": "observation",
+    "subject_store_sequence": 7,
+    "verdict": "indeterminate"
+  },
   "na_key_history": {
     "genesis": {
       "allowed_crypto_suites": [
@@ -4422,6 +4563,214 @@
     "sovereign_id": "contract-na",
     "successions": [],
     "vouching_grace_seconds": 86400
+  },
+  "observation_batch": {
+    "entry": {
+      "attestation_id": null,
+      "capability": "partner-secret.update",
+      "context_id": null,
+      "decision_id": null,
+      "entry_kind": "observation",
+      "evidence_id": null,
+      "exec_sequence_no": null,
+      "executor_sovereign_id": "observer-a",
+      "observation_sequence": 2,
+      "outcome": null,
+      "payload_digest": "819959ab5a3a528b740d1521d44cfe76566dbf88adb7d39c8c6ed05480d5562e",
+      "prev_entry_digest": "6c12079a6b0b20b6056cbe9b92ffa08b9c2490de86fb115674bafc7e7b0a6231",
+      "record_id": "41b6ae132be5ce7f1ec51dd16bca6ee6c613c467a49a3c1b195e27513715f364",
+      "recorded_at": "2026-10-31T14:31:00.748779Z",
+      "resource_action": "update",
+      "resource_id": "partner:app-1/secret",
+      "resource_sequence": null,
+      "store_sequence": 9,
+      "vendor_id": null
+    },
+    "entry_digest": "f92bdd6de67afed991796788621b4ec1ea02294953de46ffc6a8678766779c65",
+    "index": 0,
+    "judgement": {
+      "entry": {
+        "attestation_id": null,
+        "capability": "partner-secret.update",
+        "context_id": null,
+        "decision_id": null,
+        "entry_kind": "judgement",
+        "evidence_id": null,
+        "exec_sequence_no": null,
+        "executor_sovereign_id": null,
+        "outcome": "indeterminate",
+        "payload_digest": "2fb8a37c269fd88bc200e22be1b8f9c3dea76729835299611d5650eeeb7f37e5",
+        "prev_entry_digest": "f92bdd6de67afed991796788621b4ec1ea02294953de46ffc6a8678766779c65",
+        "record_id": "94e15ba9-bd61-4d9a-91fa-83da1d1c0776",
+        "recorded_at": "2026-10-31T14:31:00.752544Z",
+        "resource_action": "update",
+        "resource_id": "partner:app-1/secret",
+        "resource_sequence": null,
+        "store_sequence": 10,
+        "subject_id": "41b6ae132be5ce7f1ec51dd16bca6ee6c613c467a49a3c1b195e27513715f364",
+        "vendor_id": null
+      },
+      "entry_digest": "6d528efcb4e279cdec1f7ed97c91baef88fb2693555ac6617e6cf41b138ed2ce",
+      "payload": {
+        "action": "update",
+        "capability": "partner-secret.update",
+        "current_policy_set_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "current_verdict": "indeterminate",
+        "evaluated_as_of": "2026-10-31T14:30:00.631129Z",
+        "evaluated_from": "2026-10-31T14:26:00.631129Z",
+        "gate_results": [],
+        "governed_by": "after_the_fact",
+        "issued_by": "na-contract",
+        "issuer_sovereign_id": "contract-na",
+        "judged_at": "2026-10-31T14:31:00.752544Z",
+        "judgement_id": "94e15ba9-bd61-4d9a-91fa-83da1d1c0776",
+        "reason": "the store's policy history starts at 2026-10-31T14:31:00.289172+00:00, after this change",
+        "resource_id": "partner:app-1/secret",
+        "signature": {
+          "key_id": "na-contract",
+          "sig": "/N+37UJvCAHKKVhme2ibpPufNlqGAFg+lPbl4N9xL73WkoYJ2kmwBbboz/Fx0NG8Un9MME0tB+OV+PiWsRivAw=="
+        },
+        "subject_digest": "819959ab5a3a528b740d1521d44cfe76566dbf88adb7d39c8c6ed05480d5562e",
+        "subject_id": "41b6ae132be5ce7f1ec51dd16bca6ee6c613c467a49a3c1b195e27513715f364",
+        "subject_kind": "observation",
+        "subject_store_sequence": 9,
+        "verdict": "indeterminate"
+      },
+      "status": "judged"
+    },
+    "payload": {
+      "action": "update",
+      "capability": "partner-secret.update",
+      "changed_not_after": "2026-10-31T14:30:00.631129Z",
+      "changed_not_before": "2026-10-31T14:26:00.631129Z",
+      "metadata": {},
+      "observation_id": "41b6ae132be5ce7f1ec51dd16bca6ee6c613c467a49a3c1b195e27513715f364",
+      "observed_at": "2026-10-31T14:31:00.631129Z",
+      "observer_sovereign_id": "observer-a",
+      "resource_id": "partner:app-1/secret",
+      "signature": {
+        "key_id": "observer-key",
+        "sig": "shmOXOMMxe/ddusBbAWJCTbOgkAp9ajlVES7Vkyn0bvQTvfIgu/xAYkfzgiIiSQoEfdteWh5Uq14s/cLbH7cBg=="
+      },
+      "source": "reconciliation",
+      "source_event_id": "scan-1"
+    },
+    "status": "recorded"
+  },
+  "observation_batch_refused": {
+    "error": {
+      "code": "observation_out_of_scope",
+      "details": {
+        "quarantine_id": "e1a64b4c-b94e-44f0-b163-0c0272ed35be"
+      },
+      "message": "signing key covers only resources starting with 'partner:'"
+    },
+    "index": 1,
+    "status": "refused"
+  },
+  "observation_duplicate": {
+    "entry": {
+      "attestation_id": null,
+      "capability": "partner-secret.rotate",
+      "context_id": null,
+      "decision_id": null,
+      "entry_kind": "observation",
+      "evidence_id": null,
+      "exec_sequence_no": null,
+      "executor_sovereign_id": "observer-a",
+      "observation_sequence": 1,
+      "outcome": null,
+      "payload_digest": "de7ff3fd856b9262d1186e04f55743fa47b778c63826cec0f1f3c48fd3b12ad7",
+      "prev_entry_digest": "6b559f22cc043d848add2298d1fb674a52cea8636c602e718175feeebfc29bd3",
+      "record_id": "2b4a23e501ab23d18518a488b7683e4b677a85b1c4101bc46f09fe308080392a",
+      "recorded_at": "2026-10-31T14:31:00.695403Z",
+      "resource_action": "rotate",
+      "resource_id": "partner:app-1/secret",
+      "resource_sequence": null,
+      "store_sequence": 7,
+      "vendor_id": null
+    },
+    "entry_digest": "8ce685f1611b03f3f5920c44e0d7d16ae7258d5fa37ba8ec60cbbd98f38a37a6",
+    "payload": {
+      "action": "rotate",
+      "actor": "principal-7f3a",
+      "capability": "partner-secret.rotate",
+      "changed_at": "2026-10-31T14:29:00.631129Z",
+      "metadata": {
+        "lifetime_days": 90,
+        "vault": "kv-a"
+      },
+      "observation_id": "2b4a23e501ab23d18518a488b7683e4b677a85b1c4101bc46f09fe308080392a",
+      "observed_at": "2026-10-31T14:31:00.635526Z",
+      "observer_sovereign_id": "observer-a",
+      "resource_id": "partner:app-1/secret",
+      "signature": {
+        "key_id": "observer-key",
+        "sig": "w3s9oLg/xpFb2V0oYdbYl22hhdunVIJ9PWooRCW+hmKHXUIQRw4WLwmR6BWU2WbG72eHSFi316hdAx6SiALQDg=="
+      },
+      "source": "cloud-activity-log",
+      "source_event_id": "event-1",
+      "version_id": "v2"
+    },
+    "status": "duplicate"
+  },
+  "observation_judgement": {
+    "entry": {
+      "attestation_id": null,
+      "capability": "partner-secret.rotate",
+      "context_id": null,
+      "decision_id": null,
+      "entry_kind": "judgement",
+      "evidence_id": null,
+      "exec_sequence_no": null,
+      "executor_sovereign_id": null,
+      "outcome": "indeterminate",
+      "payload_digest": "61b5fa6512aa7be56fdcaa6a5424c645765afb95002042a3f94bda28090ce528",
+      "prev_entry_digest": "8ce685f1611b03f3f5920c44e0d7d16ae7258d5fa37ba8ec60cbbd98f38a37a6",
+      "record_id": "9a4b2b17-1877-45c1-b09d-9ea71f49ee67",
+      "recorded_at": "2026-10-31T14:31:00.700703Z",
+      "resource_action": "rotate",
+      "resource_id": "partner:app-1/secret",
+      "resource_sequence": null,
+      "store_sequence": 8,
+      "subject_id": "2b4a23e501ab23d18518a488b7683e4b677a85b1c4101bc46f09fe308080392a",
+      "vendor_id": null
+    },
+    "entry_digest": "6c12079a6b0b20b6056cbe9b92ffa08b9c2490de86fb115674bafc7e7b0a6231",
+    "payload": {
+      "action": "rotate",
+      "capability": "partner-secret.rotate",
+      "current_policy_set_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "current_verdict": "indeterminate",
+      "evaluated_as_of": "2026-10-31T14:29:00.631129Z",
+      "gate_results": [],
+      "governed_by": "after_the_fact",
+      "issued_by": "na-contract",
+      "issuer_sovereign_id": "contract-na",
+      "judged_at": "2026-10-31T14:31:00.700703Z",
+      "judgement_id": "9a4b2b17-1877-45c1-b09d-9ea71f49ee67",
+      "reason": "the store's policy history starts at 2026-10-31T14:31:00.289172+00:00, after this change",
+      "resource_id": "partner:app-1/secret",
+      "signature": {
+        "key_id": "na-contract",
+        "sig": "7fr3I6RRmYweJg/Lvr6mFi+n9BzOLGuiBevjO0GZgvmttm838cwR3DicHVJFXBZ9+Bbj4eUhQ6kJirrUtTiMDQ=="
+      },
+      "subject_digest": "de7ff3fd856b9262d1186e04f55743fa47b778c63826cec0f1f3c48fd3b12ad7",
+      "subject_id": "2b4a23e501ab23d18518a488b7683e4b677a85b1c4101bc46f09fe308080392a",
+      "subject_kind": "observation",
+      "subject_store_sequence": 7,
+      "verdict": "indeterminate"
+    },
+    "status": "existing"
+  },
+  "operator_holders": {
+    "approved_by": null,
+    "holder": "controller",
+    "key_id": "controller",
+    "operator_tier": "standard",
+    "public_key": "MWEtW6t0KkR2HNqJDfky+2yv4F1FjSnKysOUDbgV7r0=",
+    "registry_record_id": "006b7b3f-d243-4204-a1cf-ed5b75e509e7",
+    "since": "2026-10-31T14:31:00.294011+00:00"
   },
   "policy_activate": {
     "active": true,
@@ -4792,6 +5141,54 @@
       }
     ],
     "revoked_attestation_ids": []
+  },
+  "resource_changes": {
+    "changes": [
+      {
+        "action": "rotate",
+        "at": "2026-10-31T14:29:00.631129Z",
+        "governed_by": "after_the_fact",
+        "kind": "observation",
+        "record_id": "2b4a23e501ab23d18518a488b7683e4b677a85b1c4101bc46f09fe308080392a",
+        "recorded_at": "2026-10-31T14:31:00.695403+00:00",
+        "state": "indeterminate",
+        "store_sequence": 7,
+        "verdict": "indeterminate"
+      },
+      {
+        "action": "update",
+        "at": "2026-10-31T14:30:00.631129Z",
+        "governed_by": "after_the_fact",
+        "kind": "observation",
+        "record_id": "41b6ae132be5ce7f1ec51dd16bca6ee6c613c467a49a3c1b195e27513715f364",
+        "recorded_at": "2026-10-31T14:31:00.748779+00:00",
+        "state": "indeterminate",
+        "store_sequence": 9,
+        "verdict": "indeterminate"
+      }
+    ],
+    "next_after_sequence": null,
+    "resource_id": "partner:app-1/secret",
+    "truncated": false
+  },
+  "resource_changes_quarantine": {
+    "changes": [
+      {
+        "action": null,
+        "at": "2026-10-31T14:31:00.756541Z",
+        "governed_by": null,
+        "kind": "quarantine",
+        "record_id": "e1a64b4c-b94e-44f0-b163-0c0272ed35be",
+        "record_kind": "observation",
+        "recorded_at": "2026-10-31T14:31:00.756541+00:00",
+        "rejection_code": "observation_out_of_scope",
+        "state": "quarantined",
+        "store_sequence": 11
+      }
+    ],
+    "next_after_sequence": null,
+    "resource_id": "other:app-9/secret",
+    "truncated": false
   },
   "revocation_feed": {
     "feed_id": "1e387294-b1dd-4e2b-9787-989516d0e295",

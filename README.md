@@ -409,6 +409,96 @@ var checkpoint = await client.EvidenceStore.LatestCheckpoint();  // null before 
   records cover while the NA requires archives (its default). `HeldBack` says
   what stopped it short.
 
+#### Changes outside the governed path
+
+From 1.9 the store also keeps changes made outside the governed path, when the
+NA runs with its out-of-band records on (`EVIDENCE_OUT_OF_BAND=on`; otherwise
+404 `out_of_band_disabled`):
+
+- an **observation**: a change seen at its source, such as an edit in the
+  cloud console or a reconciliation finding, signed by an observer key;
+- a **break-glass record**: a change a controller made while it could not get
+  a decision, signed by its executor key with a justification.
+
+The NA judges each one after the fact, once, in a judgement it signs: how the
+change was governed and whether the policies then allowed it.
+
+```csharp
+// The platform team registers an observer key, as an executor key with the observer role.
+await admin.EvidenceStore.RegisterExecutorKey(new RegisterExecutorKeyRequest
+{
+    KeyId = "cloud-observer", PublicKey = observerPublicKey, ExecutorSovereignId = "partner-portal",
+    Role = "observer", ResourcePrefix = "partner:",
+});
+
+var observer = new ObservationRecorder("partner-portal", new SeedSigner(observerSeed, "cloud-observer"));
+var observation = await observer.Record(new ObservationInput
+{
+    ResourceId = "partner:app-1/secret",
+    Action = ResourceActions.Rotate,
+    Capability = "partner-secret.rotate",
+    ChangedAt = changedAt,                       // or ChangedNotBefore and ChangedNotAfter
+    Actor = "principal-7f3a",                    // as the source reported it; a pseudonym, never a credential
+    Source = "cloud-activity-log",
+    SourceEventId = activityLogEventId,
+    VersionId = "v2",
+});
+var submitted = await client.EvidenceStore.SubmitObservation(observation);  // "recorded", "duplicate" or "quarantined"
+var judgement = submitted.Judgement?.Payload;                                // judged at admission, by default
+
+// A reconciliation finding, observed once per scan (null for a resource in sync).
+var finding = ObservationRecorder.FromFinding(drifted, new FindingObservationOptions
+{
+    Capability = "partner-secret.rotate", PreviousScanAt = lastScan, ScannedAt = thisScan,
+});
+
+// A controller that acted while the NA could not be reached.
+var glass = await executor.SignBreakGlass(new BreakGlassInput
+{
+    ResourceId = "partner:app-1/secret",
+    ResourceAction = ResourceActions.Rotate,
+    Capability = "partner-secret.rotate",
+    Justification = "NA unreachable during an incident; rotating the leaked secret",
+    EvaluationRequest = failedRequest,           // only its digest is recorded
+    EvaluationFailure = EvaluationFailures.NetworkError,
+    Outcome = ExecutionOutcomes.Success,
+});
+await client.EvidenceStore.SubmitBreakGlass(glass);
+
+await foreach (var change in client.EvidenceStore.AllResourceChanges("partner:app-1/secret"))
+    Show(change.Kind, change.GovernedBy, change.State, change.Verdict);
+```
+
+- `Record` and `SignBreakGlass` refuse what the NA would refuse before
+  anything is signed (`OutOfBandRecordException`), in the NA's order:
+  - `*_malformed`: a field missing, empty, too long (counted in characters, as
+    the reference counts them) or not one the NA takes; for an observation,
+    no change time or window, both, or a window that ends before it starts;
+  - `*_secret_material`: secret material in the metadata, the parameters, the
+    attributes, the outcome detail, the justification or the source's own
+    strings, or more than 16 KiB of them (`EvidenceMetadata.ObservationProblem`,
+    `BreakGlassProblem`, `MetadataProblem`).
+
+  A value the NA could not read throws `StrictJsonException`.
+- An observation's ID is derived from the observer, the source and the source
+  event (`ObservationRecorder.ObservationId`), so one source event is one
+  observation: recorded again, it is a `duplicate`, and both submissions are
+  safe to retry. `SubmitObservations` sends up to 100 at once and answers each
+  by its index. A record refused there is `refused` with its code, and the
+  others are still admitted.
+- The NA keeps an authentic record it refuses for good (a retired key, or one
+  outside its key's role or prefix) as a quarantine entry, and one outside its
+  time bounds as `quarantined`.
+- `JudgeObservation` and `JudgeBreakGlass` judge a record that was not judged
+  at admission (standard tier); a second call returns the same judgement
+  (`existing`). `ResourceChanges` reads a page of a resource's changes (read
+  tier); `AllResourceChanges` follows the pages.
+- Operator-key holders: `OperatorHolders` reads them (read tier). A key is its
+  own holder until a holder change names one. `ProposeHolder` proposes one,
+  and `ApproveHolder`, with a privileged key of another named holder, records
+  it (both privileged; the same holder gets 409
+  `holder_change_needs_second_holder`).
+
 ### Governed actions
 
 From 1.9 `Governance.GovernedAction` makes one governed change, as the
@@ -790,6 +880,11 @@ bool executed = OfflineVerifier.VerifyExecutionSignature(evidenceJson, executorP
 bool justified = OfflineVerifier.VerifyJustificationSignature(evaluation.JustificationProof.GetRawText(), history);
 string digest = OfflineVerifier.ExecutionDigest(evidenceJson);   // what the next record links to
 var events = OfflineVerifier.ParseExportLines(exportText);       // gm.evidence.event JSON Lines
+
+// 1.9.0: observations, break-glass records, judgements, quarantine and registry records.
+bool observed = OfflineVerifier.VerifyOutOfBandRecord(observationJson, new[] { observerPublicKey });
+bool judged = OfflineVerifier.VerifyOutOfBandRecord(judgementJson, history);   // the key valid at judged_at
+string signedForm = OfflineVerifier.OutOfBandCanonical(recordJson);            // OutOfBandDigest: its SHA-256
 ```
 
 An accepted DENY has `Accepted` true and `Authorized` false: the decision
@@ -1053,7 +1148,11 @@ All of them derive from `GenesisMeshException` (`Status`, `Code`, `Detail`).
 A `SecretMaterialException` (1.9.0, code `evidence_secret_material`) is
 thrown before anything is signed or sent when an evaluation context holds
 secret material or more than 16 KiB of metadata (`EvidenceMetadata`): the
-SDK's own guard for contexts, and the NA's rule for evidence.
+SDK's own guard for contexts, and the NA's rule for evidence. An
+`OutOfBandRecordException` (1.9.0) is thrown before an observation or a
+break-glass record is signed when the NA would refuse it, with the NA's code
+(`observation_malformed`, `break_glass_secret_material`, ...). Both have
+`Status` 0.
 
 A connection failure or timeout is a `NetworkException`. Its `ConnectFailed`
 is true when the request did not reach the NA, so sending it again cannot

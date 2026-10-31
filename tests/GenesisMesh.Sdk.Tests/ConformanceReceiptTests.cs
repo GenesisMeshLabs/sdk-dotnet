@@ -24,6 +24,7 @@ public class ConformanceReceiptTests
         ["field_registry"] = ["unknown_fields", "verify_decision", "verify_agreement"],
         ["audit"] = ["canonical_form", "key_history", "key_at", "decision_at_record_time", "record_time"],
         ["grants"] = ["canonical_form", "verify_record"],
+        ["out_of_band"] = ["canonical_form", "verify_record", "metadata_problem"],
         ["vouching"] = null,
     };
 
@@ -36,6 +37,7 @@ public class ConformanceReceiptTests
         ConformanceTests.Receipt(),
         KeyHistoryTests.Receipt(),
         GrantsTests.Receipt(),
+        OutOfBandTests.Receipt(),
         VouchingTests.Receipt(),
     ];
 
