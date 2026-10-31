@@ -531,8 +531,15 @@ public static partial class OfflineVerifier
     /// An ISO 8601 timestamp as the reference reads one: <c>YYYY-MM-DDTHH:MM:SS</c> with ASCII digits, up to six fraction
     /// digits, and <c>Z</c>, an offset <c>+HH:MM</c> under 24 hours, or none (UTC); a valid date and time.
     /// </summary>
-    private static bool IsTimestamp(string value)
+    private static bool IsTimestamp(string value) => TryReadTimestamp(value, out _);
+
+    /// <summary>
+    /// As <see cref="IsTimestamp"/>, with the instant it names, in UTC. The offset is applied here: the reference
+    /// reads offsets of 14 hours and more, which <see cref="DateTimeOffset"/> cannot hold.
+    /// </summary>
+    private static bool TryReadTimestamp(string value, out DateTimeOffset instant)
     {
+        instant = default;
         var at = 0;
         int Number(int digits)
         {
@@ -560,27 +567,38 @@ public static partial class OfflineVerifier
         if (year < 1 || month is < 1 or > 12 || day < 1 || day > DateTime.DaysInMonth(year, month)
             || hour is < 0 or > 23 || minute is < 0 or > 59 || second is < 0 or > 59)
             return false;
+        long micros = 0;
         if (Next('.'))
         {
             var digits = 0;
             while (at < value.Length && value[at] is >= '0' and <= '9' && digits <= 6)
             {
+                if (digits < 6) micros = micros * 10 + value[at] - '0';
                 at++;
                 digits++;
             }
             if (digits is 0 or > 6) return false;
+            for (var i = digits; i < 6; i++) micros *= 10;
         }
+        var offset = TimeSpan.Zero;
+        var sign = at < value.Length && value[at] == '-' ? -1 : 1;
         if (Next('+') || Next('-'))
         {
             var offsetHour = Number(2);
             var offsetMinute = Next(':') ? Number(2) : -1;
             if (offsetHour is < 0 or > 23 || offsetMinute is < 0 or > 59) return false;
+            offset = sign * new TimeSpan(offsetHour, offsetMinute, 0);
         }
         else
         {
             Next('Z');
         }
-        return at == value.Length;
+        if (at != value.Length) return false;
+        var local = new DateTime(year, month, day, hour, minute, second, DateTimeKind.Unspecified).AddTicks(micros * 10);
+        // An instant before the year 1 or after 9999 in UTC is read at the end of the range.
+        var utcTicks = Math.Clamp(local.Ticks - offset.Ticks, DateTime.MinValue.Ticks, DateTime.MaxValue.Ticks);
+        instant = new DateTimeOffset(utcTicks, TimeSpan.Zero);
+        return true;
     }
 
     // ── data usage ─────────────────────────────────────────────────────────

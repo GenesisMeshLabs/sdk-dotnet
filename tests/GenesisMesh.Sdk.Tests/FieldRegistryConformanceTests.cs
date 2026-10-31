@@ -16,10 +16,13 @@ public class FieldRegistryConformanceTests
 {
     private static readonly string SuitePath = Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "field_registry.json");
     private static readonly string InteropPath = Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "interop.json");
-    private static readonly HashSet<string> KindsRun = new() { "unknown_fields", "verify_decision", "verify_agreement" };
+    private static readonly HashSet<string> KindsRun = new() { "unknown_fields", "verify_decision", "verify_agreement", "export" };
 
-    /// <summary>Entry kinds and evidence exports: this SDK has no evidence export verifier.</summary>
-    private static readonly HashSet<string> KindsNotRun = new() { "entry_kind", "export" };
+    /// <summary>
+    /// Entry kinds: the vectors expect every kind of the registry to be verified, and this SDK verifies the kinds a
+    /// governed store holds (1.9.0, <see cref="OfflineVerifier.VerifiedEntryKinds"/>).
+    /// </summary>
+    private static readonly HashSet<string> KindsNotRun = new() { "entry_kind" };
 
     private static JsonElement Suite() => JsonDocument.Parse(File.ReadAllText(SuitePath)).RootElement;
 
@@ -148,9 +151,33 @@ public class FieldRegistryConformanceTests
                     Assert.Equal((expected.GetProperty("accepted").GetBoolean(), expected.GetProperty("reason").GetString()), (r.Accepted, r.Reason));
                     break;
                 }
+            case "export":
+                {
+                    // 1.9.0: an export verified offline, without executor keys.
+                    var input = v.GetProperty("input");
+                    var r = OfflineVerifier.VerifyEvidenceEvents(OfflineVerifier.ParseExportLines(input.GetProperty("lines").GetString()!),
+                        new EvidenceVerifyOptions
+                        {
+                            NAPublicKeys = input.TryGetProperty("na_public_keys", out _) ? Strings(input, "na_public_keys") : [],
+                        });
+                    var failures = expected.GetProperty("failures").EnumerateArray()
+                        .Select(f => (f.GetProperty("store_sequence").GetInt64(), f.GetProperty("reason").GetString())).ToList();
+                    Assert.Equal(failures, r.Failures.Select(f => (f.StoreSequence!.Value, (string?)f.Reason)));
+                    break;
+                }
             default:
                 throw new InvalidOperationException($"vector kind {v.GetProperty("kind").GetString()} is not run");
         }
+    }
+
+    [Fact]
+    public void AnEntryAfterAnUnknownKindStillChains()
+    {
+        // 1.9.0, as in TypeScript: the same line twice is an unknown kind, a gap, and an unknown kind again.
+        var line = Vector("export-unknown-entry-kind").GetProperty("input").GetProperty("lines").GetString()!;
+        var events = OfflineVerifier.ParseExportLines(line).Concat(OfflineVerifier.ParseExportLines(line));
+        var r = OfflineVerifier.VerifyEvidenceEvents(events, new EvidenceVerifyOptions());
+        Assert.Equal(["unknown_entry_kind", "store_sequence_gap", "unknown_entry_kind"], r.Failures.Select(f => f.Reason));
     }
 
     private static JsonElement Input(string id) =>

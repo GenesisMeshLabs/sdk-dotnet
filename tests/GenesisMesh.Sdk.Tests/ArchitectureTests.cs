@@ -26,6 +26,7 @@ public partial class ArchitectureTests
         ("Canonical.cs", "canonical"),
         ("StrictFields.cs", "registry"),
         ("OfflineVerifier.cs", "verify"),
+        ("EvidenceVerification.cs", "verify"),
         ("KeyHistory.cs", "verify"),
         ("Grants.cs", "verify"),
         ("Vouching.cs", "verify"),

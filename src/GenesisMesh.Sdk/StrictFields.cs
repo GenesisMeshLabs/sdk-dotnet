@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace GenesisMesh;
 
@@ -122,6 +123,47 @@ public static class StrictFields
         Collect(model, record, prefix, projection: true, found);
         found.Sort(Canonical.CodePointComparer.Instance);
         return found;
+    }
+
+    /// <summary>
+    /// <paramref name="record"/> without the signed fields <paramref name="model"/> does not define, at any depth
+    /// (1.9.0, TypeScript <c>withoutUnknownFields</c>): what the signer did sign, when those fields were added outside
+    /// the signature.
+    /// </summary>
+    internal static JsonElement WithoutUnknownFields(string model, JsonElement record)
+    {
+        if (record.ValueKind != JsonValueKind.Object) return record;
+        var copy = JsonNode.Parse(record.GetRawText())!;
+        Strip(model, copy, projection: true);
+        return JsonSerializer.SerializeToElement(copy);
+    }
+
+    private static void Strip(string model, JsonNode? data, bool projection)
+    {
+        if (data is not JsonObject obj) return;
+        var spec = Model(model);
+        foreach (var (key, value) in obj.ToList())
+        {
+            if (projection && OutsideProjection(spec, key)) continue;
+            if (!spec.Fields.TryGetValue(key, out var nested))
+            {
+                obj.Remove(key);
+                continue;
+            }
+            if (value is null || nested is null || nested.Shape == "timestamp") continue;
+            switch (nested.Shape)
+            {
+                case "object":
+                    Strip(nested.Model, value, false);
+                    break;
+                case "list" when value is JsonArray list:
+                    foreach (var item in list) Strip(nested.Model, item, false);
+                    break;
+                case "map" when value is JsonObject map:
+                    foreach (var (_, item) in map) Strip(nested.Model, item, false);
+                    break;
+            }
+        }
     }
 
     private static bool OutsideProjection(ModelSpec spec, string key) =>

@@ -402,7 +402,7 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
             }
         });
 
-        await Step("the NA verifies the resource's history, decision to execution, and the partner's decisions, denials included", async () =>
+        await Step("the resource's history and the partner's decisions, denials included, verify on the NA and offline", async () =>
         {
             var history = await controller.EvidenceStore.ResourceHistory(Orders);
             Assert.True(history.Verification.Verified);
@@ -413,6 +413,15 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
             var vendor = await controller.EvidenceStore.VendorHistory("partner-org-1");
             Assert.True(vendor.Verification.Verified);
             Assert.Contains(vendor.Entries, e => e.Entry.EntryKind == "decision" && e.Entry.Outcome == "denied");
+            // Offline, as histories: the NA's word is not needed.
+            var keys = await controller.EvidenceStore.ListExecutorKeys();
+            foreach (var (entries, verification) in new[] { (history.Entries, history.Verification), (vendor.Entries, vendor.Verification) })
+            {
+                var offline = OfflineVerifier.VerifyEvidenceEvents(entries,
+                    new EvidenceVerifyOptions { NAPublicKeys = [naKey], ExecutorKeys = keys, Contiguous = false });
+                Assert.Equal((true, verification.CheckedEntries, verification.Decisions, verification.Executions),
+                    (offline.Verified, offline.CheckedEntries, offline.Decisions, offline.Executions));
+            }
         });
 
         await Step("a secret in the request: refused before anything is sent", async () =>
@@ -541,6 +550,13 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
             var store = await controller.EvidenceStore.Verify();
             Assert.True(store.Verified, string.Join("; ", store.Failures.Select(f => $"{f.StoreSequence} {f.Reason} {f.Detail}")));
             Assert.Equal((await controller.EvidenceStore.Status()).Entries, store.CheckedEntries);
+            // The whole store, exported, verifies offline with the keys retired ones included.
+            var export = new List<EvidenceEvent>();
+            await foreach (var e in controller.EvidenceStore.ExportAll()) export.Add(e);
+            var offline = OfflineVerifier.VerifyEvidenceEvents(export,
+                new EvidenceVerifyOptions { NAPublicKeys = [naKey], ExecutorKeys = await controller.EvidenceStore.ListExecutorKeys() });
+            Assert.True(offline.Verified, string.Join("; ", offline.Failures.Select(f => $"{f.StoreSequence} {f.Reason} {f.Detail}")));
+            Assert.Equal((store.CheckedEntries, store.Decisions, store.Executions), (offline.CheckedEntries, offline.Decisions, offline.Executions));
         });
     }
 }
