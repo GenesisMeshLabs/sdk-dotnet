@@ -531,8 +531,16 @@ public static partial class OfflineVerifier
     /// An ISO 8601 timestamp as the reference reads one: <c>YYYY-MM-DDTHH:MM:SS</c> with ASCII digits, up to six fraction
     /// digits, and <c>Z</c>, an offset <c>+HH:MM</c> under 24 hours, or none (UTC); a valid date and time.
     /// </summary>
-    private static bool IsTimestamp(string value)
+    private static bool IsTimestamp(string value) => TryReadTimestamp(value, out _);
+
+    /// <summary>
+    /// As <see cref="IsTimestamp"/>, with the instant it names: microseconds from 0001-01-01T00:00:00Z, as TypeScript
+    /// compares times. The offset is applied here, so an instant may fall before the year 1 or after 9999 in UTC; the
+    /// reference reads offsets of 14 hours and more, which <see cref="DateTimeOffset"/> cannot hold.
+    /// </summary>
+    private static bool TryReadTimestamp(string value, out long instant)
     {
+        instant = 0;
         var at = 0;
         int Number(int digits)
         {
@@ -560,28 +568,41 @@ public static partial class OfflineVerifier
         if (year < 1 || month is < 1 or > 12 || day < 1 || day > DateTime.DaysInMonth(year, month)
             || hour is < 0 or > 23 || minute is < 0 or > 59 || second is < 0 or > 59)
             return false;
+        long micros = 0;
         if (Next('.'))
         {
             var digits = 0;
             while (at < value.Length && value[at] is >= '0' and <= '9' && digits <= 6)
             {
+                if (digits < 6) micros = micros * 10 + value[at] - '0';
                 at++;
                 digits++;
             }
             if (digits is 0 or > 6) return false;
+            for (var i = digits; i < 6; i++) micros *= 10;
         }
+        var offset = TimeSpan.Zero;
+        var sign = at < value.Length && value[at] == '-' ? -1 : 1;
         if (Next('+') || Next('-'))
         {
             var offsetHour = Number(2);
             var offsetMinute = Next(':') ? Number(2) : -1;
             if (offsetHour is < 0 or > 23 || offsetMinute is < 0 or > 59) return false;
+            offset = sign * new TimeSpan(offsetHour, offsetMinute, 0);
         }
         else
         {
             Next('Z');
         }
-        return at == value.Length;
+        if (at != value.Length) return false;
+        instant = new DateTime(year, month, day, hour, minute, second, DateTimeKind.Unspecified).Ticks / 10 + micros
+            - offset.Ticks / 10;
+        return true;
     }
+
+    /// <summary>An instant of <see cref="TryReadTimestamp"/> as a time, at the end of the range when outside it.</summary>
+    private static DateTimeOffset Instant(long micros) =>
+        new(Math.Clamp(micros, DateTime.MinValue.Ticks / 10, DateTime.MaxValue.Ticks / 10) * 10, TimeSpan.Zero);
 
     // ── data usage ─────────────────────────────────────────────────────────
 

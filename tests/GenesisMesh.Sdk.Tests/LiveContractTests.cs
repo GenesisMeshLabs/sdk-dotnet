@@ -449,6 +449,17 @@ public class LiveContractTests
             var contractKey = keys.Single(k => k.KeyId == "contract-executor");
             Assert.Equal((executorPublicKey, "contract:", (string?)null, "executor"), (contractKey.PublicKey, contractKey.ResourcePrefix, contractKey.RetiredAt, contractKey.Role));
 
+            // 1.9.0: the export verifies offline as the NA verified the store, under its key or its key history, and
+            // the resource's history as a history.
+            static (bool, long, long, long) Counts(EvidenceStoreVerification v) => (v.Verified, v.CheckedEntries, v.Decisions, v.Executions);
+            var exportCheck = OfflineVerifier.VerifyEvidenceEvents(exported, new EvidenceVerifyOptions { NAPublicKeys = [naKey], ExecutorKeys = keys });
+            Assert.True(exportCheck.Verified, Failures(exportCheck));
+            Assert.Equal(Counts(storeCheck), Counts(exportCheck));
+            Assert.Equal(Counts(storeCheck), Counts(OfflineVerifier.VerifyEvidenceEvents(exported,
+                new EvidenceVerifyOptions { KeyHistory = history, ExecutorKeys = keys })));
+            Assert.Equal(Counts(resourceHistory.Verification), Counts(OfflineVerifier.VerifyEvidenceEvents(resourceHistory.Entries,
+                new EvidenceVerifyOptions { NAPublicKeys = [naKey], ExecutorKeys = keys, Contiguous = false })));
+
             // A retired key signs no new record, and the records it signed still verify.
             using var retiringKey = Key.Create(SignatureAlgorithm.Ed25519,
                 new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
@@ -477,6 +488,15 @@ public class LiveContractTests
                 (await Assert.ThrowsAsync<NotFoundException>(() => gm.EvidenceStore.RetireExecutorKey("contract-none"))).Code);
             var afterKeys = await gm.EvidenceStore.Verify();
             Assert.True(afterKeys.Verified, Failures(afterKeys));
+            // Offline too, with the retired key among the keys; without it, its record is not authentic.
+            var whole = new List<EvidenceEvent>();
+            await foreach (var e in gm.EvidenceStore.ExportAll()) whole.Add(e);
+            var allKeys = await gm.EvidenceStore.ListExecutorKeys();
+            Assert.Equal(Counts(afterKeys), Counts(OfflineVerifier.VerifyEvidenceEvents(whole,
+                new EvidenceVerifyOptions { NAPublicKeys = [naKey], ExecutorKeys = allKeys })));
+            var withoutRetired = OfflineVerifier.VerifyEvidenceEvents(whole,
+                new EvidenceVerifyOptions { NAPublicKeys = [naKey], ExecutorKeys = allKeys.Where(k => k.KeyId != "contract-retired").ToList() });
+            Assert.Equal(("invalid_signature", "execution"), (Assert.Single(withoutRetired.Failures).Reason, withoutRetired.Failures[0].Detail));
 
             // Retention removes nothing recorded within the day; the store has no checkpoint yet.
             var retention = await gm.EvidenceStore.ApplyRetention(1);

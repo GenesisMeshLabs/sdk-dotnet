@@ -59,7 +59,7 @@ jobs:
           --project tests/GenesisMesh.Sdk.Tests/GenesisMesh.Sdk.Tests.csproj
           --line 96 --branch 84
           --file Auth.cs=98 --file Canonical.cs=97 --file StrictJson.cs=97
-          --file StrictFields.cs=100 --file OfflineVerifier.cs=92
+          --file StrictFields.cs=100 --file OfflineVerifier.cs=92 --file EvidenceVerification.cs=100
           --file KeyHistory.cs=94 --file Grants.cs=100 --file Transport.cs=97 --file Metadata.cs=96
           --file Execution.cs=98 --file Clients/EvidenceStoreClient.cs=100
           --file Governance.cs=99 --file Outbox.cs=97

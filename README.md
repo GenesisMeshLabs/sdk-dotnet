@@ -19,9 +19,10 @@ submits execution evidence, reads where each resource's chain ends, and reads
 and administers the store: its status, the NA's verification of it, resource
 and vendor histories, the export, executor keys and retention (see
 [EvidenceStore](#evidencestore)). It runs governed actions with the evidence
-outbox and reconciliation (see [Governed actions](#governed-actions)). Not yet
-here: verifying an evidence export offline (this SDK parses one), store anchors,
-none of the 1.3.0 changes outside the controlled path (observations,
+outbox and reconciliation (see [Governed actions](#governed-actions)), and
+verifies an export offline (see [Verifying an export](#verifying-an-export)).
+Not yet here: verifying the store's 1.3.0 and later entry kinds offline, store
+anchors, none of the 1.3.0 changes outside the controlled path (observations,
 break-glass records, the record outbox), and none of the 1.4.0 remediation and
 review APIs (remediation records, the due queue, reviews, urgent actions).
 Those live in the [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript)
@@ -396,7 +397,8 @@ var checkpoint = await client.EvidenceStore.LatestCheckpoint();  // null before 
   an export whose positions do not advance. `ParseExportLines` refuses a line
   that is not strict JSON (`StrictJsonException`), or not an event of schema
   version 1 with exactly the reference's envelope (`JsonException`, with the
-  line number). Verifying an export offline is not in this SDK yet.
+  line number). `OfflineVerifier.VerifyEvidenceEvents` verifies the events
+  offline (see [Verifying an export](#verifying-an-export)).
 - A retired key still verifies the records it signed and signs no new one
   (`evidence_executor_key_retired`). Its ID cannot be registered again, and
   retiring it again is `executor_key_retired` (`ConflictException`).
@@ -761,6 +763,53 @@ verifiers pass the shared `interop` conformance vectors
 cross-language scenario (`interop/`) also has them verify agreements,
 decisions, a license policy and an intent that a live NA signs, on every pull
 request and push to the core's `main`.
+
+### Verifying an export
+
+From 1.9 an export, or a history, verifies offline, without trusting the NA:
+
+```csharp
+var events = new List<EvidenceEvent>();
+await foreach (var e in admin.EvidenceStore.ExportAll()) events.Add(e);
+var keys = await admin.EvidenceStore.ListExecutorKeys();            // retired keys included
+var result = OfflineVerifier.VerifyEvidenceEvents(events, new EvidenceVerifyOptions
+{
+    KeyHistory = await admin.NA.VerifiedKeyHistory(rootPublicKey),  // or NAPublicKeys = [naKey]
+    ExecutorKeys = keys,
+});
+// result.Verified, result.Failures: StoreSequence, Reason, Detail
+
+var history = await admin.EvidenceStore.ResourceHistory(resourceId);
+var check = OfflineVerifier.VerifyEvidenceEvents(history.Entries, new EvidenceVerifyOptions
+{
+    NAPublicKeys = [naKey],
+    ExecutorKeys = keys,
+    Contiguous = false,                                             // a history is no run of the store
+});
+bool kept = OfflineVerifier.VerifyRetentionCheckpoint(checkpointJson, [naKey]);
+```
+
+- It is a port of the reference's `verify_evidence_events`, with its reason
+  codes:
+  - each envelope and its digests, and the store chain;
+  - every signature: the NA's on decisions, justification proofs and
+    retention checkpoints, under its keys or the key valid at the time
+    (with a key history), and the executor's on execution evidence;
+  - each execution record against its decision (`evidence_decision_denied`,
+    `evidence_outside_decision_window`, `evidence_capability_mismatch`);
+  - the decision and resource chains.
+
+  A bad entry is a failure, never an exception.
+- It verifies the kinds a governed store holds: decisions, justification
+  proofs, execution evidence and retention checkpoints. Entries of the 1.3.0
+  and later kinds fail as `unknown_entry_kind`; their envelopes still chain.
+  Verify a store holding them with the TypeScript or Rust SDK, or
+  `genesis-mesh audit verify`. Anchors are not checked.
+- For an export that starts after a retention, pass `Checkpoint`, the
+  NA-signed checkpoint as received: the run continues from its last removed
+  entry, and each resource chain from its head.
+- It runs the shared `field_registry` suite's `export` vectors, and gives the
+  reference's own verification of its export.
 
 ### NA key history
 
