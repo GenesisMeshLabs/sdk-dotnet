@@ -47,6 +47,12 @@ public static class EvidenceOutbox
     public const string NetworkError = "network_error";
 
     /// <summary>
+    /// The local refusal code of a record outbox entry of a kind no route takes, which only a store of your own can
+    /// hold: it is a dead letter, so it does not hold back the records after it.
+    /// </summary>
+    public const string UnknownRecordKind = "record_kind_unknown";
+
+    /// <summary>
     /// The NA's refusals that no retry of the same record overcomes. Every other failure is retried: a network error, a
     /// timeout, a <c>5xx</c> or <c>429</c>, an executor key not registered yet, a gap behind a record not admitted yet,
     /// a disabled store, a proxy's error page.
@@ -210,6 +216,14 @@ public static class EvidenceOutbox
             QueuedAt = Time(now ?? DateTimeOffset.UtcNow),
         };
     }
+
+    /// <summary>
+    /// The failure of a submission answered by a success without a body, such as a proxy's 204: not the NA's answer,
+    /// which may or may not have admitted the record. Classified as an answer this SDK could not read
+    /// (<c>response_body_unreadable</c>), so the record stays pending, and a resubmission gets a <c>duplicate</c> if
+    /// the NA holds it.
+    /// </summary>
+    internal static StrictJsonException NoAnswer() => new("response_body_unreadable", "the NA's answer to the record has no body");
 
     /// <summary>A new pending record outbox entry for a signed observation.</summary>
     public static RecordOutboxEntry RecordEntry(ObservationRecord observation, DateTimeOffset? now = null)

@@ -115,13 +115,13 @@ public sealed class RecordOutboxTests : IDisposable
 
     private static HttpResponseMessage Batch(params string[] results) => Json(200, $$"""{"results":[{{string.Join(",", results)}}]}""");
 
-    private static GenesisMeshClient Client(Na na, IOutbox<RecordOutboxEntry>? outbox) => new(new ClientOptions
+    private static GenesisMeshClient Client(Na na, IOutbox<RecordOutboxEntry>? outbox, int retries = 0) => new(new ClientOptions
     {
         BaseUrl = "http://localhost",
         SigningKey = TestHelpers.ZeroSeedB64,
         KeyId = "ops",
         Audience = "TEST",
-        Retry = new RetrySettings { Attempts = 0 },
+        Retry = new RetrySettings { Attempts = retries, BaseDelay = TimeSpan.Zero },
         RecordOutbox = outbox,
         HttpHandler = new AsyncHandler(na.Respond),
     });
@@ -133,16 +133,20 @@ public sealed class RecordOutboxTests : IDisposable
         public bool FailList { get; set; }
         public bool FailUpdates { get; set; }
         public bool FailRemoves { get; set; }
+        /// <summary>Updates and removals fail as a store's own timeout does, though the caller did not cancel.</summary>
+        public bool CancelWrites { get; set; }
         public Func<Task>? DuringList { get; set; }
         public int Lists { get; private set; }
 
         public Task Add(RecordOutboxEntry entry, CancellationToken ct = default) => _inner.Add(entry, ct);
 
         public Task Update(RecordOutboxEntry entry, CancellationToken ct = default) =>
-            FailUpdates ? Task.FromException(new IOException("disk")) : _inner.Update(entry, ct);
+            CancelWrites ? Task.FromException(new TaskCanceledException("store timeout"))
+            : FailUpdates ? Task.FromException(new IOException("disk")) : _inner.Update(entry, ct);
 
         public Task Remove(string id, CancellationToken ct = default) =>
-            FailRemoves ? Task.FromException(new IOException("disk")) : _inner.Remove(id, ct);
+            CancelWrites ? Task.FromException(new TaskCanceledException("store timeout"))
+            : FailRemoves ? Task.FromException(new IOException("disk")) : _inner.Remove(id, ct);
 
         public async Task<IReadOnlyList<RecordOutboxEntry>> List(CancellationToken ct = default)
         {
@@ -277,6 +281,35 @@ public sealed class RecordOutboxTests : IDisposable
         Assert.Contains("invalid_json", EvidenceOutbox.RecordPermanentRefusals);
     }
 
+    [Fact]
+    public void RecordPermanentRefusals_AreTheTypeScriptSdks_AndLeaveOutWhatIsRetried()
+    {
+        string[] typescript =
+        [
+            "invalid_json", "invalid_observation", "observation_malformed", "observation_invalid_signature", "observation_key_retired",
+            "observation_out_of_scope", "observation_secret_material", "observation_conflict", "invalid_break_glass", "break_glass_malformed",
+            "break_glass_invalid_signature", "break_glass_key_retired", "break_glass_out_of_scope", "break_glass_secret_material",
+            "break_glass_conflict", "invalid_remediation", "remediation_malformed", "remediation_invalid_signature", "remediation_key_retired",
+            "remediation_out_of_scope", "remediation_secret_material", "remediation_subject_mismatch", "remediation_steps_mismatch",
+            "remediation_rotation_mismatch", "remediation_rotation_before_change", "remediation_rotation_other_executor",
+            "remediation_rotation_reused", "remediation_not_due", "remediation_already_recorded", "remediation_conflict", "invalid_grant_use",
+            "grant_use_malformed", "grant_not_found", "grant_use_invalid_signature", "grant_bearer_mismatch", "grant_use_secret_material",
+            "grant_bearer_key_retired", "grant_mismatch", "grant_use_conflict", "grant_use_chain_mismatch", "grant_capability_mismatch",
+            "grant_envelope_mismatch", "grant_budget_exhausted", "grant_time_token_invalid", "grant_time_token_mismatch",
+            "grant_time_token_regressed", "grant_time_token_exhausted", "grant_use_before_time_token", "grant_use_out_of_order",
+            "grant_use_outside_validity", "grant_use_uploaded_late", "grant_revoked", "grant_use_out_of_scope",
+        ];
+        Assert.Equal(typescript.Order(StringComparer.Ordinal), EvidenceOutbox.RecordPermanentRefusals.Order(StringComparer.Ordinal));
+        foreach (var retried in new[]
+        {
+            "observation_unknown_key", "break_glass_unknown_key", "remediation_subject_not_found", "remediation_rotation_missing",
+            "remediation_disabled", "grant_use_chain_gap", "grant_use_in_future", "grants_disabled", "out_of_band_disabled",
+        })
+        {
+            Assert.DoesNotContain(retried, EvidenceOutbox.RecordPermanentRefusals);
+        }
+    }
+
     // ── EnqueueRecord ────────────────────────────────────────────────────────
 
     [Fact]
@@ -316,6 +349,30 @@ public sealed class RecordOutboxTests : IDisposable
         Assert.Equal((queued.Id, queued.Attempts, queued.NextAttemptAt), (stored.Id, stored.Attempts, stored.NextAttemptAt));
     }
 
+    [Theory]
+    [InlineData(204)]
+    [InlineData(200)]
+    public async Task AnAnswerWithoutABody_LeavesTheRecordPending(int status)
+    {
+        // A success without a body, such as a proxy's 204: the NA may or may not hold the record.
+        var na = new Na { Answer = (_, _) => new HttpResponseMessage((HttpStatusCode)status) };
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        using var gm = Client(na, outbox);
+        var glass = await Glass();
+        var queued = (await gm.EvidenceStore.EnqueueRecord(glass)).Queued!;
+        Assert.Equal((OutboxStates.Pending, "response_body_unreadable"), (queued.State, queued.LastError!.Code));
+        await outbox.Add(Raw("o-1"));
+        var flushed = await gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true });
+        Assert.Empty(flushed.Admitted);
+        Assert.Equal(["/evidence/break-glass", "/evidence/break-glass"], na.Paths);
+        // A batch answered so is pending too.
+        na.Answer = (path, _) => path.EndsWith("/batch", StringComparison.Ordinal) ? new HttpResponseMessage((HttpStatusCode)status) : null;
+        var batch = await gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true });
+        Assert.Equal(glass.BreakGlassId, Assert.Single(batch.Admitted).Id);
+        Assert.Equal(("o-1", "response_body_unreadable"), (Assert.Single(batch.Pending).Id, batch.Pending[0].LastError!.Code));
+        Assert.Equal("o-1", Assert.Single(await outbox.List()).Id);
+    }
+
     [Fact]
     public async Task EnqueueRecord_DeadLettersAFinalRefusal_KeepingItsQuarantine_AndRetriesAnUnknownKey()
     {
@@ -324,8 +381,8 @@ public sealed class RecordOutboxTests : IDisposable
         using var gm = Client(na, outbox);
         var glass = await Glass();
         var dead = (await gm.EvidenceStore.EnqueueRecord(glass)).Queued!;
-        Assert.Equal((OutboxStates.DeadLetter, "break_glass_invalid_signature", "q-1", null),
-            (dead.State, dead.LastError!.Code, dead.LastError.QuarantineId, dead.NextAttemptAt));
+        Assert.Equal((OutboxStates.DeadLetter, 1, "break_glass_invalid_signature", "q-1", null),
+            (dead.State, dead.Attempts, dead.LastError!.Code, dead.LastError.QuarantineId, dead.NextAttemptAt));
         Assert.Equal("/evidence/break-glass", na.Sent[0].Path);
         Assert.Equal(glass.BreakGlassId, (string?)na.Sent[0].Body["record"]!["break_glass_id"]);
         // A dead letter enqueued again is returned as it is, unsent.
@@ -345,7 +402,11 @@ public sealed class RecordOutboxTests : IDisposable
         using var gm = Client(na, outbox);
         var record = await Observe(1);
         await gm.EvidenceStore.EnqueueRecord(record);
-        Assert.Equal(2, (await gm.EvidenceStore.EnqueueRecord(record)).Queued!.Attempts);
+        var before = DateTimeOffset.UtcNow;
+        var twice = (await gm.EvidenceStore.EnqueueRecord(record)).Queued!;
+        // 5 seconds after one failure, 10 after two.
+        Assert.Equal(2, twice.Attempts);
+        Assert.True(EvidenceOutbox.ParseTime(twice.NextAttemptAt) >= before.AddSeconds(9));
         var other = await Observer.Record(new ObservationInput
         {
             ResourceId = "kv:prod/other",
@@ -370,18 +431,20 @@ public sealed class RecordOutboxTests : IDisposable
         var outbox = new MemoryOutbox<RecordOutboxEntry>();
         foreach (var entry in new[]
         {
-            Raw("r-1", RecordOutboxKinds.Remediation), Raw("o-1"), Raw("u-1", RecordOutboxKinds.GrantExecution),
-            Raw("b-1", RecordOutboxKinds.BreakGlass), Raw("o-2"),
+            Raw("r-2", RecordOutboxKinds.Remediation), Raw("o-1"), Raw("u-1", RecordOutboxKinds.GrantExecution),
+            Raw("b-1", RecordOutboxKinds.BreakGlass), Raw("o-2"), Raw("r-1", RecordOutboxKinds.Remediation),
         })
         {
             await outbox.Add(entry);
         }
+        na.Answer = (path, _) => path == "/evidence/break-glass" ? Recorded("quarantined") : null;
         using var gm = Client(na, outbox);
         var result = await gm.EvidenceStore.FlushRecords();
-        Assert.Equal(["b-1", "u-1", "o-1", "o-2", "r-1"], result.Admitted.Select(e => e.Id));
+        Assert.Equal(["b-1", "u-1", "o-1", "o-2", "r-2", "r-1"], result.Admitted.Select(e => e.Id));
+        Assert.Equal("b-1", Assert.Single(result.Quarantined).Id);
         Assert.Equal(
             [("/evidence/break-glass", "record"), ("/evidence/grant-executions", "evidence"), ("/evidence/observations/batch", "observations"),
-             ("/evidence/remediations", "record")],
+             ("/evidence/remediations", "record"), ("/evidence/remediations", "record")],
             na.Sent.Select(s => (s.Path, s.Body.Single().Key)));
         Assert.Equal("u-1", (string?)na.Sent[1].Body["evidence"]!["id"]);
         Assert.Empty(result.Pending);
@@ -399,21 +462,22 @@ public sealed class RecordOutboxTests : IDisposable
                 Result(2, "quarantined"),
                 """{"index":4,"status":"refused","error":{"code":"observation_conflict","message":"taken"}}""",
                 """{"index":5,"status":"refused","error":{"code":"observation_unknown_key","message":"not yet"}}""",
-                """{"index":6,"status":"refused"}"""),
+                """{"index":6,"status":"refused"}""",
+                """{"index":7,"status":"refused","error":{} }"""),
         };
         var outbox = new MemoryOutbox<RecordOutboxEntry>();
-        for (var n = 0; n < 7; n++) await outbox.Add(Raw($"o-{n}"));
+        for (var n = 0; n < 8; n++) await outbox.Add(Raw($"o-{n}"));
         using var gm = Client(na, outbox);
         var result = await gm.EvidenceStore.FlushRecords();
-        Assert.Equal([7], na.Batches);
+        Assert.Equal([8], na.Batches);
         Assert.Equal(["o-0", "o-2"], result.Admitted.Select(e => e.Id));
         Assert.Equal("o-2", Assert.Single(result.Quarantined).Id);
-        Assert.Equal([("o-1", "observation_out_of_scope", 422, "q-1"), ("o-4", "observation_conflict", 409, null)],
-            result.DeadLettered.Select(e => (e.Id, e.LastError!.Code, e.LastError.Status, e.LastError.QuarantineId)));
+        Assert.Equal([("o-1", "observation_out_of_scope", "out of scope", 422, "q-1"), ("o-4", "observation_conflict", "taken", 409, null)],
+            result.DeadLettered.Select(e => (e.Id, e.LastError!.Code, e.LastError.Message, e.LastError.Status, e.LastError.QuarantineId)));
         // Unanswered, refused for a key not registered yet, or refused without a reason: still pending.
-        Assert.Equal([("o-3", null), ("o-5", "observation_unknown_key"), ("o-6", "unknown")],
-            result.Pending.Select(e => (e.Id, e.LastError?.Code)));
-        Assert.Equal(["o-1", "o-3", "o-4", "o-5", "o-6"], (await outbox.List()).Select(e => e.Id));
+        Assert.Equal([("o-3", null, null), ("o-5", "observation_unknown_key", "not yet"), ("o-6", "unknown", "unknown"), ("o-7", "unknown", "unknown")],
+            result.Pending.Select(e => (e.Id, e.LastError?.Code, e.LastError?.Message)));
+        Assert.Equal(["o-1", "o-3", "o-4", "o-5", "o-6", "o-7"], (await outbox.List()).Select(e => e.Id));
     }
 
     [Fact]
@@ -439,6 +503,27 @@ public sealed class RecordOutboxTests : IDisposable
         Assert.Equal([1, 1], na.Batches);
         Assert.Equal(["o-1", "o-due"], na.Sent.Skip(1).Select(s => (string?)s.Body["observations"]![0]!["id"]));
         Assert.Equal(["b-1", "o-later"], (await gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true })).Admitted.Select(e => e.Id));
+    }
+
+    [Fact]
+    public async Task FlushRecords_LeavesDeadLettersUnsent_AndAFinalRefusalHoldsNothingBack()
+    {
+        var na = new Na();
+        na.Answer = (path, _) => path == "/evidence/break-glass" ? Refused(422, "break_glass_malformed", retryAfter: 600) : null;
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        await outbox.Add(Raw("o-dead") with { State = OutboxStates.DeadLetter, Attempts = 1 });
+        await outbox.Add(Raw("b-1", RecordOutboxKinds.BreakGlass, nextAttemptAt: EvidenceOutbox.Time(DateTimeOffset.UtcNow.AddMinutes(-1))) with { Attempts = 2 });
+        await outbox.Add(Raw("o-1"));
+        using var gm = Client(na, outbox);
+        var result = await gm.EvidenceStore.FlushRecords();
+        var dead = Assert.Single(result.DeadLettered);
+        Assert.Equal(("b-1", 3, null), (dead.Id, dead.Attempts, dead.NextAttemptAt));
+        Assert.Equal("o-1", Assert.Single(result.Admitted).Id);
+        Assert.Empty(result.Pending);
+        Assert.Equal(["/evidence/break-glass", "/evidence/observations/batch"], na.Paths);
+        await outbox.Add(Raw("o-2"));
+        Assert.Equal("o-2", Assert.Single((await gm.EvidenceStore.FlushRecords()).Admitted).Id);
+        Assert.Equal(["o-dead", "b-1"], (await outbox.List()).Select(e => e.Id));
     }
 
     [Fact]
@@ -469,11 +554,40 @@ public sealed class RecordOutboxTests : IDisposable
         na.Answer = (_, body) => body["observations"]!.AsArray().Count == 4 ? Refused(400, "invalid_json") : Refused(503, "unavailable");
         var outbox = new MemoryOutbox<RecordOutboxEntry>();
         for (var n = 0; n < 4; n++) await outbox.Add(Raw($"o-{n}"));
+        await outbox.Add(Raw("r-1", RecordOutboxKinds.Remediation));
         using var gm = Client(na, outbox);
         var result = await gm.EvidenceStore.FlushRecords();
         Assert.Equal([4, 2], na.Batches);
-        Assert.Equal([("o-0", 1), ("o-1", 1), ("o-2", 0), ("o-3", 0)], result.Pending.Select(e => (e.Id, e.Attempts)));
+        Assert.Equal([("o-0", 1), ("o-1", 1), ("o-2", 0), ("o-3", 0), ("r-1", 0)], result.Pending.Select(e => (e.Id, e.Attempts)));
         Assert.Empty(result.Admitted);
+        Assert.DoesNotContain("/evidence/remediations", na.Paths);
+    }
+
+    [Fact]
+    public async Task FlushRecords_KeepsABatchPending_WhenTheNARefusesItForAReasonARetryMayOvercome()
+    {
+        var na = new Na { Answer = (_, _) => Refused(400, "request_not_ready") };
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        await outbox.Add(Raw("o-0"));
+        await outbox.Add(Raw("o-1"));
+        using var gm = Client(na, outbox);
+        var result = await gm.EvidenceStore.FlushRecords();
+        Assert.Equal([("o-0", 1, "request_not_ready"), ("o-1", 1, "request_not_ready")], result.Pending.Select(e => (e.Id, e.Attempts, e.LastError!.Code)));
+        Assert.Equal(["/evidence/observations/batch"], na.Paths);
+    }
+
+    [Fact]
+    public async Task FlushRecords_RetriesTheRecordRoutes_AsResubmittingARecordIsSafe()
+    {
+        var na = new Na();
+        var answered = new HashSet<string>();
+        na.Answer = (path, _) => answered.Add(path) ? Refused(503, "unavailable") : null;
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        await outbox.Add(Raw("b-1", RecordOutboxKinds.BreakGlass));
+        await outbox.Add(Raw("o-1"));
+        using var gm = Client(na, outbox, retries: 1);
+        Assert.Equal(2, (await gm.EvidenceStore.FlushRecords()).Admitted.Count);
+        Assert.Equal(["/evidence/break-glass", "/evidence/break-glass", "/evidence/observations/batch", "/evidence/observations/batch"], na.Paths);
     }
 
     [Fact]
@@ -528,6 +642,22 @@ public sealed class RecordOutboxTests : IDisposable
     }
 
     [Fact]
+    public async Task FlushRecords_KeepsBatchesOfOne_AfterABatchOfOneIsThrottled()
+    {
+        var na = new Na();
+        na.Answer = (_, _) => Refused(429, "rate_limit_exceeded");
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        await outbox.Add(Raw("o-0"));
+        using var gm = Client(na, outbox);
+        Assert.Single((await gm.EvidenceStore.FlushRecords()).Pending);
+        na.Answer = (_, _) => null;
+        await outbox.Add(Raw("o-1"));
+        await outbox.Add(Raw("o-2"));
+        Assert.Equal(3, (await gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true })).Admitted.Count);
+        Assert.Equal([1, 1, 1, 1], na.Batches);
+    }
+
+    [Fact]
     public async Task FlushRecords_SettlesWhatTheNAAnswered_WhenTheOutboxCannotStoreIt()
     {
         var na = new Na();
@@ -542,19 +672,29 @@ public sealed class RecordOutboxTests : IDisposable
         Assert.Equal("b-2", Assert.Single(result.DeadLettered).Id);
         // Still stored as they were: the next flush resubmits the admitted ones and gets duplicates.
         Assert.Equal([OutboxStates.Pending, OutboxStates.Pending, OutboxStates.Pending], (await outbox.List()).Select(e => e.State));
+
+        // A store that cancels its own writes, though the caller did not, is no different.
+        outbox.CancelWrites = true;
+        Assert.Equal("recorded", (await gm.EvidenceStore.EnqueueRecord(await Observe(1))).Submission!.Status);
+        na.Answer = (_, _) => Refused(503, "unavailable");
+        Assert.Equal(OutboxStates.Pending, (await gm.EvidenceStore.EnqueueRecord(await Observe(2))).Queued!.State);
     }
 
     [Fact]
-    public async Task FlushRecords_KeepsARecordOfAnUnknownKindPending()
+    public async Task FlushRecords_DeadLettersARecordOfAnUnknownKind_AndSendsTheRecordsAfterIt()
     {
         var na = new Na();
         var outbox = new MemoryOutbox<RecordOutboxEntry>();
         await outbox.Add(Raw("x-1", "decision"));
+        await outbox.Add(Raw("r-1", RecordOutboxKinds.Remediation));
         using var gm = Client(na, outbox);
-        var pending = Assert.Single((await gm.EvidenceStore.FlushRecords()).Pending);
-        Assert.Equal((EvidenceOutbox.LocalError, 1), (pending.LastError!.Code, pending.Attempts));
-        Assert.Contains("unknown kind, decision", pending.LastError.Message, StringComparison.Ordinal);
-        Assert.Empty(na.Sent);
+        var result = await gm.EvidenceStore.FlushRecords();
+        var dead = Assert.Single(result.DeadLettered);
+        Assert.Equal(("x-1", EvidenceOutbox.UnknownRecordKind, 0, 1), (dead.Id, dead.LastError!.Code, dead.LastError.Status, dead.Attempts));
+        Assert.Contains("unknown kind, decision", dead.LastError.Message, StringComparison.Ordinal);
+        Assert.Equal("r-1", Assert.Single(result.Admitted).Id);
+        Assert.Equal(["/evidence/remediations"], na.Paths);
+        Assert.Equal(OutboxStates.DeadLetter, Assert.Single(await outbox.List()).State);
     }
 
     [Fact]
@@ -630,6 +770,43 @@ public sealed class RecordOutboxTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting.WaitAsync(TimeSpan.FromSeconds(10)));
         release.SetResult();
         Assert.Single((await running).Admitted);
+    }
+
+    [Fact]
+    public async Task FlushRecords_AJoinerThatCancelsStopsWaiting_AndTheRunGoesOn()
+    {
+        var na = new Na();
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        await outbox.Add(Raw("o-1"));
+        var release = new TaskCompletionSource();
+        na.During = _ => release.Task;
+        using var gm = Client(na, outbox);
+        var running = gm.EvidenceStore.FlushRecords();
+        using var cts = new CancellationTokenSource();
+        var joiner = gm.EvidenceStore.FlushRecords(null, cts.Token);
+        await cts.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => joiner.WaitAsync(TimeSpan.FromSeconds(10)));
+        release.SetResult();
+        Assert.Single((await running).Admitted);
+    }
+
+    [Fact]
+    public async Task FlushRecords_AWaiterWhoseRunItsOwnerCancelled_StartsItsOwn()
+    {
+        var na = new Na();
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        await outbox.Add(Raw("o-1"));
+        var hold = new TaskCompletionSource();
+        na.During = ct => hold.Task.WaitAsync(ct);
+        using var gm = Client(na, outbox);
+        using var owner = new CancellationTokenSource();
+        var cancelled = gm.EvidenceStore.FlushRecords(null, owner.Token);
+        // It asks for more than the run tries, so it waits for the run to end rather than joining it.
+        var waiter = gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true });
+        na.During = null;
+        await owner.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+        Assert.Equal("o-1", Assert.Single((await waiter.WaitAsync(TimeSpan.FromSeconds(10))).Admitted).Id);
     }
 
     [Fact]

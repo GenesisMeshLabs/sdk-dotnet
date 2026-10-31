@@ -534,9 +534,12 @@ var flushed = await client.EvidenceStore.FlushRecords();  // at startup and on a
   change finds its break-glass record, then observations in batches of up to
   100, each in the order added. A batch the NA refuses whole, such as one
   holding a record it cannot read, is split until the record it refuses is
-  tried alone. A batch it throttles (429) halves the batches that follow, and
-  every record waits as long as its `Retry-After` asks. A transient failure
-  ends the run; the next one goes on from there.
+  tried alone. A batch it throttles (429) halves the client's batches from
+  then on. A transient answer that names a wait (`Retry-After`, such as a 429
+  or a 503) holds every record back that long, at least 5 seconds and at most
+  15 minutes; `EnqueueRecord` still submits its own record. A transient
+  failure ends the run; the next one goes on from there. An empty answer, such
+  as a proxy's 204, leaves the record pending (`response_body_unreadable`).
 - `FileRecordOutbox` writes the format of the TypeScript and Rust SDKs
   (`gm.evidence.record-outbox.v1`), and keeps each record as it was read, so a
   controller can move between them. A grant use or remediation record one of

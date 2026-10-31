@@ -3448,7 +3448,7 @@ public sealed class RegistryRecord
 
 /// <summary>
 /// The NA's answer to an observation or a break-glass record (<see cref="EvidenceStoreClient.SubmitObservation"/>,
-/// <see cref="EvidenceStoreClient.SubmitBreakGlass"/>).
+/// <see cref="EvidenceStoreClient.SubmitBreakGlass"/>), and to the other records the record outbox submits.
 /// </summary>
 public sealed class RecordSubmission
 {
@@ -3897,10 +3897,10 @@ public static class RecordOutboxKinds
     /// <summary>A break-glass record (<see cref="BreakGlassRecord"/>).</summary>
     public const string BreakGlass = "break_glass";
     /// <summary>
-    /// A remediation record. This SDK does not sign them yet; one another SDK kept in a shared outbox is submitted.
+    /// A remediation record. This SDK does not sign them yet; one in an outbox another SDK wrote is submitted.
     /// </summary>
     public const string Remediation = "remediation";
-    /// <summary>A grant use. This SDK does not sign them yet; one another SDK kept in a shared outbox is submitted.</summary>
+    /// <summary>A grant use. This SDK does not sign them yet; one in an outbox another SDK wrote is submitted.</summary>
     public const string GrantExecution = "grant_execution";
 }
 
@@ -3972,7 +3972,7 @@ public sealed class RecordFlushResult
     /// <summary>Of those, the ones the NA kept as quarantine entries, such as an observation outside its time bounds.</summary>
     public IReadOnlyList<RecordOutboxEntry> Quarantined { get; init; } = [];
 
-    /// <summary>Entries still pending: not yet due, after the run stopped, or failed again.</summary>
+    /// <summary>Entries still pending: not yet due, after the run stopped, left unanswered in a batch's answer, or failed again.</summary>
     public IReadOnlyList<RecordOutboxEntry> Pending { get; init; } = [];
 
     /// <summary>Entries this run moved to the dead letters.</summary>

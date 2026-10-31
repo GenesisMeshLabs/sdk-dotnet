@@ -97,10 +97,12 @@ public sealed partial class EvidenceStoreClient
     /// Submits the record outbox's pending records: break-glass records first, then grant uses, then observations up
     /// to 100 at a time, then remediation records, each in the order they were added. A batch the NA refuses whole (a
     /// record it cannot read) or that is larger than it takes is split in halves until the record it refuses is tried
-    /// alone; a batch it throttles (429) halves the batches that follow, and the records wait as long as its
-    /// <c>Retry-After</c> asks. Records in backoff are skipped unless <see cref="FlushOptions.IgnoreBackoff"/>; a
-    /// transient failure ends the run, leaving the rest for the next one. Run it at startup and on a timer. A call joins
-    /// the run in progress when that run tries everything it asks for, and otherwise starts one once it ends.
+    /// alone. A batch it throttles (429) halves the batches of this client from then on. A transient answer that names a
+    /// wait (<c>Retry-After</c>, such as a 429 or a 503) holds every record back that long, at least 5 seconds and at
+    /// most 15 minutes; <see cref="EnqueueRecord(ObservationRecord, CancellationToken)"/> still submits its own record.
+    /// Records in backoff are skipped unless <see cref="FlushOptions.IgnoreBackoff"/>; a transient failure ends the run,
+    /// leaving the rest for the next one. Run it at startup and on a timer. A call joins the run in progress when that
+    /// run tries everything it asks for, and otherwise starts one once it ends.
     /// </summary>
     /// <exception cref="OutboxException">
     /// No record outbox is configured (<c>record_outbox_required</c>), or it cannot be read.
@@ -240,9 +242,9 @@ public sealed partial class EvidenceStoreClient
         IReadOnlyList<ObservationBatchResult> results;
         try
         {
-            results = (await _t.PublicPostAsync<ObservationBatch>("/evidence/observations/batch",
+            results = (await _t.PublicPostAsync<ObservationBatch?>("/evidence/observations/batch",
                 new Dictionary<string, object?> { ["observations"] = batch.Select(e => e.Record).ToList() }, idempotent: true, ct)
-                .ConfigureAwait(false)).Results;
+                .ConfigureAwait(false) ?? throw EvidenceOutbox.NoAnswer()).Results;
         }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -294,8 +296,9 @@ public sealed partial class EvidenceStoreClient
     /// <summary>A record a batch's answer refused, as the exception submitting it alone would have thrown.</summary>
     private static GenesisMeshException Refusal(RecordRefusal? error)
     {
-        var code = error?.Code ?? "unknown";
-        var refusal = ErrorMapping.ForStatus(code.EndsWith("_conflict", StringComparison.Ordinal) ? 409 : 422, code, error?.Message ?? code);
+        var code = error?.Code is { Length: > 0 } named ? named : "unknown";
+        var message = error?.Message is { Length: > 0 } said ? said : code;
+        var refusal = ErrorMapping.ForStatus(code.EndsWith("_conflict", StringComparison.Ordinal) ? 409 : 422, code, message);
         refusal.Details = error?.Details ?? default;
         return refusal;
     }
@@ -303,12 +306,30 @@ public sealed partial class EvidenceStoreClient
     /// <summary>Submits one entry and stores what became of it. Throws only when the caller cancels.</summary>
     private async Task<RecordDelivery> AttemptRecord(IOutbox<RecordOutboxEntry> outbox, RecordOutboxEntry entry, CancellationToken ct)
     {
+        if (RecordRoute(entry.Kind) is not { } route)
+        {
+            // No route takes it: no retry can send it, and it must not hold back the records after it.
+            return new RecordDelivery
+            {
+                Queued = await KeepRecord(outbox, entry with
+                {
+                    Attempts = entry.Attempts + 1,
+                    State = OutboxStates.DeadLetter,
+                    NextAttemptAt = null,
+                    LastError = new SubmissionFailure
+                    {
+                        Status = 0,
+                        Code = EvidenceOutbox.UnknownRecordKind,
+                        Message = $"the record outbox holds a record of an unknown kind, {entry.Kind}",
+                    },
+                }).ConfigureAwait(false),
+            };
+        }
         RecordSubmission submission;
         try
         {
-            var (path, field) = RecordRoute(entry.Kind);
-            submission = await _t.PublicPostAsync<RecordSubmission>(path,
-                new Dictionary<string, object?> { [field] = entry.Record }, idempotent: true, ct).ConfigureAwait(false);
+            submission = await _t.PublicPostAsync<RecordSubmission?>(route.Path,
+                new Dictionary<string, object?> { [route.Field] = entry.Record }, idempotent: true, ct).ConfigureAwait(false) ?? throw EvidenceOutbox.NoAnswer();
         }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -318,14 +339,17 @@ public sealed partial class EvidenceStoreClient
         return new RecordDelivery { Submission = submission };
     }
 
-    /// <summary>The route that admits a record of <paramref name="kind"/>, and the field of the body that carries it.</summary>
-    private static (string Path, string Field) RecordRoute(string kind) => kind switch
+    /// <summary>
+    /// The route that admits a record of <paramref name="kind"/>, and the field of the body that carries it; null for a
+    /// kind no route takes.
+    /// </summary>
+    private static (string Path, string Field)? RecordRoute(string kind) => kind switch
     {
         RecordOutboxKinds.Observation => ("/evidence/observations", "observation"),
         RecordOutboxKinds.BreakGlass => ("/evidence/break-glass", "record"),
         RecordOutboxKinds.Remediation => ("/evidence/remediations", "record"),
         RecordOutboxKinds.GrantExecution => ("/evidence/grant-executions", "evidence"),
-        _ => throw new InvalidOperationException($"genesismesh: the record outbox holds a record of an unknown kind, {kind}"),
+        _ => null,
     };
 
     /// <summary>
@@ -345,16 +369,24 @@ public sealed partial class EvidenceStoreClient
                 if (until > _recordsPausedUntil) _recordsPausedUntil = until;
             }
         }
-        var next = transient
+        return await KeepRecord(outbox, transient
             ? entry with { Attempts = attempts, LastError = failure, NextAttemptAt = EvidenceOutbox.Time(EvidenceOutbox.NextAttemptAt(attempts, error, now)) }
-            : entry with { Attempts = attempts, State = OutboxStates.DeadLetter, NextAttemptAt = null, LastError = failure };
+            : entry with { Attempts = attempts, State = OutboxStates.DeadLetter, NextAttemptAt = null, LastError = failure }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Stores an entry's new state and returns it. Whatever the outbox throws, even a cancellation of its own, the
+    /// answer stands: the entry keeps its previous state, and the next flush settles it.
+    /// </summary>
+    private static async Task<RecordOutboxEntry> KeepRecord(IOutbox<RecordOutboxEntry> outbox, RecordOutboxEntry next)
+    {
         try
         {
             await outbox.Update(next, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception)
         {
-            // The entry keeps its previous state; the next flush settles it.
+            // Every failure of the outbox is the same here: the entry is settled later.
         }
         return next;
     }
@@ -365,7 +397,7 @@ public sealed partial class EvidenceStoreClient
         {
             await outbox.Remove(id, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception)
         {
             // The NA holds the record: the next flush resubmits it, gets a duplicate and removes it.
         }
