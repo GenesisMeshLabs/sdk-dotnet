@@ -463,6 +463,44 @@ var findings = Governance.ReconcileResources(
 
 Correct each finding through a governed action.
 
+#### A partner controller on a standard key
+
+[`PartnerLifecycleTests`](https://github.com/GenesisMeshLabs/sdk-dotnet/blob/main/tests/GenesisMesh.Sdk.Tests/PartnerLifecycleTests.cs)
+runs a partner credential controller's lifecycle against a live NA that
+refuses the policy-free decide route (`BOUNDARY_POLICY_ENFORCEMENT=required`).
+It is a worked example of the split between the two keys:
+
+- **The platform team sets up, with the privileged key:**
+  - the policies: the partner lifecycle (`partner-secret.*`, with the
+    application in the partner's claims, an owner and a lifetime limit), an
+    emergency policy that requires an incident, and the other controller's;
+  - the partner's attestation, its capabilities and applications as claims;
+  - the security team's attestation for emergency removal, ahead of any incident;
+  - the controller's executor key, limited to `partner:`.
+- **The controller does the rest, with a standard key.** It creates, rotates,
+  retires and revokes as governed actions, with an outbox. Its key cannot
+  publish policies, issue or revoke attestations or register keys
+  (`ForbiddenException`).
+- **What holds:**
+  - A denial runs nothing.
+  - An ALLOW bound to other policies or another attestation than expected
+    is refused before the action. This is the controller's guard on the
+    policies: `required` refuses only the decide route, and a capability no
+    policy selects is decided by the attestation's claims alone.
+  - A secret in the request is refused before anything is sent; one in the
+    report is recorded without it.
+  - A record on a stale head is refused (`evidence_conflict`).
+  - A record for a resource outside `partner:` is refused for good, and kept
+    as a dead letter (`evidence_out_of_scope`). The prefix limits what is
+    recorded, not what runs: the decision does not name the resource, so
+    check that a resource is yours before acting on it.
+  - Once the partner's attestation is revoked, its requests are denied, and a
+    record under such a denial is refused (`evidence_decision_denied`).
+- **Emergency removal** is evaluated under the security team's attestation and
+  the emergency policy; the partner's attestation cannot authorize it. So it
+  still works after the partner's attestation is revoked, and needs no
+  privileged key.
+
 ### Attestation
 
 ```csharp

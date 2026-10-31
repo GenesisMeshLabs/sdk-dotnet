@@ -26,7 +26,7 @@ enforces the layer table; a new source file goes into its module table.
 ```text
 src/GenesisMesh.Sdk/       # the package (one assembly, namespace GenesisMesh)
 tests/GenesisMesh.Sdk.Tests/ # tests; testdata/conformance/ holds the core's vectors, copied unchanged
-scripts/                   # changelog, version, TRX and registry tools; contract_na.py for the live test
+scripts/                   # changelog, version, TRX and registry tools; contract_na.py for the live tests
 changelog.d/               # changelog fragments, one per change
 docs/architecture.md       # modules, layers, flows, recipes
 ```
@@ -126,8 +126,10 @@ python scripts/changelog.py check                # fragments are valid
 CI also holds a coverage floor (`scripts/check_coverage.py`) and the layer
 table (`ArchitectureTests`); see docs/architecture.md.
 
-The live contract test: `GM_E2E_PYTHON=python dotnet test -c Release --filter "Category=Live"`
-with the genesis-mesh core installed (see CONTRIBUTING.md).
+The live tests (`LiveContractTests`, `PartnerLifecycleTests`):
+`GM_E2E_PYTHON=python dotnet test -c Release --filter "Category=Live"` with the genesis-mesh
+core installed (see CONTRIBUTING.md). A new live test goes into the `--only-test` list of the
+`live-contract` job in ci.yml.
 
 ---
 
