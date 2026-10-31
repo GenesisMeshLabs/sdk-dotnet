@@ -3241,7 +3241,7 @@ public sealed class JudgementRecord
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public JsonElement GateResults { get; set; }
 
-    /// <summary>The verdict under the policies active when it was judged, when they differ from those then.</summary>
+    /// <summary>The verdict under the policies active when it was judged; <see cref="FlaggedForReview"/> when it differs.</summary>
     [JsonPropertyName("current_verdict")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CurrentVerdict { get; set; }

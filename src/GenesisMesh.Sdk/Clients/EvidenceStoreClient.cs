@@ -705,7 +705,8 @@ public sealed class EvidenceStoreClient
 
     /// <summary>
     /// Approves a holder change with a privileged key of a different named holder than the proposer's (privileged).
-    /// The NA records the new holder in the store, in a registry record it signs.
+    /// The NA records the new holder in the store, in a registry record it signs. Not retried: sent again after a lost
+    /// answer, it would read as <c>holder_change_already_approved</c>.
     /// POST /admin/operator-keys/holder-changes/&lt;proposal_id&gt;/approve
     /// </summary>
     /// <exception cref="NotFoundException">No such proposal (<c>holder_change_not_found</c>).</exception>

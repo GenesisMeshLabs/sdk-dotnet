@@ -57,10 +57,10 @@ public sealed class FindingObservationOptions
     /// <summary>The capability the change exercises. Required.</summary>
     public string Capability { get; init; } = "";
 
-    /// <summary>The scan before this one: the change happened after it.</summary>
+    /// <summary>The scan before this one: the change happened after it. Required.</summary>
     public DateTimeOffset PreviousScanAt { get; init; }
 
-    /// <summary>This scan: the change happened before it.</summary>
+    /// <summary>This scan: the change happened before it. Required.</summary>
     public DateTimeOffset ScannedAt { get; init; }
 
     /// <summary>The observation's source; default <c>reconciliation</c>.</summary>
@@ -127,17 +127,10 @@ public sealed class ObservationRecorder
     public async Task<ObservationRecord> Record(ObservationInput input, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(input);
-        var window = input.ChangedNotBefore is not null || input.ChangedNotAfter is not null;
-        if (input.ChangedAt is not null && window)
-            throw new OutOfBandRecordException("observation_malformed",
-                "give changed_at, or the changed_not_before and changed_not_after window, not both");
-        if (input.ChangedAt is null && (input.ChangedNotBefore is null || input.ChangedNotAfter is null))
-            throw new OutOfBandRecordException("observation_malformed",
-                "changed_at, or both changed_not_before and changed_not_after, is required");
-
         var record = new ObservationRecord
         {
-            ObservationId = input.ObservationId ?? ObservationId(ObserverSovereignId, input.Source, input.SourceEventId),
+            // A missing source or source event is refused below, as the model refuses it.
+            ObservationId = input.ObservationId ?? ObservationId(ObserverSovereignId, input.Source ?? "", input.SourceEventId ?? ""),
             ObserverSovereignId = ObserverSovereignId,
             ResourceId = input.ResourceId,
             Action = input.Action,
@@ -147,12 +140,19 @@ public sealed class ObservationRecorder
             ChangedNotAfter = Time(input.ChangedNotAfter),
             ObservedAt = Canonical.Timestamp(input.ObservedAt ?? DateTimeOffset.UtcNow),
             Actor = input.Actor,
-            Source = input.Source,
-            SourceEventId = input.SourceEventId,
+            Source = input.Source!,
+            SourceEventId = input.SourceEventId!,
             VersionId = input.VersionId,
             Metadata = ExecutionRecorder.Element(input.Metadata ?? new Dictionary<string, object?>()),
         };
         var unsigned = OutOfBandRecords.Signable(record);
+        var window = input.ChangedNotBefore is not null || input.ChangedNotAfter is not null;
+        if (input.ChangedAt is not null && window)
+            throw new OutOfBandRecordException("observation_malformed",
+                "give changed_at, or the changed_not_before and changed_not_after window, not both");
+        if (input.ChangedAt is null && (input.ChangedNotBefore is null || input.ChangedNotAfter is null))
+            throw new OutOfBandRecordException("observation_malformed",
+                "changed_at, or both changed_not_before and changed_not_after, is required");
         if (!OfflineVerifier.ValidOutOfBand("ObservationRecord", unsigned))
         {
             throw new OutOfBandRecordException("observation_malformed",
@@ -184,10 +184,16 @@ public sealed class ObservationRecorder
     /// the resource, so a repeated scan does not record the finding twice: signed again, it is the same record, and the
     /// NA answers <c>duplicate</c>.
     /// </summary>
+    /// <exception cref="ArgumentException">
+    /// <see cref="FindingObservationOptions.PreviousScanAt"/> or <see cref="FindingObservationOptions.ScannedAt"/> is
+    /// not given.
+    /// </exception>
     public static ObservationInput? FromFinding(ReconciliationFinding finding, FindingObservationOptions options)
     {
         ArgumentNullException.ThrowIfNull(finding);
         ArgumentNullException.ThrowIfNull(options);
+        if (options.PreviousScanAt == default || options.ScannedAt == default)
+            throw new ArgumentException("genesismesh: both scan times, PreviousScanAt and ScannedAt, are required", nameof(options));
         string? action = null;
         if (options.Actions?.TryGetValue(finding.Status, out var chosen) != true || chosen is null)
             FindingActions.TryGetValue(finding.Status, out action);
@@ -253,7 +259,7 @@ public sealed class BreakGlassInput
     /// <summary>When it was executed; default now.</summary>
     public DateTimeOffset? ExecutedAt { get; init; }
 
-    /// <summary>A value of <see cref="ExecutionOutcomes"/>. Required.</summary>
+    /// <summary>The outcome, usually a value of <see cref="ExecutionOutcomes"/>: the NA takes any string.</summary>
     public string Outcome { get; init; } = "";
 
     /// <summary>A short description of the outcome, at most 1024 characters.</summary>

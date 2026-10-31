@@ -262,6 +262,52 @@ public class OutOfBandTests
     }
 
     [Fact]
+    public async Task AnObservationIsRefusedInTheNAsOrder()
+    {
+        // A value the NA could not read, before the change times its model checks.
+        await Assert.ThrowsAsync<StrictJsonException>(() => Observer().Record(new ObservationInput
+        {
+            ResourceId = "r",
+            Action = ResourceActions.Rotate,
+            Capability = "c",
+            ChangedAt = At,
+            ChangedNotBefore = At.AddHours(-1),
+            ChangedNotAfter = At,
+            Source = "s",
+            SourceEventId = "e",
+            Metadata = new Dictionary<string, object?> { ["s"] = "\ud83d" },
+        }));
+        // A record the model does not take, before secret material.
+        await AssertRefused("observation_malformed", "does not match", Observer().Record(Copy(Seen(), actor: "", versionId: "-----BEGIN X")));
+        // A window with equal ends is in order: what the model does not take is another field.
+        await AssertRefused("observation_malformed", "does not match the ObservationRecord model", Observer().Record(new ObservationInput
+        {
+            Action = ResourceActions.Rotate,
+            Capability = "c",
+            ChangedNotBefore = At,
+            ChangedNotAfter = At,
+            Source = "s",
+            SourceEventId = "e",
+        }));
+        // A missing source or source event is a field the model does not take, as a missing resource is.
+        foreach (var (source, sourceEventId) in new (string, string)[] { (null!, "e"), ("s", null!) })
+        {
+            await AssertRefused("observation_malformed", "does not match", Observer().Record(new ObservationInput
+            {
+                ResourceId = "r",
+                Action = ResourceActions.Rotate,
+                Capability = "c",
+                ChangedAt = At,
+                Source = source,
+                SourceEventId = sourceEventId,
+            }));
+        }
+        // An ID of at most 128 characters.
+        Assert.NotNull(await Observer().Record(Copy(Seen(), observationId: new string('o', 128))));
+        await AssertRefused("observation_malformed", "does not match", Observer().Record(Copy(Seen(), observationId: new string('o', 129))));
+    }
+
+    [Fact]
     public async Task AnObservationIdTheCallerGivesIsKept()
     {
         Assert.Equal("mine", (await Observer().Record(Copy(Seen(), observationId: "mine"))).ObservationId);
@@ -377,6 +423,27 @@ public class OutOfBandTests
         Assert.Throws<ArgumentNullException>(() => ObservationRecorder.FromFinding(Drifted, null!));
     }
 
+    [Fact]
+    public void AFindingsOwnMetadataIsKept_AndBothScanTimesAreRequired()
+    {
+        var finding = new ReconciliationFinding
+        {
+            ResourceId = "r",
+            Status = ReconciliationStatuses.Drifted,
+            Observed = new ObservedResource { ResourceId = "r", Exists = true, Metadata = new Dictionary<string, object?> { ["status"] = "enabled" } },
+        };
+        Assert.Equal(new Dictionary<string, object?> { ["status"] = "enabled" }, ObservationRecorder.FromFinding(finding, Scan)!.Metadata);
+        foreach (var options in new[]
+        {
+            new FindingObservationOptions { Capability = "c", ScannedAt = Scan.ScannedAt },
+            new FindingObservationOptions { Capability = "c", PreviousScanAt = Scan.PreviousScanAt },
+        })
+        {
+            Assert.Throws<ArgumentException>(() => ObservationRecorder.FromFinding(finding, options));
+            Assert.Throws<ArgumentException>(() => ObservationRecorder.FromFinding(new ReconciliationFinding { ResourceId = "r", Status = ReconciliationStatuses.InSync }, options));
+        }
+    }
+
     // ── Break-glass ──────────────────────────────────────────────────────────
 
     private static ExecutionRecorder Executor() => new("executor-a", new SeedSigner(TestHelpers.ZeroSeedB64, "executor-key-1"));
@@ -390,19 +457,19 @@ public class OutOfBandTests
 
     private static BreakGlassInput Glass(
         string? justification = null, string? outcomeDetail = null, IDictionary<string, object?>? attributes = null,
-        string failure = EvaluationFailures.NetworkError) => new()
+        string failure = EvaluationFailures.NetworkError, string? attestationId = "att-1", string outcome = ExecutionOutcomes.Success) => new()
         {
             ResourceId = "partner:app-1/secret",
             ResourceAction = ResourceActions.Rotate,
             Capability = "partner-secret.rotate",
-            AttestationId = "att-1",
+            AttestationId = attestationId,
             RequestParameters = new Dictionary<string, object?> { ["app_id"] = "app-1" },
             Attributes = attributes ?? new Dictionary<string, object?> { ["owner"] = "team-a" },
             Justification = justification ?? "NA unreachable during an incident; rotating the leaked secret",
             EvaluationRequest = FailedRequest,
             EvaluationFailure = failure,
             ExecutedAt = At.AddSeconds(1),
-            Outcome = ExecutionOutcomes.Success,
+            Outcome = outcome,
             OutcomeDetail = outcomeDetail,
             ExecutionParameters = new Dictionary<string, object?> { ["secret_version"] = "v8" },
         };
@@ -495,6 +562,26 @@ public class OutOfBandTests
         Assert.NotNull(await Executor().SignBreakGlass(Glass(attributes: large)));
     }
 
+    [Fact]
+    public async Task ABreakGlassRecordIsRefusedInTheNAsOrder_AndTakesWhatTheNATakes()
+    {
+        // A record the model does not take, before secret material.
+        await AssertRefused("break_glass_malformed", "does not match",
+            Executor().SignBreakGlass(Glass(failure: "timeout ", justification: "see -----BEGIN")));
+        // Only a transient failure: never a decision the NA made.
+        await AssertRefused("break_glass_malformed", "does not match", Executor().SignBreakGlass(Glass(failure: "deny")));
+        foreach (var failure in new[] { EvaluationFailures.NetworkError, EvaluationFailures.Timeout, EvaluationFailures.ServerError, EvaluationFailures.RateLimited })
+            Assert.Equal(failure, (await Executor().SignBreakGlass(Glass(failure: failure))).EvaluationFailure);
+        // An attestation ID of 1 to 128 characters, or none.
+        await AssertRefused("break_glass_malformed", "does not match", Executor().SignBreakGlass(Glass(attestationId: "")));
+        await AssertRefused("break_glass_malformed", "does not match", Executor().SignBreakGlass(Glass(attestationId: new string('a', 129))));
+        Assert.Equal(new string('a', 128), (await Executor().SignBreakGlass(Glass(attestationId: new string('a', 128)))).AttestationId);
+        Assert.Null((await Executor().SignBreakGlass(Glass(attestationId: null))).AttestationId);
+        // An empty outcome detail, and any outcome, as the NA takes them.
+        Assert.Equal("", (await Executor().SignBreakGlass(Glass(outcomeDetail: ""))).OutcomeDetail);
+        Assert.Equal("", (await Executor().SignBreakGlass(Glass(outcome: ""))).Outcome);
+    }
+
     // ── The metadata guard ───────────────────────────────────────────────────
 
     private static JsonElement Values(object values) => JsonSerializer.SerializeToElement(values);
@@ -560,25 +647,32 @@ public class OutOfBandTests
     }
 
     [Fact]
-    public void ARecordIsVerifiedOnlyAsItsKindAndForm()
+    public async Task ARecordIsVerifiedOnlyAsItsKindAndForm()
     {
-        bool Verify(Action<JsonObject> change, string json = Observation)
+        // Signed again after the change, so what refuses it is the kind, the shape or the form.
+        async Task<bool> Verify(Action<JsonObject> change, string json = Observation) =>
+            OfflineVerifier.VerifyOutOfBandRecord(await Resign(json, change), [PublicKey]);
+        bool Unsigned(Action<JsonObject> change)
         {
-            var record = JsonNode.Parse(json)!.AsObject();
+            var record = JsonNode.Parse(Observation)!.AsObject();
             change(record);
             return OfflineVerifier.VerifyOutOfBandRecord(record.ToJsonString(), [PublicKey]);
         }
-        Assert.True(Verify(_ => { }));
-        Assert.False(Verify(r => r["actor_note"] = null));                                     // a field this SDK does not know
-        Assert.False(Verify(r => r.Remove("signature")));
-        Assert.False(Verify(r => r["signature"] = null));
-        Assert.False(Verify(r => r["signature"] = new JsonObject { ["key_id"] = "k" }));
-        Assert.False(Verify(r => r["changed_at"] = "2026-10-30T12:00:00.123456"));            // not UTC
-        Assert.False(Verify(r => r["changed_not_after"] = "2026-10-30T13:00:00Z"));          // a time and a window
-        Assert.False(Verify(r => { r.Remove("observation_id"); r["remediation_id"] = "x"; })); // a kind of a later release
+        Assert.True(await Verify(_ => { }));
+        Assert.False(await Verify(r => r["actor_note"] = "x"));                                      // a field this SDK does not know
+        Assert.False(Unsigned(r => r.Remove("signature")));
+        Assert.False(Unsigned(r => r["signature"] = null));
+        Assert.False(Unsigned(r => r["signature"] = new JsonObject { ["key_id"] = "k" }));
+        Assert.False(Unsigned(r => r["actor"] = "principal-other"));                                // changed after signing
+        Assert.False(await Verify(r => r["changed_at"] = "2026-10-30T12:00:00.123456"));            // not UTC
+        Assert.False(await Verify(r => r["changed_not_after"] = "2026-10-30T13:00:00Z"));          // a time and a window
+        Assert.False(await Verify(r => { r.Remove("observation_id"); r["remediation_id"] = "x"; })); // a kind of a later release
         Assert.False(OfflineVerifier.VerifyOutOfBandRecord("[1]", [PublicKey]));
         Assert.True(OfflineVerifier.VerifyOutOfBandRecord(BreakGlass, [PublicKey]));
-        Assert.False(Verify(r => r["evaluation_request_digest"] = "ab", BreakGlass));
+        Assert.True(await Verify(_ => { }, BreakGlass));
+        Assert.False(await Verify(r => r["evaluation_request_digest"] = "ab", BreakGlass));
+        Assert.False(await Verify(r => r["evaluation_request_digest"] = new string('a', 65), BreakGlass));
+        Assert.False(await Verify(r => r["evaluation_failure"] = "deny", BreakGlass));
         Assert.Throws<StrictJsonException>(() => OfflineVerifier.VerifyOutOfBandRecord("{\"a\":1,\"a\":2}", [PublicKey]));
     }
 
@@ -604,9 +698,12 @@ public class OutOfBandTests
     }
 
     /// <summary>A vector's record signed again by the zero seed, after <paramref name="change"/>.</summary>
-    private static async Task<string> Resigned(string id, Action<JsonObject>? change = null)
+    private static Task<string> Resigned(string id, Action<JsonObject>? change = null) => Resign(Record(id), change);
+
+    /// <summary>A record signed again by the zero seed, after <paramref name="change"/>.</summary>
+    private static async Task<string> Resign(string json, Action<JsonObject>? change = null)
     {
-        var record = JsonNode.Parse(Record(id))!.AsObject();
+        var record = JsonNode.Parse(json)!.AsObject();
         change?.Invoke(record);
         record.Remove("signature");
         using var doc = JsonDocument.Parse(record.ToJsonString());
@@ -643,6 +740,22 @@ public class OutOfBandTests
         Assert.False(OfflineVerifier.VerifyOutOfBandRecord(await Resigned("canonical-registry", r => r["effective_at"] = "2026-01-01T00:00:00+00:00"), [PublicKey]));
         Assert.False(OfflineVerifier.VerifyOutOfBandRecord(await Resigned("canonical-registry", r => r["effective_at"] = "2026-01-01T00:00:00-00:00"), [PublicKey]));
         Assert.False(OfflineVerifier.VerifyOutOfBandRecord(await Resigned("canonical-registry", r => r["effective_at"] = "2026-01-01T01:00:00+01:00"), [PublicKey]));
+    }
+
+    [Fact]
+    public async Task AnNARecordsValuesAreThoseTheReferenceTakes()
+    {
+        async Task<bool> Verify(string id, Action<JsonObject> change) => OfflineVerifier.VerifyOutOfBandRecord(await Resigned(id, change), [PublicKey]);
+        // v1.6.0: a change matched to a grant use, and a refused grant use kept in quarantine.
+        Assert.True(await Verify("canonical-judgement", r => r["governed_by"] = "grant"));
+        Assert.True(await Verify("canonical-quarantine", r => r["record_kind"] = "grant_execution"));
+        Assert.False(await Verify("canonical-judgement", r => r["governed_by"] = "policy"));
+        // An empty reason is one the reference takes.
+        Assert.True(await Verify("canonical-judgement", r => r["reason"] = ""));
+        Assert.True(await Verify("canonical-registry", r => r["key_role"] = "observer"));
+        Assert.False(await Verify("canonical-registry", r => r["key_role"] = "admin"));
+        // The record a quarantine keeps is required.
+        Assert.False(await Verify("canonical-quarantine", r => r.Remove("record")));
     }
 
     [Fact]
@@ -809,6 +922,17 @@ public class OutOfBandTests
     }
 
     [Fact]
+    public async Task SubmitObservations_IsRetried_AsARecordSentAgainIsADuplicate()
+    {
+        var sent = new List<Sent>();
+        var calls = 0;
+        using var gm = Client(sent, _ => ++calls == 1 ? Refused(503, "unavailable") : Answer(200, """{"results":[]}"""), retries: 1);
+        var observation = JsonSerializer.Deserialize<ObservationRecord>(Observation, Auth.SerializerOptions)!;
+        Assert.Empty(await gm.EvidenceStore.SubmitObservations([observation]));
+        Assert.Equal(2, sent.Count);
+    }
+
+    [Fact]
     public async Task SubmitBreakGlass_IsPublicAndRetried()
     {
         var sent = new List<Sent>();
@@ -924,11 +1048,23 @@ public class OutOfBandTests
     [Fact]
     public async Task AllResourceChanges_RefusesACursorThatDoesNotAdvance_AndATruncatedPageWithoutOne()
     {
-        using var stuck = Client([], _ => Answer(200, ChangesPage(ObservedChange, true, 4)));
-        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        // A cursor that stays or goes back; the third page would end the changes, so a cursor taken is no loop.
+        foreach (var second in new long[] { 4, 3 })
         {
-            await foreach (var _ in stuck.EvidenceStore.AllResourceChanges("r")) { }
-        });
+            var pages = 0;
+            using var stuck = Client([], _ => (++pages) switch
+            {
+                1 => Answer(200, ChangesPage(ObservedChange, true, 4)),
+                2 => Answer(200, ChangesPage(ObservedChange, true, second)),
+                _ => Answer(200, ChangesPage("", false, null)),
+            });
+            var refused = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            {
+                await foreach (var _ in stuck.EvidenceStore.AllResourceChanges("r")) { }
+            });
+            Assert.Contains("did not advance", refused.Message, StringComparison.Ordinal);
+            Assert.Equal(2, pages);
+        }
         using var old = Client([], _ => Answer(200, """{"resource_id":"r","truncated":true,"changes":[]}"""));
         var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
@@ -968,6 +1104,15 @@ public class OutOfBandTests
         var calls = 0;
         using var gm = Client([], _ => { calls++; return Refused(503, "unavailable"); }, retries: 2);
         await Assert.ThrowsAsync<ServerException>(() => gm.EvidenceStore.ProposeHolder("controller", "holder-c"));
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task ApproveHolder_IsNotSentTwice_AsASecondApprovalIsRefused()
+    {
+        var calls = 0;
+        using var gm = Client([], _ => { calls++; return Refused(503, "unavailable"); }, retries: 2);
+        await Assert.ThrowsAsync<ServerException>(() => gm.EvidenceStore.ApproveHolder("p-1"));
         Assert.Equal(1, calls);
     }
 

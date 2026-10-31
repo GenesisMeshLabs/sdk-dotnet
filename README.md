@@ -447,10 +447,11 @@ var submitted = await client.EvidenceStore.SubmitObservation(observation);  // "
 var judgement = submitted.Judgement?.Payload;                                // judged at admission, by default
 
 // A reconciliation finding, observed once per scan (null for a resource in sync).
-var finding = ObservationRecorder.FromFinding(drifted, new FindingObservationOptions
+if (ObservationRecorder.FromFinding(drifted, new FindingObservationOptions
 {
     Capability = "partner-secret.rotate", PreviousScanAt = lastScan, ScannedAt = thisScan,
-});
+}) is { } seen)
+    await client.EvidenceStore.SubmitObservation(await observer.Record(seen));
 
 // A controller that acted while the NA could not be reached.
 var glass = await executor.SignBreakGlass(new BreakGlassInput
