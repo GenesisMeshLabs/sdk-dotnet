@@ -73,7 +73,7 @@ jobs:
   # Every client method against a running Network Authority: each typed
   # result must model the JSON the NA sent (v1.0.2: most of them did not).
   # Then a partner credential controller's lifecycle on a standard key,
-  # against an NA that requires policies.
+  # against an NA that refuses the policy-free decide route.
   live-contract:
     name: Live contract
     runs-on: ubuntu-latest

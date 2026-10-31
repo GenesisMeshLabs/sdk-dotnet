@@ -82,8 +82,10 @@ def check(results: Path, project: Path, min_tests: int, only_tests: list[str] | 
             problems.append(f"{label}: {len(not_passed)} not passed: {', '.join(not_passed[:10])}")
         if only_tests:
             names = [r.get("testName", "") for r in results_]
-            ran_each = sorted(next((t for t in only_tests if n.endswith("." + t)), n) for n in names)
-            if ran_each != sorted(only_tests):
+            # The longest name first, so that C.M is not taken for M; a name no test matches stays apart.
+            wanted = sorted(set(only_tests), key=len, reverse=True)
+            ran_each = sorted(next((t for t in wanted if n.endswith("." + t)), "\0" + n) for n in names)
+            if ran_each != sorted(wanted):
                 ran = ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "") or "none"
                 problems.append(f"{label}: expected exactly the tests {', '.join(only_tests)}, ran {ran}")
     missing = [f for f in expected if f not in seen]

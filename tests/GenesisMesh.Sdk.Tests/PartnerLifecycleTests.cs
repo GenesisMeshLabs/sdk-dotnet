@@ -8,8 +8,8 @@ using Xunit.Abstractions;
 namespace GenesisMesh.Tests;
 
 /// <summary>
-/// A partner credential controller on a standard operator key, against a live NA that requires policies
-/// (<c>scripts/contract_na.py --policy-enforcement required</c>; it runs as <see cref="LiveContractTests"/> does).
+/// A partner credential controller on a standard operator key, against a live NA that refuses the policy-free decide
+/// route (<c>scripts/contract_na.py --policy-enforcement required</c>; it runs as <see cref="LiveContractTests"/> does).
 /// The platform team's setup uses the privileged key directly: the policies, the partner's and the security team's
 /// attestations, and the controller's executor key, limited to <c>partner:</c>. Everything else uses the standard key:
 /// create, rotate, retire and revoke through governed actions with an outbox, the denials and refusals, emergency
@@ -161,11 +161,12 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
 
         await Step("the controller's standard key cannot publish a policy, issue or revoke an attestation, or register a key", async () =>
         {
-            await Assert.ThrowsAsync<ForbiddenException>(() => controller.Policy.Publish(intents[0]));
-            await Assert.ThrowsAsync<ForbiddenException>(() =>
-                controller.Attestation.Issue(D(("subject_id", "partner-org-2"), ("roles", new[] { "role:client" }))));
-            await Assert.ThrowsAsync<ForbiddenException>(() => controller.Attestation.Revoke(partner.AttestationId, D(("reason", "none"))));
-            await Assert.ThrowsAsync<ForbiddenException>(() => controller.EvidenceStore.RegisterExecutorKey(new RegisterExecutorKeyRequest
+            async Task Refused(Func<Task> call) =>
+                Assert.Equal("insufficient_operator_tier", (await Assert.ThrowsAsync<ForbiddenException>(call)).Code);
+            await Refused(() => controller.Policy.Publish(intents[0]));
+            await Refused(() => controller.Attestation.Issue(D(("subject_id", "partner-org-2"), ("roles", new[] { "role:client" }))));
+            await Refused(() => controller.Attestation.Revoke(partner.AttestationId, D(("reason", "none"))));
+            await Refused(() => controller.EvidenceStore.RegisterExecutorKey(new RegisterExecutorKeyRequest
             {
                 KeyId = "partner-executor-2",
                 PublicKey = executorPublicKey,
@@ -241,6 +242,7 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
                 Cloud(("secret_version", "v2"), ("overlap_until", Iso(TimeSpan.FromDays(1)))));
             rotated = result.Evidence!;
             Assert.Equal((2L, ExecutionRecorder.Digest(created)), (rotated.ResourceSequence!.Value, rotated.PrevResourceDigest));
+            Assert.Equal("recorded", result.Submission!.Status);
         });
 
         await Step("retire the old version once the overlap ends", async () =>
@@ -294,15 +296,20 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
             Assert.Contains(result.Summary.EnforcedFailures, f => f.Gate == "partner-secret-lifecycle/owner");
         });
 
-        await Step("a capability the partner's attestation does not claim: denied", async () =>
+        await Step("a capability the partner's attestation does not claim: denied by the capability check", async () =>
         {
+            var before = actions;
             var result = await Act(Partner("partner-secret.delete", Orders, ResourceActions.Delete), Cloud());
             Assert.False(result.Authorized);
-            Assert.NotNull(result.Summary.DenialReason);
+            Assert.Equal(before, actions);
+            Assert.Contains(result.Summary.EnforcedFailures, f => f.Gate == "capability_check");
         });
 
-        await Step("a decision bound to other policies than expected: refused before the action", async () =>
+        // The NA authorizes this request; only the expectations differ.
+        var authorizedRotation = Partner("partner-secret.rotate", Orders, ResourceActions.Rotate);
+        await Step("an ALLOW bound to other policies than expected: refused before the action", async () =>
         {
+            Assert.True((await Decide(authorizedRotation)).Authorized);
             var before = actions;
             var refused = await Assert.ThrowsAsync<DecisionVerificationException>(() =>
                 Act(Partner("partner-secret.rotate", Orders, ResourceActions.Rotate, verify: Expect(emergency, partner)), Cloud()));
@@ -310,13 +317,24 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
             Assert.Equal(before, actions);
         });
 
-        await Step("a decision on another attestation than expected: refused before the action", async () =>
+        await Step("an ALLOW on another attestation than expected: refused before the action", async () =>
         {
+            Assert.True((await Decide(authorizedRotation)).Authorized);
             var before = actions;
             var refused = await Assert.ThrowsAsync<DecisionVerificationException>(() =>
                 Act(Partner("partner-secret.rotate", Orders, ResourceActions.Rotate, verify: Expect(lifecycle, security)), Cloud()));
             Assert.Equal("attestation_binding_mismatch", refused.Code);
             Assert.Equal(before, actions);
+        });
+
+        await Step("the partner's attestation cannot authorize emergency removal", async () =>
+        {
+            var before = actions;
+            var result = await Act(Partner("partner-secret-emergency.revoke", Orders, ResourceActions.Revoke,
+                verify: Expect(emergency, partner)), Cloud());
+            Assert.False(result.Authorized);
+            Assert.Equal(before, actions);
+            Assert.Contains(result.Summary.EnforcedFailures, f => f.Gate == "capability_check");
         });
 
         await Step("a failing cloud action: recorded as a failure and rethrown; the last good version stays v2", async () =>
@@ -330,6 +348,7 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
 
         await Step("the NA unreachable after the action: the record stays in the outbox, and a flush admits it without acting again", async () =>
         {
+            var before = actions;
             outage.Down = true;
             GovernedActionResult<string> result;
             try
@@ -340,13 +359,13 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
             {
                 outage.Down = false;
             }
-            var acted = actions;
+            Assert.Equal(before + 1, actions);
             Assert.Null(result.Submission);
             Assert.Equal((OutboxStates.Pending, EvidenceOutbox.NetworkError), (result.Queued!.State, result.Queued.LastError!.Code));
             var flushed = await controller.EvidenceStore.FlushPending(new FlushOptions { IgnoreBackoff = true });
             Assert.Equal(result.Evidence!.EvidenceId, Assert.Single(flushed.Admitted).Id);
             Assert.Empty(await outbox.List());
-            Assert.Equal(acted, actions);
+            Assert.Equal(before + 1, actions);
             Assert.Equal(5L, result.Evidence.ResourceSequence);
         });
 
@@ -408,9 +427,14 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
             Assert.Equal(before, actions);
         });
 
-        await Step("a record for the other controller's resource: refused for good (outside the executor key's prefix), kept as a dead letter", async () =>
+        await Step("acting on the other controller's resource: the action runs, its record is refused for good and kept as a dead letter", async () =>
         {
+            // The decision does not name the resource, so the NA authorizes the change; the executor key's prefix
+            // stops only its record. A controller keeps to its own resources itself.
+            var before = actions;
             var result = await Act(Partner("partner-secret.rotate", Internal, ResourceActions.Rotate), Cloud(("secret_version", "v9")));
+            Assert.True(result.Authorized);
+            Assert.Equal(before + 1, actions);
             Assert.Null(result.Submission);
             Assert.Equal((OutboxStates.DeadLetter, "evidence_out_of_scope"), (result.Queued!.State, result.Queued.LastError!.Code));
             Assert.Equal(result.Queued.Id, Assert.Single(await outbox.List()).Id);

@@ -9,8 +9,8 @@ set up here.
 
 Two operator keys: "ops" (privileged) and "controller" (standard), as a
 platform team and a controller hold them. ``--policy-enforcement required``
-starts the NA as a governed deployment runs it: every evaluation needs an
-active policy, and the legacy decide route is refused.
+starts the NA as a governed deployment runs it: the policy-free decide route
+is refused, so every decision comes from the evaluate route.
 """
 import argparse
 import json

@@ -46,8 +46,8 @@ If the break is intended, see "A breaking change" in
 Network Authority (`scripts/contract_na.py`) and compares each typed result
 with the JSON the NA sent. `PartnerLifecycleTests` runs a partner credential
 controller's lifecycle on a standard key, against an NA started with
-`--policy-enforcement required`. They need a Python with the genesis-mesh core
-installed:
+`--policy-enforcement required`, which refuses the policy-free decide route.
+They need a Python with the genesis-mesh core installed:
 
 ```sh
 pip install -e ../genesismesh
