@@ -1,0 +1,3 @@
+### Added
+
+- **Reading and verifying attestations.** `client.Attestation` reads a stored attestation with its current status (`Get`), lists attestations (`List`: signed with a key, the records; without one, the count), reads the active recognition policy (`GetPolicy`), asks the NA to verify an attestation against a policy (`Verify`), and reads the NA's signed revocation feed (`RevocationFeed`). Typed results: `AttestationRecord` (with v1.8.0 `ReissuedFrom` and `SupersededBy`), `AttestationList`, `AttestationVerification`, `RecognitionPolicy`, `RecognizedIssuer` and `SovereignRevocationFeed`, which keeps its signed form.
