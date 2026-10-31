@@ -57,14 +57,24 @@ public sealed class AttestationClient
     /// <summary>
     /// Stored attestations, by issuer, subject or status (1.9.0). The NA lists them to operators and gives anyone else
     /// the count: a client with a signing key signs the request (a read-tier key or above) and gets
-    /// <see cref="AttestationList.Attestations"/>; without one it gets <see cref="AttestationList.Count"/>.
+    /// <see cref="AttestationList.Attestations"/>; without one it gets <see cref="AttestationList.Count"/>. Both leave
+    /// out copies another one re-issued, which <see cref="Get"/> and <see cref="RevocationFeed"/> still name.
     /// GET /attestations
     /// </summary>
     /// <exception cref="UnauthorizedException">
-    /// Without a signing key, a filter by issuer or subject: it would tell who is a member (<c>admin_auth_failed</c>).
+    /// <c>admin_auth_failed</c>: without a signing key, a filter by issuer or subject, which would tell who is a member;
+    /// or the NA does not accept the key (unknown or revoked), even without a filter.
+    /// </exception>
+    /// <exception cref="ForbiddenException">The key has no tier that may read (<c>insufficient_operator_tier</c>).</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The client has a signing key but no key ID (<see cref="ClientOptions.KeyId"/>): the NA would take the request as
+    /// unsigned and answer with the count. Nothing is sent.
     /// </exception>
     public Task<AttestationList> List(ListAttestationsParams? filter = null, CancellationToken ct = default)
     {
+        if (_t.CanSign && string.IsNullOrEmpty(_t.SignerKeyId))
+            throw new InvalidOperationException(
+                "genesismesh: a signing key needs a key ID (ClientOptions.KeyId) to list attestations");
         var query = new Dictionary<string, string>(StringComparer.Ordinal);
         if (filter?.IssuerSovereignId is { } issuer) query["issuer_sovereign_id"] = issuer;
         if (filter?.SubjectId is { } subject) query["subject_id"] = subject;
@@ -76,8 +86,8 @@ public sealed class AttestationClient
 
     /// <summary>
     /// The NA's verification of an attestation against a recognition policy, by default its own active one (1.9.0).
-    /// For the NA's own attestations it also checks that it holds the copy (<c>not_held</c>) and (v1.8.0) that the key
-    /// that signed it still vouches for it (<c>outlives_key</c>).
+    /// From NA 1.8.0, for its own attestations, it also checks that it holds the copy (<c>not_held</c>) and that the key
+    /// that signed it still vouches for it (<c>outlives_key</c>). Sent again on a retry, as it changes nothing.
     /// POST /attestations/verify
     /// </summary>
     /// <exception cref="BadRequestException">No policy is given and none is active (<c>missing_recognition_policy</c>).</exception>
@@ -103,7 +113,9 @@ public sealed class AttestationClient
     /// sovereign's NA.
     /// GET /sovereign-revocation-feed
     /// </summary>
-    /// <param name="issuerSovereignId">The sovereign whose feed to read; null for this NA's.</param>
+    /// <param name="issuerSovereignId">
+    /// This NA's own sovereign, as a check, or null. Any other value, an empty one included, is refused.
+    /// </param>
     /// <param name="ct">Cancels the request.</param>
     /// <exception cref="BadRequestException">
     /// <paramref name="issuerSovereignId"/> is another sovereign than this NA's (<c>feed_issuer_mismatch</c>).

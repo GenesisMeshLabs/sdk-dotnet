@@ -540,12 +540,23 @@ public class LiveContractTests
                 Attestation = memberRecord.Attestation,
                 RecognitionPolicy = recognition,
             })).Accepted);
+            // A policy built in code: its issuer accepts active attestations by default, as the NA reads one.
+            Assert.True((await gm.Attestation.Verify(new VerifyAttestationRequest
+            {
+                Attestation = memberRecord.Attestation,
+                RecognitionPolicy = new RecognitionPolicy
+                {
+                    LocalSovereignId = network,
+                    RecognizedIssuers = [new RecognizedIssuer { SovereignId = network, PublicKeys = [naKey], AllowedRoles = ["role:client"] }],
+                },
+            })).Accepted);
 
             await gm.Attestation.Revoke(member.AttestationId, D(("reason", "offboarded")));
             var revokedMember = await gm.Attestation.Get(member.AttestationId);
             Assert.Equal(("revoked", "offboarded"), (revokedMember.Status, revokedMember.RevocationReason));
             Assert.NotNull(revokedMember.RevokedAt);
-            Assert.False((await gm.Attestation.Verify(new VerifyAttestationRequest { Attestation = member })).Accepted);
+            var afterRevocation = await gm.Attestation.Verify(new VerifyAttestationRequest { Attestation = member });
+            Assert.Equal((false, "locally_revoked"), (afterRevocation.Accepted, afterRevocation.Reason));
             var feed = await gm.Attestation.RevocationFeed();
             Modeled("revocation_feed", feed);
             Assert.Equal(("offboarded", network), (feed.RevocationReasons[member.AttestationId], feed.IssuerSovereignId));

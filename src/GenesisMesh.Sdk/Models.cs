@@ -669,9 +669,12 @@ public sealed class RecognizedIssuer
     [JsonPropertyName("allowed_roles")]
     public List<string> AllowedRoles { get; set; } = [];
 
-    /// <summary>The attestation statuses accepted from it.</summary>
+    /// <summary>
+    /// The attestation statuses accepted from it; by default <c>active</c>, as the NA reads an issuer that names none.
+    /// Empty accepts no attestation.
+    /// </summary>
     [JsonPropertyName("accepted_statuses")]
-    public List<string> AcceptedStatuses { get; set; } = [];
+    public List<string> AcceptedStatuses { get; set; } = ["active"];
 }
 
 /// <summary>

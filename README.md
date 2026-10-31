@@ -622,7 +622,10 @@ var feed = await client.Attestation.RevocationFeed();              // the NA's s
 - `List` signs the request when the client has a key (read tier or above) and
   gets the attestations. Without a key it gets only the count, and the NA
   refuses a filter by subject or issuer (401 `admin_auth_failed`): it would
-  tell who is a member.
+  tell who is a member. A signing key needs its `KeyId`, or `List` throws.
+  Neither leaves in copies another one re-issued.
+- A `RecognizedIssuer` accepts `active` attestations unless told otherwise, as
+  the NA reads an issuer that names no statuses.
 - A typed attestation or policy passed back keeps what was signed and stored,
   so `Verify` reads it as the NA does.
 

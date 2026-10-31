@@ -244,7 +244,52 @@ public class AttestationTests
         Assert.Equal(("GET", "/attestations?issuer_sovereign_id=na-a&subject_id=vendor-1&status=active", true),
             (sent[0].Method, sent[0].Path, sent[0].Admin));
         await gm.Attestation.List();
-        Assert.Equal("/attestations", sent[1].Path);
+        Assert.Equal(("/attestations", true), (sent[1].Path, sent[1].Admin));
+    }
+
+    [Fact]
+    public async Task List_RefusesASigningKeyWithoutAKeyId()
+    {
+        var sent = new List<Sent>();
+        using var gm = new GenesisMeshClient(new ClientOptions
+        {
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
+            Audience = "TEST",
+            HttpHandler = new FuncHandler(req =>
+            {
+                sent.Add(new Sent(req.Method.Method, req.RequestUri!.PathAndQuery, null, false));
+                return Json(200, """{"count":1}""");
+            }),
+        });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => gm.Attestation.List());
+        Assert.Empty(sent);
+    }
+
+    [Fact]
+    public async Task Verify_IsSentAgain_AsItChangesNothing()
+    {
+        var calls = 0;
+        using var gm = new GenesisMeshClient(new ClientOptions
+        {
+            BaseUrl = "http://localhost",
+            Retry = new RetrySettings { Attempts = 1, BaseDelay = TimeSpan.Zero },
+            HttpHandler = new FuncHandler(_ => ++calls == 1
+                ? Error(503, "unavailable")
+                : Json(200, """{"accepted":true,"reason":"accepted","issuer_sovereign_id":"na-a","attestation_id":"att-1"}""")),
+        });
+        var attestation = JsonSerializer.Deserialize<MembershipAttestation>(Attestation, Auth.SerializerOptions)!;
+        Assert.True((await gm.Attestation.Verify(new VerifyAttestationRequest { Attestation = attestation })).Accepted);
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public void ARecognizedIssuer_AcceptsActiveAttestationsByDefault_AsTheNAReadsOne()
+    {
+        var issuer = new RecognizedIssuer { SovereignId = "na-a", PublicKeys = ["k"], AllowedRoles = ["role:client"] };
+        Assert.Equal(["active"], issuer.AcceptedStatuses);
+        Assert.Equal(["active"], JsonSerializer.Deserialize<RecognizedIssuer>("""{"sovereign_id":"na-a","public_keys":["k"]}""",
+            Auth.SerializerOptions)!.AcceptedStatuses);
     }
 
     [Fact]

@@ -252,6 +252,9 @@ internal sealed class Transport : IDisposable
     /// <summary>True when the client holds a signing key, so it can make admin requests (1.9.0).</summary>
     internal bool CanSign => _signer is not null;
 
+    /// <summary>The key ID admin requests name (<see cref="ClientOptions.KeyId"/>, or the signer's); null without a signer.</summary>
+    internal string? SignerKeyId => _signer?.KeyId;
+
     /// <summary>An unauthenticated GET; without <paramref name="retry"/>, failover only, as a probe needs.</summary>
     internal async Task<T> PublicGetAsync<T>(string path, bool retry, CancellationToken ct) =>
         Parse<T>(await SendAsync(new Spec(HttpMethod.Get, path, null, null, Admin: false, Idempotent: true, NoRetry: !retry), ct)
