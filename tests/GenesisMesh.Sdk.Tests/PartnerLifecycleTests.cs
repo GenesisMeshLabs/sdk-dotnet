@@ -159,7 +159,7 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
                 ("validity_hours", 720), ("claims", D(("capabilities", new[] { "partner-secret-emergency.revoke" })))));
         });
 
-        await Step("the controller's standard key cannot publish a policy, issue or revoke an attestation, or register a key", async () =>
+        await Step("the controller's standard key cannot publish a policy, issue or revoke an attestation, register or retire a key, or apply retention", async () =>
         {
             async Task Refused(Func<Task> call) =>
                 Assert.Equal("insufficient_operator_tier", (await Assert.ThrowsAsync<ForbiddenException>(call)).Code);
@@ -173,6 +173,8 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
                 ExecutorSovereignId = "partner-controller",
                 ResourcePrefix = "internal:",
             }));
+            await Refused(() => controller.EvidenceStore.RetireExecutorKey("partner-executor"));
+            await Refused(() => controller.EvidenceStore.ApplyRetention(1));
         });
 
         // ── The controller, with the standard key ───────────────────────────────────────────────────────────
@@ -400,6 +402,19 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
             }
         });
 
+        await Step("the NA verifies the resource's history, decision to execution, and the partner's decisions, denials included", async () =>
+        {
+            var history = await controller.EvidenceStore.ResourceHistory(Orders);
+            Assert.True(history.Verification.Verified);
+            var executions = history.Entries.Where(e => e.Entry.EntryKind == "execution").ToList();
+            Assert.Equal(new long[] { 1, 2, 3, 4, 5 }, executions.Select(e => e.Entry.ResourceSequence!.Value));
+            var decisions = history.Entries.Where(e => e.Entry.EntryKind == "decision").Select(e => e.Entry.DecisionId).ToHashSet();
+            Assert.All(executions, e => Assert.Contains(e.Entry.DecisionId, decisions));
+            var vendor = await controller.EvidenceStore.VendorHistory("partner-org-1");
+            Assert.True(vendor.Verification.Verified);
+            Assert.Contains(vendor.Entries, e => e.Entry.EntryKind == "decision" && e.Entry.Outcome == "denied");
+        });
+
         await Step("a secret in the request: refused before anything is sent", async () =>
         {
             var before = actions;
@@ -506,6 +521,26 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
             }, findings.ToDictionary(f => f.ResourceId, f => f.Status));
             var drift = Governance.ReconcileResources([new ObservedResource { ResourceId = Billing, Exists = true, Version = "v7" }], states);
             Assert.Equal(ReconciliationStatuses.Drifted, Assert.Single(drift).Status);
+        });
+
+        await Step("offboarding: the platform team retires the executor key; it signs no new record, and the store still verifies", async () =>
+        {
+            Assert.False((await platform.EvidenceStore.RetireExecutorKey("partner-executor")).Active);
+            Assert.NotNull((await controller.EvidenceStore.ListExecutorKeys()).Single(k => k.KeyId == "partner-executor").RetiredAt);
+            var late = await executor.Record(new RecordExecutionRequest
+            {
+                Decision = await Decide(Emergency("INC-1043")),
+                ExecutedCapability = "partner-secret-emergency.revoke",
+                Outcome = ExecutionOutcomes.Success,
+                ResourceId = Orders,
+                ResourceAction = ResourceActions.Revoke,
+                PriorResource = await controller.EvidenceStore.ResourceHead(Orders),
+            });
+            var refused = await Assert.ThrowsAsync<ValidationException>(() => controller.EvidenceStore.Submit(late));
+            Assert.Equal("evidence_executor_key_retired", refused.Code);
+            var store = await controller.EvidenceStore.Verify();
+            Assert.True(store.Verified, string.Join("; ", store.Failures.Select(f => $"{f.StoreSequence} {f.Reason} {f.Detail}")));
+            Assert.Equal((await controller.EvidenceStore.Status()).Entries, store.CheckedEntries);
         });
     }
 }

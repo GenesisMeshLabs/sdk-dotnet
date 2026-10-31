@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using GenesisMesh;
 using Xunit;
@@ -44,6 +45,53 @@ public class ContractTypesTests
     private static SortedSet<string> Keys(JsonElement obj) =>
         new(obj.EnumerateObject().Select(p => p.Name), StringComparer.Ordinal);
 
+    /// <summary>
+    /// Where <paramref name="raw"/> differs from <paramref name="type"/> at any depth (1.9.0): a key no model declares,
+    /// or a key a model requires that was not sent. Models are followed through their properties, lists and
+    /// dictionaries; a <see cref="JsonElement"/> is not looked into.
+    /// </summary>
+    internal static List<string> Unmodeled(JsonNode? raw, Type type, string path = "$")
+    {
+        var problems = new List<string>();
+        Walk(raw, type, path, problems);
+        return problems;
+    }
+
+    private static void Walk(JsonNode? raw, Type type, string path, List<string> problems)
+    {
+        if (raw is null) return;
+        type = Nullable.GetUnderlyingType(type) ?? type;
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+        {
+            if (raw is JsonObject map)
+                foreach (var (key, value) in map) Walk(value, type.GetGenericArguments()[1], $"{path}.{key}", problems);
+            return;
+        }
+        var items = type == typeof(string) ? null : type.GetInterfaces().Prepend(type)
+            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+        if (items is not null)
+        {
+            if (raw is JsonArray list)
+                for (var i = 0; i < list.Count; i++) Walk(list[i], items.GetGenericArguments()[0], $"{path}[{i}]", problems);
+            return;
+        }
+        if (!type.IsClass || type.Namespace != "GenesisMesh" || raw is not JsonObject obj) return;
+        var declared = new Dictionary<string, (Type Type, bool Required)>();
+        foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            var name = prop.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name;
+            var ignore = prop.GetCustomAttribute<JsonIgnoreAttribute>();
+            if (name is null || ignore?.Condition == JsonIgnoreCondition.Always) continue;
+            declared[name] = (prop.PropertyType, ignore is null);
+        }
+        foreach (var (key, value) in obj)
+        {
+            if (declared.TryGetValue(key, out var field)) Walk(value, field.Type, $"{path}.{key}", problems);
+            else problems.Add($"{path}.{key}: not modeled");
+        }
+        problems.AddRange(declared.Where(f => f.Value.Required && !obj.ContainsKey(f.Key)).Select(f => $"{path}.{f.Key}: declared but not sent"));
+    }
+
     public static TheoryData<string, Type> Models => new()
     {
         { "agreement_offer", typeof(OfferRecord) },
@@ -78,7 +126,24 @@ public class ContractTypesTests
         { "evidence_resource_head", typeof(StoredResourceHead) },
         { "evidence_search", typeof(EvidenceSearchResult) },
         { "evidence_execution_record", typeof(ExecutionEvidence) },
+        { "evidence_status", typeof(EvidenceStoreStatus) },
+        { "evidence_verify_store", typeof(EvidenceStoreVerification) },
+        { "evidence_resource_history", typeof(ResourceHistory) },
+        { "evidence_vendor_history", typeof(VendorHistory) },
+        { "evidence_export_event", typeof(EvidenceEvent) },
+        { "evidence_executor_key_record", typeof(ExecutorKeyRecord) },
+        { "evidence_retire_executor_key", typeof(ExecutorKeyState) },
+        { "evidence_retention", typeof(RetentionResult) },
     };
+
+    // 1.9.0: the objects inside each response too, such as the verification and its anchors in a history.
+    [Theory]
+    [MemberData(nameof(Models))]
+    public void NestedObjectsModelTheNAResponses(string name, Type model)
+    {
+        var problems = Unmodeled(JsonNode.Parse(Response(name).GetRawText()), model, name);
+        Assert.True(problems.Count == 0, string.Join("; ", problems));
+    }
 
     [Theory]
     [MemberData(nameof(Models))]

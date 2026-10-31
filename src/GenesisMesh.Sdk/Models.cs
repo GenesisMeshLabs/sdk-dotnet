@@ -2216,16 +2216,17 @@ public sealed class RegisterExecutorKeyRequest
     public string? ResourcePrefix { get; set; }
 }
 
-/// <summary>Returned by registering an executor key.</summary>
+/// <summary>Returned by registering an executor key, and by retiring one.</summary>
 public sealed class ExecutorKeyState
 {
     /// <summary>The key's ID.</summary>
     [JsonPropertyName("key_id")]
     public string KeyId { get; set; } = "";
 
-    /// <summary>The sovereign the key signs for.</summary>
+    /// <summary>The sovereign the key signs for; null in the answer to a retirement, which does not send it.</summary>
     [JsonPropertyName("executor_sovereign_id")]
-    public string ExecutorSovereignId { get; set; } = "";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExecutorSovereignId { get; set; }
 
     /// <summary>True while the key is not retired.</summary>
     [JsonPropertyName("active")]
@@ -2256,6 +2257,552 @@ public sealed class EvidenceSubmission
     /// <summary>SHA-256 hex of the envelope's canonical JSON.</summary>
     [JsonPropertyName("entry_digest")]
     public string EntryDigest { get; set; } = "";
+}
+
+// ── Evidence store reads and administration (1.9.0) ─────────────────────────
+
+/// <summary>A page of <see cref="EvidenceStoreClient.Export"/> or <see cref="EvidenceStoreClient.ExportText"/>.</summary>
+public sealed class EvidenceExportParams
+{
+    /// <summary>Entries after this store sequence; the NA's default is 0, the start of the store.</summary>
+    public long? SinceSequence { get; init; }
+    /// <summary>1 to 1000 entries a page; the NA's default is 1000.</summary>
+    public int? Limit { get; init; }
+}
+
+/// <summary>
+/// Returned by GET /admin/evidence/status: the store's mode, size and position. With the store off the NA sends only
+/// <see cref="EvidenceStore"/> and <see cref="RetentionCheckpoint"/>; a field it leaves out reads as null.
+/// </summary>
+public sealed class EvidenceStoreStatus
+{
+    /// <summary><c>on</c> or <c>off</c>.</summary>
+    [JsonPropertyName("evidence_store")]
+    public string EvidenceStore { get; set; } = "";
+
+    /// <summary>The number of stored entries.</summary>
+    [JsonPropertyName("entries")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? Entries { get; set; }
+
+    /// <summary>The last entry's position; null for an empty store.</summary>
+    [JsonPropertyName("last_store_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? LastStoreSequence { get; set; }
+
+    /// <summary>How many submissions the NA refused.</summary>
+    [JsonPropertyName("rejections")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? Rejections { get; set; }
+
+    /// <summary>Executor and observer keys not retired.</summary>
+    [JsonPropertyName("active_executor_keys")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? ActiveExecutorKeys { get; set; }
+
+    /// <summary>
+    /// The last position the latest retention checkpoint removed (its <see cref="GenesisMesh.RetentionCheckpoint.RemovedThroughSequence"/>);
+    /// null before the first retention. Read the checkpoint itself with <see cref="EvidenceStoreClient.LatestCheckpoint"/>.
+    /// </summary>
+    [JsonPropertyName("retention_checkpoint")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? RetentionCheckpoint { get; set; }
+
+    /// <summary>v1.2.0: the latest store anchor; null before the first.</summary>
+    [JsonPropertyName("latest_anchor")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public LatestAnchor? LatestAnchor { get; set; }
+
+    /// <summary>v1.2.0: entries after the latest anchor.</summary>
+    [JsonPropertyName("unanchored_entries")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? UnanchoredEntries { get; set; }
+
+    /// <summary>v1.3.1: why this instance cannot anchor (the latest anchor is dated ahead of its clock); null when it can.</summary>
+    [JsonPropertyName("anchoring_blocked")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AnchoringBlocked { get; set; }
+
+    /// <summary>v1.3.0: observations and break-glass records not judged yet. They hold retention back.</summary>
+    [JsonPropertyName("unjudged_records")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? UnjudgedRecords { get; set; }
+
+    /// <summary>v1.3.1, with out-of-band records on: when the policy history starts; null before it does.</summary>
+    [JsonPropertyName("policy_history_started")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PolicyHistoryStarted { get; set; }
+
+    /// <summary>v1.3.1, with out-of-band records on: whether changes can be judged against the registry.</summary>
+    [JsonPropertyName("registry_healthy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RegistryHealthy { get; set; }
+
+    /// <summary>v1.3.1, with out-of-band records on: what keeps the registry from being healthy.</summary>
+    [JsonPropertyName("registry_problems")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? RegistryProblems { get; set; }
+
+    /// <summary>v1.4.0: <c>on</c> when the NA records remediations and reviews.</summary>
+    [JsonPropertyName("evidence_remediation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EvidenceRemediation { get; set; }
+
+    /// <summary>v1.4.0, with those records on: the number of remediations in each state, and <c>review_pending</c>.</summary>
+    [JsonPropertyName("remediation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, long>? Remediation { get; set; }
+
+    /// <summary>v1.6.0: <c>on</c> when the NA issues pre-issued capability grants and records their uses.</summary>
+    [JsonPropertyName("evidence_grants")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EvidenceGrants { get; set; }
+
+    /// <summary>v1.6.0, with grants on: the grants issued.</summary>
+    [JsonPropertyName("grants_issued")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? GrantsIssued { get; set; }
+
+    /// <summary>v1.6.0, with grants on: the grants neither revoked nor ended.</summary>
+    [JsonPropertyName("grants_active")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? GrantsActive { get; set; }
+
+    /// <summary>v1.6.0, with grants on: the grants revoked.</summary>
+    [JsonPropertyName("grants_revoked")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? GrantsRevoked { get; set; }
+
+    /// <summary>v1.6.0, with grants on: the grant uses admitted.</summary>
+    [JsonPropertyName("grant_uses")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? GrantUses { get; set; }
+}
+
+/// <summary>The latest store anchor, as <see cref="EvidenceStoreStatus.LatestAnchor"/> reports it (v1.2.0).</summary>
+public sealed class LatestAnchor
+{
+    /// <summary>The anchor's position in the anchor chain, from 1.</summary>
+    [JsonPropertyName("anchor_sequence")]
+    public long AnchorSequence { get; set; }
+
+    /// <summary>The store position it signs.</summary>
+    [JsonPropertyName("store_sequence")]
+    public long StoreSequence { get; set; }
+
+    /// <summary>When the NA signed it.</summary>
+    [JsonPropertyName("anchored_at")]
+    public string AnchoredAt { get; set; } = "";
+}
+
+/// <summary>
+/// The NA's verification of stored entries (GET /admin/evidence/verify, and with each resource and vendor history):
+/// the envelopes, the store chain, every signature, and the decision and resource chains.
+/// </summary>
+public sealed class EvidenceStoreVerification
+{
+    /// <summary>True when nothing failed.</summary>
+    [JsonPropertyName("verified")]
+    public bool Verified { get; set; }
+
+    /// <summary>The entries checked.</summary>
+    [JsonPropertyName("checked_entries")]
+    public long CheckedEntries { get; set; }
+
+    /// <summary>The decisions among them.</summary>
+    [JsonPropertyName("decisions")]
+    public long Decisions { get; set; }
+
+    /// <summary>The execution records among them.</summary>
+    [JsonPropertyName("executions")]
+    public long Executions { get; set; }
+
+    /// <summary>What failed, in store order; empty when <see cref="Verified"/>.</summary>
+    [JsonPropertyName("failures")]
+    public List<EvidenceVerificationFailure> Failures { get; set; } = [];
+
+    /// <summary>v1.3.0: the observations among them; sent when not 0.</summary>
+    [JsonPropertyName("observations")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Observations { get; set; }
+
+    /// <summary>v1.3.0: the break-glass records among them; sent when not 0.</summary>
+    [JsonPropertyName("break_glass")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long BreakGlass { get; set; }
+
+    /// <summary>v1.3.0: the judgements among them; sent when not 0.</summary>
+    [JsonPropertyName("judgements")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Judgements { get; set; }
+
+    /// <summary>v1.3.0: the quarantine entries among them; sent when not 0.</summary>
+    [JsonPropertyName("quarantined")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Quarantined { get; set; }
+
+    /// <summary>v1.4.0: the remediation records among them; sent when not 0.</summary>
+    [JsonPropertyName("remediations")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Remediations { get; set; }
+
+    /// <summary>v1.4.0: the review records among them; sent when not 0.</summary>
+    [JsonPropertyName("reviews")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Reviews { get; set; }
+
+    /// <summary>v1.5.0: the NA key successions among them; sent when not 0.</summary>
+    [JsonPropertyName("key_successions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long KeySuccessions { get; set; }
+
+    /// <summary>v1.5.0: the archive records among them; sent when not 0.</summary>
+    [JsonPropertyName("archives")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Archives { get; set; }
+
+    /// <summary>v1.6.0: the capability grants among them; sent when not 0.</summary>
+    [JsonPropertyName("grants")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Grants { get; set; }
+
+    /// <summary>v1.6.0: the grant uses among them; sent when not 0.</summary>
+    [JsonPropertyName("grant_executions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long GrantExecutions { get; set; }
+
+    /// <summary>v1.6.0: the grant revocations among them; sent when not 0.</summary>
+    [JsonPropertyName("grant_revocations")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long GrantRevocations { get; set; }
+
+    /// <summary>
+    /// v1.2.0: how the entries tie to the NA's store anchors. Sent with the whole store's verification
+    /// (<see cref="EvidenceStoreClient.Verify"/>), not with a history.
+    /// </summary>
+    [JsonPropertyName("anchors")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AnchorSummary? Anchors { get; set; }
+
+    /// <summary>v1.2.0: findings that do not fail verification, such as <c>unsigned_field</c>; null when there are none.</summary>
+    [JsonPropertyName("warnings")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<EvidenceVerificationFailure>? Warnings { get; set; }
+}
+
+/// <summary>One finding of an <see cref="EvidenceStoreVerification"/>.</summary>
+public sealed class EvidenceVerificationFailure
+{
+    /// <summary>The entry's position; null for a finding about no one entry, such as the retention checkpoint's.</summary>
+    [JsonPropertyName("store_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public long? StoreSequence { get; set; }
+
+    /// <summary>Why, as every implementation names it, such as <c>store_chain_break</c> or <c>invalid_signature</c>.</summary>
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    /// <summary>More about it; may be empty.</summary>
+    [JsonPropertyName("detail")]
+    public string Detail { get; set; } = "";
+}
+
+/// <summary>How a run of entries ties to the store anchors (<see cref="EvidenceStoreVerification.Anchors"/>, v1.2.0).</summary>
+public sealed class AnchorSummary
+{
+    /// <summary>The anchors checked.</summary>
+    [JsonPropertyName("anchors_checked")]
+    public long AnchorsChecked { get; set; }
+
+    /// <summary>The anchors that name an entry of the run by its digest.</summary>
+    [JsonPropertyName("anchors_matched")]
+    public long AnchorsMatched { get; set; }
+
+    /// <summary>The anchors before the run's first entry.</summary>
+    [JsonPropertyName("anchors_before_export")]
+    public long AnchorsBeforeExport { get; set; }
+
+    /// <summary>The anchors after its last entry: history the run stops short of.</summary>
+    [JsonPropertyName("anchors_after_export")]
+    public long AnchorsAfterExport { get; set; }
+
+    /// <summary>True when the run starts at entry 1, or right after a retention checkpoint it holds.</summary>
+    [JsonPropertyName("linked_start")]
+    public bool LinkedStart { get; set; }
+
+    /// <summary>The last position a matched anchor covers; null when none matched.</summary>
+    [JsonPropertyName("anchored_through_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public long? AnchoredThroughSequence { get; set; }
+
+    /// <summary>The run's entries after the last matched anchor.</summary>
+    [JsonPropertyName("unanchored_entries")]
+    public long UnanchoredEntries { get; set; }
+
+    /// <summary>The NA's own anchors verified as a chain; sent by the NA's verify route only.</summary>
+    [JsonPropertyName("chain")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AnchorVerification? Chain { get; set; }
+}
+
+/// <summary>A run of store anchors verified as a chain: signatures, links and heads that never go back (v1.2.0).</summary>
+public sealed class AnchorVerification
+{
+    /// <summary>True when nothing failed.</summary>
+    [JsonPropertyName("verified")]
+    public bool Verified { get; set; }
+
+    /// <summary>The anchors checked.</summary>
+    [JsonPropertyName("checked_anchors")]
+    public long CheckedAnchors { get; set; }
+
+    /// <summary>The first anchor's position; null without anchors.</summary>
+    [JsonPropertyName("first_anchor_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public long? FirstAnchorSequence { get; set; }
+
+    /// <summary>The last anchor's position; null without anchors.</summary>
+    [JsonPropertyName("last_anchor_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public long? LastAnchorSequence { get; set; }
+
+    /// <summary>The store position the last anchor signs; null without anchors.</summary>
+    [JsonPropertyName("anchored_through_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public long? AnchoredThroughSequence { get; set; }
+
+    /// <summary>What failed.</summary>
+    [JsonPropertyName("failures")]
+    public List<AnchorFailure> Failures { get; set; } = [];
+}
+
+/// <summary>One finding of an <see cref="AnchorVerification"/>.</summary>
+public sealed class AnchorFailure
+{
+    /// <summary>The anchor's position; null for a finding about no one anchor.</summary>
+    [JsonPropertyName("anchor_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public long? AnchorSequence { get; set; }
+
+    /// <summary>Why, such as <c>anchor_chain_break</c> or <c>invalid_signature</c>.</summary>
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    /// <summary>More about it; may be empty.</summary>
+    [JsonPropertyName("detail")]
+    public string Detail { get; set; } = "";
+}
+
+/// <summary>
+/// Returned by GET /admin/evidence/resources/&lt;resource_id&gt;: one resource's records, the decisions they rest on
+/// and (v1.3.0) its changes outside the governed path, as the NA verified them.
+/// </summary>
+public sealed class ResourceHistory
+{
+    /// <summary>The resource.</summary>
+    [JsonPropertyName("resource_id")]
+    public string ResourceId { get; set; } = "";
+
+    /// <summary>
+    /// v0.63.1: true when the resource has more records than one response holds (10,000); the history then holds the
+    /// oldest. Read the rest through the export, and the chain's head with <see cref="EvidenceStoreClient.ResourceHead"/>.
+    /// </summary>
+    [JsonPropertyName("truncated")]
+    public bool Truncated { get; set; }
+
+    /// <summary>The entries, in store order.</summary>
+    [JsonPropertyName("entries")]
+    public List<EvidenceEvent> Entries { get; set; } = [];
+
+    /// <summary>
+    /// The NA's verification of <see cref="Entries"/>. A history is not a run of the store, so the store chain is
+    /// checked only between adjacent positions.
+    /// </summary>
+    [JsonPropertyName("verification")]
+    public EvidenceStoreVerification Verification { get; set; } = new();
+}
+
+/// <summary>
+/// Returned by GET /admin/evidence/vendors/&lt;vendor_id&gt;: a vendor's decisions and the evidence under them, as the
+/// NA verified them.
+/// </summary>
+public sealed class VendorHistory
+{
+    /// <summary>The vendor (attestation subject).</summary>
+    [JsonPropertyName("vendor_id")]
+    public string VendorId { get; set; } = "";
+
+    /// <summary>v0.63.1: true when the vendor has more decisions than one response holds (10,000); it then holds the oldest.</summary>
+    [JsonPropertyName("truncated")]
+    public bool Truncated { get; set; }
+
+    /// <summary>The entries, in store order.</summary>
+    [JsonPropertyName("entries")]
+    public List<EvidenceEvent> Entries { get; set; } = [];
+
+    /// <summary>The NA's verification of <see cref="Entries"/>, as for a <see cref="ResourceHistory"/>.</summary>
+    [JsonPropertyName("verification")]
+    public EvidenceStoreVerification Verification { get; set; } = new();
+}
+
+/// <summary>A registered executor or observer key, retired or not (<see cref="EvidenceStoreClient.ListExecutorKeys"/>).</summary>
+public sealed class ExecutorKeyRecord
+{
+    /// <summary>The key's ID, as the records it signs name it.</summary>
+    [JsonPropertyName("key_id")]
+    public string KeyId { get; set; } = "";
+
+    /// <summary>The raw 32-byte Ed25519 public key, base64.</summary>
+    [JsonPropertyName("public_key")]
+    public string PublicKey { get; set; } = "";
+
+    /// <summary>The sovereign the key signs for.</summary>
+    [JsonPropertyName("executor_sovereign_id")]
+    public string ExecutorSovereignId { get; set; } = "";
+
+    /// <summary>When the key was registered.</summary>
+    [JsonPropertyName("registered_at")]
+    public string RegisteredAt { get; set; } = "";
+
+    /// <summary>When it was retired; null while it is not. A retired key still verifies the records it signed.</summary>
+    [JsonPropertyName("retired_at")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RetiredAt { get; set; }
+
+    /// <summary>v1.3.0: <c>executor</c>, or <c>observer</c>, which signs observations only.</summary>
+    [JsonPropertyName("role")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Role { get; set; }
+
+    /// <summary>v1.3.0: the prefix of the resources the key signs for; null for any resource.</summary>
+    [JsonPropertyName("resource_prefix")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourcePrefix { get; set; }
+}
+
+/// <summary>Returned by POST /admin/evidence/retention/apply (<see cref="EvidenceStoreClient.ApplyRetention"/>).</summary>
+public sealed class RetentionResult
+{
+    /// <summary>The entries removed; 0 when retention removed nothing.</summary>
+    [JsonPropertyName("removed_count")]
+    public long RemovedCount { get; set; }
+
+    /// <summary>The checkpoint the NA signed over what it removed; null when it removed nothing.</summary>
+    [JsonPropertyName("checkpoint")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RetentionCheckpoint? Checkpoint { get; set; }
+
+    /// <summary>v1.3.1: why retention stopped short of what was asked, when it did; null otherwise.</summary>
+    [JsonPropertyName("held_back")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RetentionHeldBack? HeldBack { get; set; }
+}
+
+/// <summary>Why retention stopped short (<see cref="RetentionResult.HeldBack"/>, v1.3.1).</summary>
+public sealed class RetentionHeldBack
+{
+    /// <summary>
+    /// <c>unjudged_records</c> (an observation or break-glass record not judged yet), v1.4.0 <c>open_remediations</c>
+    /// (a change whose remediation or review is not settled), v1.5.0 <c>not_archived</c> (entries no archive covers
+    /// yet) or v1.6.0 <c>usable_grants</c> (a grant whose uses may still be uploaded).
+    /// </summary>
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    /// <summary>The NA's explanation, with what to do.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+
+    /// <summary>The first entry retention kept for <see cref="Reason"/>; null for <c>not_archived</c>.</summary>
+    [JsonPropertyName("store_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? StoreSequence { get; set; }
+
+    /// <summary>That entry's kind; null for <c>not_archived</c>.</summary>
+    [JsonPropertyName("entry_kind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EntryKind { get; set; }
+
+    /// <summary>That entry's record or decision ID; null for <c>not_archived</c>.</summary>
+    [JsonPropertyName("record_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RecordId { get; set; }
+
+    /// <summary>For <c>unjudged_records</c>: how many records in the store are not judged yet.</summary>
+    [JsonPropertyName("unjudged_records")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? UnjudgedRecords { get; set; }
+
+    /// <summary>For <c>not_archived</c>: the last position an unbroken run of archives covers.</summary>
+    [JsonPropertyName("archived_through_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? ArchivedThroughSequence { get; set; }
+}
+
+/// <summary>
+/// The record the NA signs over one retention run (Python <c>RetentionCheckpoint</c>): what it removed, and the head of
+/// every resource chain that lost records, so the rest of the store still verifies. It is stored as a
+/// <c>retention_checkpoint</c> entry.
+/// <para>
+/// Serialized as the NA sends it: <see cref="ObservationHeads"/> is left out when absent, as the NA signs it, and
+/// <see cref="PreviousCheckpointId"/> is written even when null, so a checkpoint passed back keeps its signed form.
+/// </para>
+/// </summary>
+public sealed class RetentionCheckpoint
+{
+    /// <summary>The checkpoint's ID (a UUID).</summary>
+    [JsonPropertyName("checkpoint_id")]
+    public string CheckpointId { get; set; } = "";
+
+    /// <summary>When the NA signed it.</summary>
+    [JsonPropertyName("created_at")]
+    public string CreatedAt { get; set; } = "";
+
+    /// <summary>Entries recorded before this instant were eligible.</summary>
+    [JsonPropertyName("cutoff")]
+    public string Cutoff { get; set; } = "";
+
+    /// <summary>Entries 1 to this position are removed.</summary>
+    [JsonPropertyName("removed_through_sequence")]
+    public long RemovedThroughSequence { get; set; }
+
+    /// <summary>The digest of the last removed entry: what the next stored entry links to.</summary>
+    [JsonPropertyName("last_removed_entry_digest")]
+    public string LastRemovedEntryDigest { get; set; } = "";
+
+    /// <summary>How many entries this run removed.</summary>
+    [JsonPropertyName("removed_count")]
+    public long RemovedCount { get; set; }
+
+    /// <summary>The last removed record of every resource that lost records, by resource: where its chain continues.</summary>
+    [JsonPropertyName("resource_heads")]
+    public Dictionary<string, ResourceHead> ResourceHeads { get; set; } = [];
+
+    /// <summary>The previous checkpoint's ID; null for the first.</summary>
+    [JsonPropertyName("previous_checkpoint_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? PreviousCheckpointId { get; set; }
+
+    /// <summary>The NA key that signed it.</summary>
+    [JsonPropertyName("issued_by")]
+    public string IssuedBy { get; set; } = "";
+
+    /// <summary>The NA's signature, <c>{"key_id", "sig"}</c>, over the record without it.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+
+    /// <summary>v1.3.0, left out when absent: the last removed observation position, by resource.</summary>
+    [JsonPropertyName("observation_heads")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, long>? ObservationHeads { get; set; }
+}
+
+/// <summary>The body of GET /admin/evidence/executor-keys.</summary>
+internal sealed class ExecutorKeyList
+{
+    [JsonPropertyName("executor_keys")]
+    public IReadOnlyList<ExecutorKeyRecord> ExecutorKeys { get; set; } = [];
 }
 
 // ── The evidence outbox (1.9.0) ───────────────────────────────────────────────

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using NSec.Cryptography;
 
 namespace GenesisMesh;
@@ -431,6 +432,113 @@ public static partial class OfflineVerifier
             && StrictFields.UnknownFields(model, record).Count == 0
             && StrictFields.NonCanonicalFields(model, record).Count == 0
             && SignedAsReceived(model, record, keys(record));
+    }
+
+    // ── evidence exports ───────────────────────────────────────────────────
+
+    /// <summary>The fields of an export event; every one is sent.</summary>
+    private static readonly string[] EventFields = ["schema", "schema_version", "entry", "entry_digest", "payload"];
+
+    /// <summary>The store envelope's fields that every entry carries, string or null.</summary>
+    private static readonly string[] EntryNullableStrings =
+    [
+        "prev_entry_digest", "decision_id", "context_id", "vendor_id", "attestation_id", "capability", "outcome",
+        "evidence_id", "executor_sovereign_id", "resource_id", "resource_action",
+    ];
+
+    /// <summary>v1.3.0: the envelope's fields left out when absent (a null reads as absent).</summary>
+    private static readonly string[] EntryOptionalStrings = ["record_id", "subject_id", "matched_evidence_id"];
+
+    private static readonly HashSet<string> EntryFields = new(
+        ["store_sequence", "entry_kind", "recorded_at", "payload_digest", "exec_sequence_no", "resource_sequence",
+         "observation_sequence", .. EntryNullableStrings, .. EntryOptionalStrings], StringComparer.Ordinal);
+
+    /// <summary>
+    /// Parses <c>gm.evidence.event</c> JSON Lines, such as an export (<see cref="EvidenceStoreClient.ExportText"/>) or a
+    /// file a SIEM pipeline kept. Blank lines are skipped. Each line must be strict JSON and an event of schema version 1
+    /// with exactly the envelope fields the reference writes, as every implementation reads it: an integer written as a
+    /// float (<c>7.0</c>) is refused. The payload is kept as received, for verification.
+    /// </summary>
+    /// <param name="text">The lines, separated by <c>\n</c> (a <c>\r</c> before it is ignored).</param>
+    /// <exception cref="StrictJsonException">A line is not strict JSON.</exception>
+    /// <exception cref="JsonException">A line is not such an event; the message gives its line number, from 1.</exception>
+    public static IReadOnlyList<EvidenceEvent> ParseExportLines(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return ParseExportLines(text.Split('\n'));
+    }
+
+    /// <summary>As <see cref="ParseExportLines(string)"/>, one line at a time.</summary>
+    /// <param name="lines">The lines.</param>
+    /// <exception cref="StrictJsonException">A line is not strict JSON.</exception>
+    /// <exception cref="JsonException">A line is not such an event; the message gives its line number, from 1.</exception>
+    public static IReadOnlyList<EvidenceEvent> ParseExportLines(IEnumerable<string> lines)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        var events = new List<EvidenceEvent>();
+        var number = 0;
+        foreach (var raw in lines)
+        {
+            number++;
+            var line = raw.Trim(' ', '\t', '\r', '\n');
+            if (line.Length == 0) continue;
+            using var doc = StrictJsonReader.Parse(line);
+            if (!IsEvent(doc.RootElement))
+                throw new JsonException($"genesismesh: line {number} is not a gm.evidence.event of schema version 1");
+            events.Add(doc.RootElement.Deserialize<EvidenceEvent>()!);
+        }
+        return events;
+    }
+
+    /// <summary>An export event in the shape the reference writes (TypeScript <c>validEvent</c>).</summary>
+    private static bool IsEvent(JsonElement e) =>
+        e.ValueKind == JsonValueKind.Object
+        && e.EnumerateObject().All(p => EventFields.Contains(p.Name))
+        && EventFields.All(f => e.TryGetProperty(f, out _))
+        && Str(e, "schema") == "gm.evidence.event"
+        && Integer(e.GetProperty("schema_version")) == 1
+        && IsEntry(e.GetProperty("entry"))
+        && e.GetProperty("entry_digest").ValueKind == JsonValueKind.String
+        && e.GetProperty("payload").ValueKind == JsonValueKind.Object;
+
+    private static bool IsEntry(JsonElement e)
+    {
+        if (e.ValueKind != JsonValueKind.Object || e.EnumerateObject().Any(p => !EntryFields.Contains(p.Name))) return false;
+        bool Present(string name, out JsonElement value) => e.TryGetProperty(name, out value);
+        bool NullOr(string name, JsonValueKind kind) =>
+            Present(name, out var v) && (v.ValueKind == JsonValueKind.Null || v.ValueKind == kind);
+        bool NullOrInteger(string name, long min) =>
+            Present(name, out var v) && (v.ValueKind == JsonValueKind.Null || Integer(v) >= min);
+        return Present("store_sequence", out var sequence) && Integer(sequence) >= 1
+            && Present("entry_kind", out var kind) && kind.ValueKind == JsonValueKind.String
+            && Present("recorded_at", out var at) && at.ValueKind == JsonValueKind.String && IsTimestamp(at.GetString()!)
+            && Present("payload_digest", out var digest) && digest.ValueKind == JsonValueKind.String
+            && EntryNullableStrings.All(f => NullOr(f, JsonValueKind.String))
+            && NullOrInteger("exec_sequence_no", long.MinValue) && NullOrInteger("resource_sequence", long.MinValue)
+            && EntryOptionalStrings.All(f => !Present(f, out _) || NullOr(f, JsonValueKind.String))
+            && (!Present("observation_sequence", out _) || NullOrInteger("observation_sequence", 1));
+    }
+
+    /// <summary>The value of an integer written as one (not <c>7.0</c> or <c>7e0</c>), or null.</summary>
+    private static long? Integer(JsonElement value) =>
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var n) ? n : null;
+
+    [GeneratedRegex(@"^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]{1,6})?(?:Z|[+-]([0-9]{2}):([0-9]{2}))?\z",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex TimestampForm();
+
+    /// <summary>
+    /// An ISO 8601 timestamp as the reference reads one: to the microsecond at most, a valid date and time, and UTC, an
+    /// offset under 24 hours, or none (UTC).
+    /// </summary>
+    private static bool IsTimestamp(string value)
+    {
+        var m = TimestampForm().Match(value);
+        if (!m.Success) return false;
+        int Group(int i) => m.Groups[i].Success ? int.Parse(m.Groups[i].ValueSpan, CultureInfo.InvariantCulture) : 0;
+        int year = Group(1), month = Group(2), day = Group(3);
+        return year >= 1 && month is >= 1 and <= 12 && day >= 1 && day <= DateTime.DaysInMonth(year, month)
+            && Group(4) < 24 && Group(5) < 60 && Group(6) < 60 && Group(7) < 24 && Group(8) < 60;
     }
 
     // ── data usage ─────────────────────────────────────────────────────────

@@ -7,13 +7,16 @@ namespace GenesisMesh;
 
 /// <summary>
 /// The NA's evidence store (v0.59; 1.9.0 in this SDK): a controller submits the execution evidence it signed and reads
-/// where each resource's chain ends; an operator searches what is stored. Reads need an operator key of the read tier
-/// or above; registering keys needs a privileged one.
+/// where each resource's chain ends; an operator searches, verifies and exports what is stored. Reads need an operator
+/// key of the read tier or above; registering and retiring keys and applying retention need a privileged one.
 /// </summary>
 public sealed class EvidenceStoreClient
 {
     /// <summary>Most pending records an enqueued record submits before its own; older ones wait for a flush.</summary>
     private const int MaxInlineDrain = 100;
+
+    /// <summary>The most entries the NA returns in one page.</summary>
+    private const int MaxPage = 1000;
 
     /// <summary>Refusals of a record whose predecessor is not stored: final once that predecessor is a dead letter.</summary>
     private static readonly HashSet<string> ChainGaps = new(StringComparer.Ordinal) { "evidence_chain_gap", "resource_chain_gap" };
@@ -330,6 +333,173 @@ public sealed class EvidenceStoreClient
         return await _t.AdminPostAsync<ExecutorKeyState>("/admin/evidence/executor-keys", request, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// The store's mode, size, last position and latest retention checkpoint; (v1.2.0) its anchoring; and the counts
+    /// of the records it keeps. Answered with the store off too.
+    /// GET /admin/evidence/status
+    /// </summary>
+    public Task<EvidenceStoreStatus> Status(CancellationToken ct = default) =>
+        _t.AdminGetAsync<EvidenceStoreStatus>("/admin/evidence/status", null, ct);
+
+    /// <summary>
+    /// The NA's verification of every stored entry from the latest retention checkpoint on: the envelopes, the store
+    /// chain, every signature, the decision and resource chains, and (v1.2.0) the store against the NA's own anchors.
+    /// GET /admin/evidence/verify
+    /// </summary>
+    public Task<EvidenceStoreVerification> Verify(CancellationToken ct = default) =>
+        _t.AdminGetAsync<EvidenceStoreVerification>("/admin/evidence/verify", null, ct);
+
+    /// <summary>
+    /// One resource's records, the decisions they rest on and (v1.3.0) its changes outside the governed path, as the NA
+    /// verified them: at most the oldest 10,000 records (<see cref="GenesisMesh.ResourceHistory.Truncated"/>).
+    /// GET /admin/evidence/resources/&lt;resource_id&gt;
+    /// </summary>
+    /// <exception cref="NotFoundException">
+    /// The store holds no record of the resource (<c>resource_not_found</c>), also when retention removed them all;
+    /// <see cref="ResourceHead"/> still reads where its chain ends.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="resourceId"/> cannot be sent as a path (see <see cref="ResourceHead"/>): nothing is sent.
+    /// </exception>
+    public async Task<ResourceHistory> ResourceHistory(string resourceId, CancellationToken ct = default) =>
+        await _t.AdminGetAsync<ResourceHistory>(
+            "/admin/evidence/resources/" + Transport.ResourcePath(resourceId, nameof(resourceId)), null, ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// A vendor's decisions and the evidence under them, as the NA verified them: at most the oldest 10,000 decisions
+    /// (<see cref="GenesisMesh.VendorHistory.Truncated"/>).
+    /// GET /admin/evidence/vendors/&lt;vendor_id&gt;
+    /// </summary>
+    /// <exception cref="NotFoundException">The store holds no decision for the vendor (<c>vendor_not_found</c>).</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="vendorId"/> is not one path segment: it is empty, a dot segment, or holds '/', '\', '?', '#', '%'
+    /// or a control character. Nothing is sent.
+    /// </exception>
+    public async Task<VendorHistory> VendorHistory(string vendorId, CancellationToken ct = default) =>
+        await _t.AdminGetAsync<VendorHistory>(
+            "/admin/evidence/vendors/" + Transport.PathSegment(vendorId, nameof(vendorId)), null, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// One page of the store as <c>gm.evidence.event</c> JSON Lines, unparsed: what a SIEM pipeline keeps. Read it with
+    /// <see cref="OfflineVerifier.ParseExportLines(string)"/>, or use <see cref="Export"/> or <see cref="ExportAll"/>.
+    /// GET /admin/evidence/export
+    /// </summary>
+    public Task<string> ExportText(EvidenceExportParams? export = null, CancellationToken ct = default) =>
+        _t.AdminGetTextAsync("/admin/evidence/export", ExportQuery(export?.SinceSequence, export?.Limit), ct);
+
+    /// <summary>One page of the store's export, parsed (<see cref="ExportText"/>).</summary>
+    /// <exception cref="System.Text.Json.JsonException">A line is not a <c>gm.evidence.event</c> of schema version 1.</exception>
+    public async Task<IReadOnlyList<EvidenceEvent>> Export(EvidenceExportParams? export = null, CancellationToken ct = default) =>
+        OfflineVerifier.ParseExportLines(await ExportText(export, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Every entry after <paramref name="sinceSequence"/>, following the export's pages: an incremental pull, from the
+    /// last position a previous pull kept.
+    /// </summary>
+    /// <param name="sinceSequence">The last position already held; 0 for the whole store.</param>
+    /// <param name="pageSize">Entries a page, 1 to 1000.</param>
+    /// <param name="ct">Cancels the pull.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="sinceSequence"/> is negative, or <paramref name="pageSize"/> is not 1 to 1000.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">An entry of the export is not after the one before it.</exception>
+    public IAsyncEnumerable<EvidenceEvent> ExportAll(long sinceSequence = 0, int pageSize = MaxPage, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(sinceSequence);
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageSize, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(pageSize, MaxPage);
+        return ExportFrom(sinceSequence, pageSize, ct);
+    }
+
+    private async IAsyncEnumerable<EvidenceEvent> ExportFrom(
+        long since, int pageSize, [EnumeratorCancellation] CancellationToken ct)
+    {
+        while (true)
+        {
+            var text = await _t.AdminGetTextAsync("/admin/evidence/export", ExportQuery(since, pageSize), ct)
+                .ConfigureAwait(false);
+            var events = OfflineVerifier.ParseExportLines(text);
+            foreach (var e in events)
+            {
+                if (e.Entry.StoreSequence <= since)
+                    throw new InvalidOperationException("genesismesh: the evidence export cursor did not advance");
+                since = e.Entry.StoreSequence;
+                yield return e;
+            }
+            if (events.Count < pageSize) yield break;
+        }
+    }
+
+    /// <summary>
+    /// The registered executor and (v1.3.0) observer keys, retired ones included: a retired key still verifies the
+    /// records it signed.
+    /// GET /admin/evidence/executor-keys
+    /// </summary>
+    public async Task<IReadOnlyList<ExecutorKeyRecord>> ListExecutorKeys(CancellationToken ct = default) =>
+        (await _t.AdminGetAsync<ExecutorKeyList>("/admin/evidence/executor-keys", null, ct).ConfigureAwait(false))
+            .ExecutorKeys;
+
+    /// <summary>
+    /// Retires an executor or observer key (privileged): the NA refuses new records signed by it
+    /// (<c>evidence_executor_key_retired</c>), and it still verifies the records it signed. (v1.6.0) The grants it
+    /// bears are revoked with it. A key cannot be registered again: register a new one.
+    /// POST /admin/evidence/executor-keys/&lt;key_id&gt;/retire
+    /// </summary>
+    /// <returns>The key, no longer active. <see cref="ExecutorKeyState.ExecutorSovereignId"/> is not sent.</returns>
+    /// <exception cref="NotFoundException">No such key is registered (<c>executor_key_not_found</c>).</exception>
+    /// <exception cref="ConflictException">
+    /// The key is retired already (<c>executor_key_retired</c>), or (v1.7.0) it is an edge node's key, retired by
+    /// revoking the node (<c>executor_key_is_edge_node</c>).
+    /// </exception>
+    /// <exception cref="ArgumentException"><paramref name="keyId"/> is not one path segment (see <see cref="VendorHistory"/>): nothing is sent.</exception>
+    public async Task<ExecutorKeyState> RetireExecutorKey(string keyId, CancellationToken ct = default) =>
+        await _t.AdminPostAsync<ExecutorKeyState>(
+            $"/admin/evidence/executor-keys/{Transport.PathSegment(keyId, nameof(keyId))}/retire",
+            new Dictionary<string, object?>(), ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Removes a prefix of the store behind a checkpoint the NA signs (privileged), so the rest still verifies. The
+    /// prefix ends before the first entry recorded within <paramref name="olderThanDays"/> days, under a decision still
+    /// valid, or not yet judged, and never splits a decision from its evidence. (v1.5.0) It never goes past
+    /// <paramref name="throughSequence"/>, and while the NA requires archives (its default) not past what archive
+    /// records cover. Whatever stopped it short is in <see cref="RetentionResult.HeldBack"/>.
+    /// POST /admin/evidence/retention/apply
+    /// </summary>
+    /// <param name="olderThanDays">Keep entries recorded within this many days (1 or more); null to give only <paramref name="throughSequence"/>.</param>
+    /// <param name="throughSequence">v1.5.0: remove nothing past this position (1 or more); null for no limit.</param>
+    /// <param name="ct">Cancels the request.</param>
+    /// <exception cref="ArgumentException">Neither <paramref name="olderThanDays"/> nor <paramref name="throughSequence"/> is given: nothing is sent.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A value given is less than 1: nothing is sent.</exception>
+    /// <exception cref="ValidationException">
+    /// The NA refused the request (<c>invalid_retention</c>): for example, with out-of-band records, an
+    /// <paramref name="olderThanDays"/> within the observation backlog.
+    /// </exception>
+    /// <exception cref="ConflictException">Retention is running on another instance (<c>retention_in_progress</c>).</exception>
+    public async Task<RetentionResult> ApplyRetention(int? olderThanDays, long? throughSequence = null, CancellationToken ct = default)
+    {
+        if (olderThanDays is null && throughSequence is null)
+            throw new ArgumentException("genesismesh: give olderThanDays, throughSequence or both", nameof(olderThanDays));
+        if (olderThanDays is { } days) ArgumentOutOfRangeException.ThrowIfLessThan(days, 1, nameof(olderThanDays));
+        if (throughSequence is { } through) ArgumentOutOfRangeException.ThrowIfLessThan(through, 1L, nameof(throughSequence));
+        var body = new Dictionary<string, object?>();
+        if (olderThanDays is not null) body["older_than_days"] = olderThanDays;
+        if (throughSequence is not null) body["through_sequence"] = throughSequence;
+        return await _t.AdminPostAsync<RetentionResult>("/admin/evidence/retention/apply", body, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The store's most recent retention checkpoint, or null before the first retention: the heads of the chains it
+    /// removed records from. Read from the store's <c>retention_checkpoint</c> entries.
+    /// </summary>
+    public async Task<RetentionCheckpoint?> LatestCheckpoint(CancellationToken ct = default)
+    {
+        JsonElement? latest = null;
+        await foreach (var e in Iterate(new EvidenceSearchParams { EntryKind = "retention_checkpoint" }, ct).ConfigureAwait(false))
+            latest = e.Payload;
+        return latest?.Deserialize<RetentionCheckpoint>();
+    }
+
     // ── The outbox ──────────────────────────────────────────────────────────
 
     private IOutbox<OutboxEntry> RequireOutbox() =>
@@ -597,6 +767,14 @@ public sealed class EvidenceStoreClient
         Put("until", search?.Until);
         Put("after_sequence", afterSequence?.ToString(CultureInfo.InvariantCulture));
         Put("limit", search?.Limit?.ToString(CultureInfo.InvariantCulture));
+        return query;
+    }
+
+    private static Dictionary<string, string> ExportQuery(long? sinceSequence, int? limit)
+    {
+        var query = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (sinceSequence is { } since) query["since_sequence"] = since.ToString(CultureInfo.InvariantCulture);
+        if (limit is { } n) query["limit"] = n.ToString(CultureInfo.InvariantCulture);
         return query;
     }
 

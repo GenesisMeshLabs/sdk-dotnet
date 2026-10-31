@@ -396,6 +396,95 @@ public class LiveContractTests
                 if (Directory.Exists(outboxDir)) Directory.Delete(outboxDir, recursive: true);
             }
 
+            // 1.9.0: the store's status, the NA's verification of it, histories, the export, executor keys and
+            // retention. Each response is checked at every depth: a history holds events and a verification.
+            void Modeled<T>(string name, T typed, JsonNode? raw = null)
+            {
+                if (raw is null) Check(name, typed);
+                var problems = ContractTypesTests.Unmodeled(raw ?? recorder.Json, typeof(T), name);
+                Assert.True(problems.Count == 0, string.Join("; ", problems));
+            }
+            static string Failures(EvidenceStoreVerification v) =>
+                string.Join("; ", v.Failures.Select(f => $"{f.StoreSequence} {f.Reason} {f.Detail}"));
+
+            var status = await gm.EvidenceStore.Status();
+            Modeled("evidence_status", status);
+            Assert.Equal(("on", (long?)null), (status.EvidenceStore, status.RetentionCheckpoint));
+            Assert.Equal(status.Entries, status.LastStoreSequence);
+            var storeCheck = await gm.EvidenceStore.Verify();
+            Modeled("evidence_verify_store", storeCheck);
+            Assert.True(storeCheck.Verified, Failures(storeCheck));
+            Assert.Equal((status.Entries, true), (storeCheck.CheckedEntries, storeCheck.Anchors!.Chain!.Verified));
+
+            var resourceHistory = await gm.EvidenceStore.ResourceHistory(resource);
+            Modeled("evidence_resource_history", resourceHistory);
+            Assert.True(resourceHistory.Verification.Verified, Failures(resourceHistory.Verification));
+            Assert.False(resourceHistory.Truncated);
+            Assert.Equal([created.EvidenceId, rotated.EvidenceId],
+                resourceHistory.Entries.Where(e => e.Entry.EntryKind == "execution").Select(e => e.Entry.EvidenceId));
+            Assert.Contains(resourceHistory.Entries, e => e.Entry.EntryKind == "decision" && e.Entry.DecisionId == rotateDecision.DecisionId);
+            var vendorHistory = await gm.EvidenceStore.VendorHistory(vendor.SubjectId);
+            Modeled("evidence_vendor_history", vendorHistory);
+            Assert.True(vendorHistory.Verification.Verified, Failures(vendorHistory.Verification));
+            Assert.Contains(vendorHistory.Entries, e => e.Entry.EntryKind == "decision" && e.Entry.DecisionId == allowed.Decision.DecisionId);
+            Assert.Equal("resource_not_found",
+                (await Assert.ThrowsAsync<NotFoundException>(() => gm.EvidenceStore.ResourceHistory("contract:none/secret"))).Code);
+            Assert.Equal("vendor_not_found", (await Assert.ThrowsAsync<NotFoundException>(() => gm.EvidenceStore.VendorHistory("vendor-none"))).Code);
+
+            // The export, page by page, holds the whole store in order, as search and the first page hold it.
+            var exported = new List<EvidenceEvent>();
+            await foreach (var e in gm.EvidenceStore.ExportAll(pageSize: 3)) exported.Add(e);
+            Assert.Equal(Enumerable.Range(1, (int)status.Entries!.Value).Select(i => (long)i), exported.Select(e => e.Entry.StoreSequence));
+            Assert.Equal(stored.Entries.Select(e => e.EntryDigest),
+                exported.Where(e => e.Entry.ResourceId == resource && e.Entry.EntryKind == "execution").Select(e => e.EntryDigest));
+            var firstPage = await gm.EvidenceStore.ExportText(new EvidenceExportParams { Limit = 2 });
+            Assert.Equal(exported.Take(2).Select(e => e.EntryDigest), OfflineVerifier.ParseExportLines(firstPage).Select(e => e.EntryDigest));
+            foreach (var line in firstPage.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                Modeled("evidence_export_event", OfflineVerifier.ParseExportLines(line)[0], JsonNode.Parse(line));
+            Assert.Equal(exported.Skip(2).Select(e => e.EntryDigest),
+                (await gm.EvidenceStore.Export(new EvidenceExportParams { SinceSequence = 2 })).Select(e => e.EntryDigest));
+
+            var keys = await gm.EvidenceStore.ListExecutorKeys();
+            Modeled("evidence_executor_keys", keys.ToList(), recorder.Json!["executor_keys"]);
+            var contractKey = keys.Single(k => k.KeyId == "contract-executor");
+            Assert.Equal((executorPublicKey, "contract:", (string?)null, "executor"), (contractKey.PublicKey, contractKey.ResourcePrefix, contractKey.RetiredAt, contractKey.Role));
+
+            // A retired key signs no new record, and the records it signed still verify.
+            using var retiringKey = Key.Create(SignatureAlgorithm.Ed25519,
+                new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
+            await gm.EvidenceStore.RegisterExecutorKey(new RegisterExecutorKeyRequest
+            {
+                KeyId = "contract-retired",
+                PublicKey = Convert.ToBase64String(retiringKey.PublicKey.Export(KeyBlobFormat.RawPublicKey)),
+                ExecutorSovereignId = "contract-executor",
+                ResourcePrefix = "contract:",
+            });
+            var retiring = new ExecutionRecorder("contract-executor",
+                new SeedSigner(Convert.ToBase64String(retiringKey.Export(KeyBlobFormat.RawPrivateKey)), "contract-retired"));
+            Assert.Equal("recorded", (await gm.EvidenceStore.Submit(await retiring.Record(Execution(
+                (await gm.Boundary.Evaluate(Evaluation(30))).Decision, "contract:app-7/secret", ResourceActions.Create, null)))).Status);
+            var retired = await gm.EvidenceStore.RetireExecutorKey("contract-retired");
+            Modeled("evidence_retire_executor_key", retired);
+            Assert.Equal(("contract-retired", false, (string?)null), (retired.KeyId, retired.Active, retired.ExecutorSovereignId));
+            Assert.NotNull((await gm.EvidenceStore.ListExecutorKeys()).Single(k => k.KeyId == "contract-retired").RetiredAt);
+            var afterRetirement = await Assert.ThrowsAsync<ValidationException>(async () => await gm.EvidenceStore.Submit(
+                await retiring.Record(Execution((await gm.Boundary.Evaluate(Evaluation(30))).Decision, "contract:app-8/secret",
+                    ResourceActions.Create, null))));
+            Assert.Equal("evidence_executor_key_retired", afterRetirement.Code);
+            Assert.Equal("executor_key_retired",
+                (await Assert.ThrowsAsync<ConflictException>(() => gm.EvidenceStore.RetireExecutorKey("contract-retired"))).Code);
+            Assert.Equal("executor_key_not_found",
+                (await Assert.ThrowsAsync<NotFoundException>(() => gm.EvidenceStore.RetireExecutorKey("contract-none"))).Code);
+            var afterKeys = await gm.EvidenceStore.Verify();
+            Assert.True(afterKeys.Verified, Failures(afterKeys));
+
+            // Retention removes nothing recorded within the day; the store has no checkpoint yet.
+            var retention = await gm.EvidenceStore.ApplyRetention(1);
+            Modeled("evidence_retention", retention);
+            Assert.Equal((0L, (RetentionCheckpoint?)null, (RetentionHeldBack?)null), (retention.RemovedCount, retention.Checkpoint, retention.HeldBack));
+            Assert.Null(await gm.EvidenceStore.LatestCheckpoint());
+            Assert.Null((await gm.EvidenceStore.Status()).RetentionCheckpoint);
+
             Check("policy_deactivate", await gm.Policy.Deactivate("contract-policy", boundaryPolicy.Version));
         }
         finally

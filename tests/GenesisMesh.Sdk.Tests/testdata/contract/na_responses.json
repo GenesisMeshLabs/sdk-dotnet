@@ -1,5 +1,5 @@
 {
-  "_comment": "Responses of a live Network Authority (1.0.2; the health, key history, policy and evaluation responses 1.8.1; the evidence store responses 1.8.1 with this SDK's execution evidence) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests). evidence_execution_record is the first stored record of evidence_search.",
+  "_comment": "Responses of a live Network Authority (1.0.2; the health, key history, policy and evaluation responses 1.8.1; the evidence store responses 1.8.1 with this SDK's execution evidence) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests). evidence_execution_record is the first stored record of evidence_search. evidence_executor_key_record is the first key of GET /admin/evidence/executor-keys and evidence_export_event the first line of GET /admin/evidence/export (1.8.1).",
   "agreement_accept": {
     "agreed_terms": {
       "capabilities": [
@@ -934,6 +934,88 @@
       "sig": "5J38VVCi1OvtjOO0Cpu6nexOm9PmShhVOco9tLCVbRsQ3golBzSpc5U6BSsz1PzcVUDZ5nQmh5npR13MSQ1pDw=="
     }
   },
+  "evidence_executor_key_record": {
+    "executor_sovereign_id": "contract-executor",
+    "key_id": "contract-executor",
+    "public_key": "+TFsHlUsNTBkMwBPtlpYtRX8ktK7UT+Ld37clwW3YAk=",
+    "registered_at": "2026-10-31T08:42:06.176123+00:00",
+    "resource_prefix": "contract:",
+    "retired_at": null,
+    "role": "executor"
+  },
+  "evidence_export_event": {
+    "entry": {
+      "attestation_id": null,
+      "capability": "read",
+      "context_id": "f3a3d9df-085a-45f0-b70d-16819d3953bd",
+      "decision_id": "733323e2-afab-4824-aabe-c031547c5b7a",
+      "entry_kind": "decision",
+      "evidence_id": null,
+      "exec_sequence_no": null,
+      "executor_sovereign_id": null,
+      "outcome": "authorized",
+      "payload_digest": "f4da44b8394696e08dabffd7b6ed9be5eb27fe1297e709fe0cd180e13916cdfe",
+      "prev_entry_digest": null,
+      "recorded_at": "2026-10-31T08:42:05.719339Z",
+      "resource_action": null,
+      "resource_id": null,
+      "resource_sequence": null,
+      "store_sequence": 1,
+      "vendor_id": "sovereign-b"
+    },
+    "entry_digest": "7830097bbea6fa79b1d6013b9da9fafcae60e31f6806b9158cfd4f591791d363",
+    "payload": {
+      "context": {
+        "agreement_id": "d29221a2-0f3f-4c83-ae10-6dca20688952",
+        "attestation_id": null,
+        "attributes": {},
+        "context_freshness_seq": 0,
+        "context_id": "f3a3d9df-085a-45f0-b70d-16819d3953bd",
+        "parent_kind": "direct",
+        "provider_sovereign_id": "contract-na",
+        "request_parameters": {},
+        "requested_at": "2026-10-31T08:42:05.718961Z",
+        "requested_capability": "read",
+        "requester_sovereign_id": "sovereign-b"
+      },
+      "decision": {
+        "agreement_id": "d29221a2-0f3f-4c83-ae10-6dca20688952",
+        "attestation_binding": null,
+        "authorized": true,
+        "context_id": "f3a3d9df-085a-45f0-b70d-16819d3953bd",
+        "decision_id": "733323e2-afab-4824-aabe-c031547c5b7a",
+        "decision_made_at": "2026-10-31T08:42:05.719020Z",
+        "decision_valid_until": "2026-10-31T08:47:05.719020Z",
+        "denial_reason": null,
+        "freshness_proof": null,
+        "gate_results": [
+          {
+            "detail": "capability 'read' is in agreed scope",
+            "gate_name": "capability_check",
+            "passed": true
+          },
+          {
+            "detail": "request at 2026-10-31T08:42:05.718961+00:00 is within [2026-10-31T08:42:05+00:00, 2026-11-01T08:42:05+00:00]",
+            "gate_name": "validity_window",
+            "passed": true
+          },
+          {
+            "detail": "freshness seq 0 >= commitment 0",
+            "gate_name": "freshness_check",
+            "passed": true
+          }
+        ],
+        "operator_sovereign_id": "contract-na",
+        "policy_binding": null,
+        "signature": {
+          "key_id": "na-contract",
+          "sig": "3TNDs0aT3szvtxd0k5dnYPwB31VQhLLhE0WD/IIpplZjRFyWdQmG7Sp6F9mSQ5ZCtH9r5nnC0DbfN72aw0LeDg=="
+        }
+      }
+    },
+    "schema": "gm.evidence.event",
+    "schema_version": 1
+  },
   "evidence_register_executor_key": {
     "active": true,
     "executor_sovereign_id": "contract-executor",
@@ -947,6 +1029,604 @@
     "record_id": "c59eb17e-c1b6-4bac-836b-a8dd4cbc00e2",
     "resource_id": "contract:app-1/secret",
     "resource_sequence": 1
+  },
+  "evidence_resource_history": {
+    "entries": [
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "77f7b26a-71b5-4f06-a540-87f21bcc9ae2",
+          "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+          "entry_kind": "decision",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "11ff80c4eb96c29efa019f1825235323d65635f97af992d8aa88f6a9ba3a0191",
+          "prev_entry_digest": "7830097bbea6fa79b1d6013b9da9fafcae60e31f6806b9158cfd4f591791d363",
+          "recorded_at": "2026-10-31T08:42:06.112297Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 2,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "c42cadf4784696c08647aea6c014d0300fb89dc5a937ee2b550a8ac56f471f4c",
+        "payload": {
+          "context": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attributes": {},
+            "context_freshness_seq": 0,
+            "context_id": "77f7b26a-71b5-4f06-a540-87f21bcc9ae2",
+            "parent_kind": "attestation",
+            "provider_sovereign_id": "contract-na",
+            "request_parameters": {
+              "days": 30
+            },
+            "requested_at": "2026-10-31T08:42:06.110024Z",
+            "requested_capability": "contract.read",
+            "requester_sovereign_id": "vendor-evaluate"
+          },
+          "decision": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_binding": {
+              "attestation_digest": "818bd14698f320e81fe0f0349a06347d82f0864bf1575721202f6f80824b2544",
+              "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+              "issuer_sovereign_id": "contract-na",
+              "revocation_seq_checked": 0,
+              "subject_id": "vendor-evaluate"
+            },
+            "authorized": true,
+            "context_id": "77f7b26a-71b5-4f06-a540-87f21bcc9ae2",
+            "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+            "decision_made_at": "2026-10-31T08:42:06.110351Z",
+            "decision_valid_until": "2026-10-31T08:47:06.110351Z",
+            "denial_reason": null,
+            "freshness_proof": null,
+            "gate_results": [
+              {
+                "detail": "attestation is active, signed by a trusted key, and not revoked",
+                "gate_name": "attestation_status",
+                "passed": true
+              },
+              {
+                "detail": "request at 2026-10-31T08:42:06.110024+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "gate_name": "attestation_validity",
+                "passed": true
+              },
+              {
+                "detail": "capability 'contract.read' is in attested capabilities",
+                "gate_name": "capability_check",
+                "passed": true
+              },
+              {
+                "detail": "freshness seq 0 >= commitment 0",
+                "gate_name": "freshness_check",
+                "passed": true
+              },
+              {
+                "detail": "request_parameters.days satisfies <= 90.0",
+                "gate_name": "contract-policy/max-days",
+                "passed": true
+              }
+            ],
+            "operator_sovereign_id": "contract-na",
+            "policy_binding": {
+              "context_digest": "1d7607863529e6b2245335c3e23986edde83d175da39a3218ffdb944830c2c13",
+              "gate_evaluations": [
+                {
+                  "gate_id": "max-days",
+                  "gate_type": "max_value.v1",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "passed": true,
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                }
+              ],
+              "policies": [
+                {
+                  "policy_digest": "5d194fe97c9e18969a509add853401bcda8e6b61356bd4b379903056a6f48c09",
+                  "policy_id": "contract-policy",
+                  "signed_by": "na-contract",
+                  "version": 1
+                }
+              ],
+              "policy_set_digest": "a5709d5e0ab4685c8202b3706a54f15f055c94e70da0bb7e9eb4bfade242049e",
+              "registry_gate_types": [
+                "max_value.v1"
+              ],
+              "resolution_failure": null,
+              "resolution_status": "resolved"
+            },
+            "signature": {
+              "key_id": "na-contract",
+              "sig": "3rYai5WhY/I5T9whKSpbfclEWLjhaDLMwAK/8QA0M+bfAUJ2QaeR5BtvyJtAGrR+dmLH9jdNukQ5uWR8BwYdAw=="
+            }
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "77f7b26a-71b5-4f06-a540-87f21bcc9ae2",
+          "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+          "entry_kind": "justification",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "c2d015352e4903047f7fe7810c7611717599bece11b88251eaefd5b149f85acf",
+          "prev_entry_digest": "c42cadf4784696c08647aea6c014d0300fb89dc5a937ee2b550a8ac56f471f4c",
+          "recorded_at": "2026-10-31T08:42:06.112297Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 3,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "abb2ac661e98ce0377a51551d0bbc1f00bdf74da358707c73df6cff5f495da9e",
+        "payload": {
+          "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+          "issuer_sovereign_id": "contract-na",
+          "proof_id": "4b947d9f-e136-4b47-b31e-3cbb633611d2",
+          "proof_issued_at": "2026-10-31T08:42:06.110351Z",
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "ekVFgMXr8653+GlS8CW+oqwlOnpzUgTYLBhqLU0iMNsm5i4X5P1GdGuNZgS9n3aENn6wPkaieLpFvcTw9F4wCg=="
+          },
+          "trace": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+            "entries": [
+              {
+                "evaluated_at": "2026-10-31T08:42:06.110351Z",
+                "gate_name": "attestation_status",
+                "gate_type": "AttestationStatusGate",
+                "inputs": {
+                  "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+                  "found": true,
+                  "revocation_seq_checked": 0
+                },
+                "metadata": {},
+                "reason": "attestation is active, signed by a trusted key, and not revoked",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.110351Z",
+                "gate_name": "attestation_validity",
+                "gate_type": "AttestationValidityGate",
+                "inputs": {
+                  "expires_at": "2026-11-01T08:42:06.091343+00:00",
+                  "requested_at": "2026-10-31T08:42:06.110024+00:00",
+                  "valid_from": "2026-10-31T08:42:06.091343+00:00"
+                },
+                "metadata": {},
+                "reason": "request at 2026-10-31T08:42:06.110024+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.110351Z",
+                "gate_name": "capability_check",
+                "gate_type": "CapabilityGate",
+                "inputs": {
+                  "capabilities": [
+                    "contract.read"
+                  ],
+                  "requested_capability": "contract.read"
+                },
+                "metadata": {},
+                "reason": "capability 'contract.read' is in attested capabilities",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.110351Z",
+                "gate_name": "freshness_check",
+                "gate_type": "FreshnessGate",
+                "inputs": {
+                  "context_freshness_seq": 0,
+                  "freshness_commitment": 0
+                },
+                "metadata": {},
+                "reason": "freshness seq 0 >= commitment 0",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.110351Z",
+                "gate_name": "contract-policy/max-days",
+                "gate_type": "max_value.v1",
+                "inputs": {
+                  "condition": {
+                    "max": 90.0,
+                    "operator": "<="
+                  },
+                  "path": "request_parameters.days",
+                  "present": true,
+                  "value_type": "number"
+                },
+                "metadata": {
+                  "gate_id": "max-days",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                },
+                "reason": "request_parameters.days satisfies <= 90.0",
+                "result": true
+              }
+            ],
+            "final_authorized": true,
+            "operator_sovereign_id": "contract-na",
+            "short_circuited_at": null,
+            "trace_id": "1cbd4f2a-7024-479c-972b-6e9ca0b5127b",
+            "traced_at": "2026-10-31T08:42:06.110351Z"
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "77f7b26a-71b5-4f06-a540-87f21bcc9ae2",
+          "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+          "entry_kind": "execution",
+          "evidence_id": "c8cfb6ea-68cb-4b32-a96a-125fdb7874da",
+          "exec_sequence_no": 1,
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "payload_digest": "4e710c12e09c89fb1689d45b678d4c4ccba1938315aad5112ee270634f91c34b",
+          "prev_entry_digest": "6758046072844a5cc43c719e859a6746009bb80c5a363b78d34abe3fca84f311",
+          "recorded_at": "2026-10-31T08:42:06.223006Z",
+          "resource_action": "create",
+          "resource_id": "contract:app-1/secret",
+          "resource_sequence": 1,
+          "store_sequence": 6,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "d32f3844b9b735163f3d9de09bd19d0b210b84ca5d34c49140327846c8334c8c",
+        "payload": {
+          "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "context_id": "77f7b26a-71b5-4f06-a540-87f21bcc9ae2",
+          "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+          "evidence_id": "c8cfb6ea-68cb-4b32-a96a-125fdb7874da",
+          "executed_at": "2026-10-31T08:42:06.210303Z",
+          "executed_capability": "contract.read",
+          "execution_parameters": {
+            "app_id": "app-1",
+            "lifetime_days": 30
+          },
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "outcome_detail": null,
+          "prev_evidence_digest": null,
+          "resource_action": "create",
+          "resource_id": "contract:app-1/secret",
+          "resource_sequence": 1,
+          "sequence_no": 1,
+          "signature": {
+            "key_id": "contract-executor",
+            "sig": "wzgS3meAqNGTLK+x/bdiYtxY6vQWpteaYgwwVzXrJeTyq5VuaZk1CCb0sabmQGsUq6Dqokemdssz/77M1ML5CQ=="
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "37324b90-6d07-422e-9122-30f796cd2cfc",
+          "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+          "entry_kind": "decision",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "6f6e5b7f254532acfbf79f286934f44c5fce44f0f210746d7e1a51d8030aab49",
+          "prev_entry_digest": "d32f3844b9b735163f3d9de09bd19d0b210b84ca5d34c49140327846c8334c8c",
+          "recorded_at": "2026-10-31T08:42:06.261405Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 7,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "5b59a84b0db2f8a18a783d03b14299a91f3eef821d192080410af78d4a6c50cf",
+        "payload": {
+          "context": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attributes": {},
+            "context_freshness_seq": 0,
+            "context_id": "37324b90-6d07-422e-9122-30f796cd2cfc",
+            "parent_kind": "attestation",
+            "provider_sovereign_id": "contract-na",
+            "request_parameters": {
+              "days": 60
+            },
+            "requested_at": "2026-10-31T08:42:06.259370Z",
+            "requested_capability": "contract.read",
+            "requester_sovereign_id": "vendor-evaluate"
+          },
+          "decision": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_binding": {
+              "attestation_digest": "818bd14698f320e81fe0f0349a06347d82f0864bf1575721202f6f80824b2544",
+              "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+              "issuer_sovereign_id": "contract-na",
+              "revocation_seq_checked": 0,
+              "subject_id": "vendor-evaluate"
+            },
+            "authorized": true,
+            "context_id": "37324b90-6d07-422e-9122-30f796cd2cfc",
+            "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+            "decision_made_at": "2026-10-31T08:42:06.259652Z",
+            "decision_valid_until": "2026-10-31T08:47:06.259652Z",
+            "denial_reason": null,
+            "freshness_proof": null,
+            "gate_results": [
+              {
+                "detail": "attestation is active, signed by a trusted key, and not revoked",
+                "gate_name": "attestation_status",
+                "passed": true
+              },
+              {
+                "detail": "request at 2026-10-31T08:42:06.259370+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "gate_name": "attestation_validity",
+                "passed": true
+              },
+              {
+                "detail": "capability 'contract.read' is in attested capabilities",
+                "gate_name": "capability_check",
+                "passed": true
+              },
+              {
+                "detail": "freshness seq 0 >= commitment 0",
+                "gate_name": "freshness_check",
+                "passed": true
+              },
+              {
+                "detail": "request_parameters.days satisfies <= 90.0",
+                "gate_name": "contract-policy/max-days",
+                "passed": true
+              }
+            ],
+            "operator_sovereign_id": "contract-na",
+            "policy_binding": {
+              "context_digest": "1a82e502391e2a4d08a9cb9e2b13ce5169b1e0ad21da88f4fcb662f93478ce34",
+              "gate_evaluations": [
+                {
+                  "gate_id": "max-days",
+                  "gate_type": "max_value.v1",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "passed": true,
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                }
+              ],
+              "policies": [
+                {
+                  "policy_digest": "5d194fe97c9e18969a509add853401bcda8e6b61356bd4b379903056a6f48c09",
+                  "policy_id": "contract-policy",
+                  "signed_by": "na-contract",
+                  "version": 1
+                }
+              ],
+              "policy_set_digest": "a5709d5e0ab4685c8202b3706a54f15f055c94e70da0bb7e9eb4bfade242049e",
+              "registry_gate_types": [
+                "max_value.v1"
+              ],
+              "resolution_failure": null,
+              "resolution_status": "resolved"
+            },
+            "signature": {
+              "key_id": "na-contract",
+              "sig": "mNL5Dsjze0yIMe+0D0NMWPZ5KfqEvC109mEvY2CiY+p0TzSOyk4p6GGbDV/uaUIZl5HqLoyAXz4ahquK49ohAQ=="
+            }
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "37324b90-6d07-422e-9122-30f796cd2cfc",
+          "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+          "entry_kind": "justification",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "9c2de64617479b924a3be5b1f65e8d896314dd15c1253be2e3ce0a2380ab8f8c",
+          "prev_entry_digest": "5b59a84b0db2f8a18a783d03b14299a91f3eef821d192080410af78d4a6c50cf",
+          "recorded_at": "2026-10-31T08:42:06.261405Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 8,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "63e3ee3abc75b458454502fae02d6b257138cd4e290a8c8de29360b5f2ad028d",
+        "payload": {
+          "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+          "issuer_sovereign_id": "contract-na",
+          "proof_id": "5a7c9300-24fc-4831-9b0d-6b4b966d4fe0",
+          "proof_issued_at": "2026-10-31T08:42:06.259652Z",
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "G5X8IzUwnMkCB+pPb1xRNoL9n/FeOPpTPXgv41Zbg7qho9bW5j+6PzbjHAao/8yG5bOge3ewWP8nGHLjOm6tBA=="
+          },
+          "trace": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+            "entries": [
+              {
+                "evaluated_at": "2026-10-31T08:42:06.259652Z",
+                "gate_name": "attestation_status",
+                "gate_type": "AttestationStatusGate",
+                "inputs": {
+                  "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+                  "found": true,
+                  "revocation_seq_checked": 0
+                },
+                "metadata": {},
+                "reason": "attestation is active, signed by a trusted key, and not revoked",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.259652Z",
+                "gate_name": "attestation_validity",
+                "gate_type": "AttestationValidityGate",
+                "inputs": {
+                  "expires_at": "2026-11-01T08:42:06.091343+00:00",
+                  "requested_at": "2026-10-31T08:42:06.259370+00:00",
+                  "valid_from": "2026-10-31T08:42:06.091343+00:00"
+                },
+                "metadata": {},
+                "reason": "request at 2026-10-31T08:42:06.259370+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.259652Z",
+                "gate_name": "capability_check",
+                "gate_type": "CapabilityGate",
+                "inputs": {
+                  "capabilities": [
+                    "contract.read"
+                  ],
+                  "requested_capability": "contract.read"
+                },
+                "metadata": {},
+                "reason": "capability 'contract.read' is in attested capabilities",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.259652Z",
+                "gate_name": "freshness_check",
+                "gate_type": "FreshnessGate",
+                "inputs": {
+                  "context_freshness_seq": 0,
+                  "freshness_commitment": 0
+                },
+                "metadata": {},
+                "reason": "freshness seq 0 >= commitment 0",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.259652Z",
+                "gate_name": "contract-policy/max-days",
+                "gate_type": "max_value.v1",
+                "inputs": {
+                  "condition": {
+                    "max": 90.0,
+                    "operator": "<="
+                  },
+                  "path": "request_parameters.days",
+                  "present": true,
+                  "value_type": "number"
+                },
+                "metadata": {
+                  "gate_id": "max-days",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                },
+                "reason": "request_parameters.days satisfies <= 90.0",
+                "result": true
+              }
+            ],
+            "final_authorized": true,
+            "operator_sovereign_id": "contract-na",
+            "short_circuited_at": null,
+            "trace_id": "e953c3d7-a62d-4f4b-8623-ba58f6d2401a",
+            "traced_at": "2026-10-31T08:42:06.259652Z"
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "37324b90-6d07-422e-9122-30f796cd2cfc",
+          "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+          "entry_kind": "execution",
+          "evidence_id": "7fc2ea11-e4cf-4486-b9b0-b0d679874f6a",
+          "exec_sequence_no": 1,
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "payload_digest": "37cfa89bfacbd848e0e86499da7ad18d14fa0e9b2341744574e33283576eb5c5",
+          "prev_entry_digest": "63e3ee3abc75b458454502fae02d6b257138cd4e290a8c8de29360b5f2ad028d",
+          "recorded_at": "2026-10-31T08:42:06.278157Z",
+          "resource_action": "rotate",
+          "resource_id": "contract:app-1/secret",
+          "resource_sequence": 2,
+          "store_sequence": 9,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "fa6f717655323a13ee2a344fc5882dc991a98d36c3ed431f9d68a93890ec0934",
+        "payload": {
+          "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "context_id": "37324b90-6d07-422e-9122-30f796cd2cfc",
+          "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+          "evidence_id": "7fc2ea11-e4cf-4486-b9b0-b0d679874f6a",
+          "executed_at": "2026-10-31T08:42:06.273823Z",
+          "executed_capability": "contract.read",
+          "execution_parameters": {
+            "app_id": "app-1",
+            "lifetime_days": 30
+          },
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "outcome_detail": null,
+          "prev_evidence_digest": null,
+          "prev_resource_digest": "b532e0bfdbdb5590ef5e32a8b1c9f304efc8a54b96eaa45c9d6a891faf4768e9",
+          "resource_action": "rotate",
+          "resource_id": "contract:app-1/secret",
+          "resource_sequence": 2,
+          "sequence_no": 1,
+          "signature": {
+            "key_id": "contract-executor",
+            "sig": "n9v2csJIrUKNEnkgugNS/qT6mc85vso2b8IeqdVYjdf2n+27kBrZv6dZ5mQSfLk/Yer+7fS0tQaaw1cNc2VEAQ=="
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      }
+    ],
+    "resource_id": "contract:app-1/secret",
+    "truncated": false,
+    "verification": {
+      "checked_entries": 6,
+      "decisions": 2,
+      "executions": 2,
+      "failures": [],
+      "verified": true
+    }
+  },
+  "evidence_retention": {
+    "checkpoint": null,
+    "removed_count": 0
+  },
+  "evidence_retire_executor_key": {
+    "active": false,
+    "key_id": "contract-retired"
   },
   "evidence_search": {
     "count": 2,
@@ -1051,6 +1731,23 @@
     ],
     "next_after_sequence": null
   },
+  "evidence_status": {
+    "active_executor_keys": 1,
+    "entries": 25,
+    "evidence_grants": "off",
+    "evidence_remediation": "off",
+    "evidence_store": "on",
+    "last_store_sequence": 25,
+    "latest_anchor": {
+      "anchor_sequence": 1,
+      "anchored_at": "2026-10-31T08:42:05.722312+00:00",
+      "store_sequence": 1
+    },
+    "rejections": 3,
+    "retention_checkpoint": null,
+    "unanchored_entries": 24,
+    "unjudged_records": 0
+  },
   "evidence_submit": {
     "entry": {
       "attestation_id": "f492f5b1-372a-4250-a019-99f746cbaf0a",
@@ -1074,12 +1771,2497 @@
     "entry_digest": "5331aceb51e66fba02f0e43fb9bcc58159d1d1ef44a2277ac87ea21b11ce7339",
     "status": "recorded"
   },
+  "evidence_vendor_history": {
+    "entries": [
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "77f7b26a-71b5-4f06-a540-87f21bcc9ae2",
+          "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+          "entry_kind": "decision",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "11ff80c4eb96c29efa019f1825235323d65635f97af992d8aa88f6a9ba3a0191",
+          "prev_entry_digest": "7830097bbea6fa79b1d6013b9da9fafcae60e31f6806b9158cfd4f591791d363",
+          "recorded_at": "2026-10-31T08:42:06.112297Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 2,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "c42cadf4784696c08647aea6c014d0300fb89dc5a937ee2b550a8ac56f471f4c",
+        "payload": {
+          "context": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attributes": {},
+            "context_freshness_seq": 0,
+            "context_id": "77f7b26a-71b5-4f06-a540-87f21bcc9ae2",
+            "parent_kind": "attestation",
+            "provider_sovereign_id": "contract-na",
+            "request_parameters": {
+              "days": 30
+            },
+            "requested_at": "2026-10-31T08:42:06.110024Z",
+            "requested_capability": "contract.read",
+            "requester_sovereign_id": "vendor-evaluate"
+          },
+          "decision": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_binding": {
+              "attestation_digest": "818bd14698f320e81fe0f0349a06347d82f0864bf1575721202f6f80824b2544",
+              "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+              "issuer_sovereign_id": "contract-na",
+              "revocation_seq_checked": 0,
+              "subject_id": "vendor-evaluate"
+            },
+            "authorized": true,
+            "context_id": "77f7b26a-71b5-4f06-a540-87f21bcc9ae2",
+            "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+            "decision_made_at": "2026-10-31T08:42:06.110351Z",
+            "decision_valid_until": "2026-10-31T08:47:06.110351Z",
+            "denial_reason": null,
+            "freshness_proof": null,
+            "gate_results": [
+              {
+                "detail": "attestation is active, signed by a trusted key, and not revoked",
+                "gate_name": "attestation_status",
+                "passed": true
+              },
+              {
+                "detail": "request at 2026-10-31T08:42:06.110024+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "gate_name": "attestation_validity",
+                "passed": true
+              },
+              {
+                "detail": "capability 'contract.read' is in attested capabilities",
+                "gate_name": "capability_check",
+                "passed": true
+              },
+              {
+                "detail": "freshness seq 0 >= commitment 0",
+                "gate_name": "freshness_check",
+                "passed": true
+              },
+              {
+                "detail": "request_parameters.days satisfies <= 90.0",
+                "gate_name": "contract-policy/max-days",
+                "passed": true
+              }
+            ],
+            "operator_sovereign_id": "contract-na",
+            "policy_binding": {
+              "context_digest": "1d7607863529e6b2245335c3e23986edde83d175da39a3218ffdb944830c2c13",
+              "gate_evaluations": [
+                {
+                  "gate_id": "max-days",
+                  "gate_type": "max_value.v1",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "passed": true,
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                }
+              ],
+              "policies": [
+                {
+                  "policy_digest": "5d194fe97c9e18969a509add853401bcda8e6b61356bd4b379903056a6f48c09",
+                  "policy_id": "contract-policy",
+                  "signed_by": "na-contract",
+                  "version": 1
+                }
+              ],
+              "policy_set_digest": "a5709d5e0ab4685c8202b3706a54f15f055c94e70da0bb7e9eb4bfade242049e",
+              "registry_gate_types": [
+                "max_value.v1"
+              ],
+              "resolution_failure": null,
+              "resolution_status": "resolved"
+            },
+            "signature": {
+              "key_id": "na-contract",
+              "sig": "3rYai5WhY/I5T9whKSpbfclEWLjhaDLMwAK/8QA0M+bfAUJ2QaeR5BtvyJtAGrR+dmLH9jdNukQ5uWR8BwYdAw=="
+            }
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "77f7b26a-71b5-4f06-a540-87f21bcc9ae2",
+          "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+          "entry_kind": "justification",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "c2d015352e4903047f7fe7810c7611717599bece11b88251eaefd5b149f85acf",
+          "prev_entry_digest": "c42cadf4784696c08647aea6c014d0300fb89dc5a937ee2b550a8ac56f471f4c",
+          "recorded_at": "2026-10-31T08:42:06.112297Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 3,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "abb2ac661e98ce0377a51551d0bbc1f00bdf74da358707c73df6cff5f495da9e",
+        "payload": {
+          "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+          "issuer_sovereign_id": "contract-na",
+          "proof_id": "4b947d9f-e136-4b47-b31e-3cbb633611d2",
+          "proof_issued_at": "2026-10-31T08:42:06.110351Z",
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "ekVFgMXr8653+GlS8CW+oqwlOnpzUgTYLBhqLU0iMNsm5i4X5P1GdGuNZgS9n3aENn6wPkaieLpFvcTw9F4wCg=="
+          },
+          "trace": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+            "entries": [
+              {
+                "evaluated_at": "2026-10-31T08:42:06.110351Z",
+                "gate_name": "attestation_status",
+                "gate_type": "AttestationStatusGate",
+                "inputs": {
+                  "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+                  "found": true,
+                  "revocation_seq_checked": 0
+                },
+                "metadata": {},
+                "reason": "attestation is active, signed by a trusted key, and not revoked",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.110351Z",
+                "gate_name": "attestation_validity",
+                "gate_type": "AttestationValidityGate",
+                "inputs": {
+                  "expires_at": "2026-11-01T08:42:06.091343+00:00",
+                  "requested_at": "2026-10-31T08:42:06.110024+00:00",
+                  "valid_from": "2026-10-31T08:42:06.091343+00:00"
+                },
+                "metadata": {},
+                "reason": "request at 2026-10-31T08:42:06.110024+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.110351Z",
+                "gate_name": "capability_check",
+                "gate_type": "CapabilityGate",
+                "inputs": {
+                  "capabilities": [
+                    "contract.read"
+                  ],
+                  "requested_capability": "contract.read"
+                },
+                "metadata": {},
+                "reason": "capability 'contract.read' is in attested capabilities",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.110351Z",
+                "gate_name": "freshness_check",
+                "gate_type": "FreshnessGate",
+                "inputs": {
+                  "context_freshness_seq": 0,
+                  "freshness_commitment": 0
+                },
+                "metadata": {},
+                "reason": "freshness seq 0 >= commitment 0",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.110351Z",
+                "gate_name": "contract-policy/max-days",
+                "gate_type": "max_value.v1",
+                "inputs": {
+                  "condition": {
+                    "max": 90.0,
+                    "operator": "<="
+                  },
+                  "path": "request_parameters.days",
+                  "present": true,
+                  "value_type": "number"
+                },
+                "metadata": {
+                  "gate_id": "max-days",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                },
+                "reason": "request_parameters.days satisfies <= 90.0",
+                "result": true
+              }
+            ],
+            "final_authorized": true,
+            "operator_sovereign_id": "contract-na",
+            "short_circuited_at": null,
+            "trace_id": "1cbd4f2a-7024-479c-972b-6e9ca0b5127b",
+            "traced_at": "2026-10-31T08:42:06.110351Z"
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "5fcef167-926c-49b8-8b93-9abbc22501cc",
+          "decision_id": "e66658b5-44e7-4db2-8eea-c2fb7ed3e888",
+          "entry_kind": "decision",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "denied",
+          "payload_digest": "7ead11306d35175811f3d0d49632a53c6d2c562e8c40de8d2d98540e52c3d22e",
+          "prev_entry_digest": "abb2ac661e98ce0377a51551d0bbc1f00bdf74da358707c73df6cff5f495da9e",
+          "recorded_at": "2026-10-31T08:42:06.130402Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 4,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "0fd264c32a6cbecf310c53d89db81d1698c8d3c61e664a142406fc125dc15254",
+        "payload": {
+          "context": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attributes": {},
+            "context_freshness_seq": 0,
+            "context_id": "5fcef167-926c-49b8-8b93-9abbc22501cc",
+            "parent_kind": "attestation",
+            "provider_sovereign_id": "contract-na",
+            "request_parameters": {
+              "days": 120
+            },
+            "requested_at": "2026-10-31T08:42:06.128811Z",
+            "requested_capability": "contract.read",
+            "requester_sovereign_id": "vendor-evaluate"
+          },
+          "decision": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_binding": {
+              "attestation_digest": "818bd14698f320e81fe0f0349a06347d82f0864bf1575721202f6f80824b2544",
+              "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+              "issuer_sovereign_id": "contract-na",
+              "revocation_seq_checked": 0,
+              "subject_id": "vendor-evaluate"
+            },
+            "authorized": false,
+            "context_id": "5fcef167-926c-49b8-8b93-9abbc22501cc",
+            "decision_id": "e66658b5-44e7-4db2-8eea-c2fb7ed3e888",
+            "decision_made_at": "2026-10-31T08:42:06.129032Z",
+            "decision_valid_until": "2026-10-31T08:47:06.129032Z",
+            "denial_reason": "policy gate 'contract-policy/max-days' failed",
+            "freshness_proof": null,
+            "gate_results": [
+              {
+                "detail": "attestation is active, signed by a trusted key, and not revoked",
+                "gate_name": "attestation_status",
+                "passed": true
+              },
+              {
+                "detail": "request at 2026-10-31T08:42:06.128811+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "gate_name": "attestation_validity",
+                "passed": true
+              },
+              {
+                "detail": "capability 'contract.read' is in attested capabilities",
+                "gate_name": "capability_check",
+                "passed": true
+              },
+              {
+                "detail": "freshness seq 0 >= commitment 0",
+                "gate_name": "freshness_check",
+                "passed": true
+              },
+              {
+                "detail": "request_parameters.days violates <= 90.0",
+                "gate_name": "contract-policy/max-days",
+                "passed": false
+              }
+            ],
+            "operator_sovereign_id": "contract-na",
+            "policy_binding": {
+              "context_digest": "924a36dc984ef4330ae347245ce3f11f041db128c1d1547cc45c96c244304b59",
+              "gate_evaluations": [
+                {
+                  "gate_id": "max-days",
+                  "gate_type": "max_value.v1",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "fail",
+                  "passed": false,
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                }
+              ],
+              "policies": [
+                {
+                  "policy_digest": "5d194fe97c9e18969a509add853401bcda8e6b61356bd4b379903056a6f48c09",
+                  "policy_id": "contract-policy",
+                  "signed_by": "na-contract",
+                  "version": 1
+                }
+              ],
+              "policy_set_digest": "a5709d5e0ab4685c8202b3706a54f15f055c94e70da0bb7e9eb4bfade242049e",
+              "registry_gate_types": [
+                "max_value.v1"
+              ],
+              "resolution_failure": null,
+              "resolution_status": "resolved"
+            },
+            "signature": {
+              "key_id": "na-contract",
+              "sig": "7SzkX4kbcD3FaI7ITN7egRulIX9knSp8mPC8qG0+jD6ah7JwzWJ/KmH7swY56v0De9z3+5mm9bghIQAz3ilHDQ=="
+            }
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "5fcef167-926c-49b8-8b93-9abbc22501cc",
+          "decision_id": "e66658b5-44e7-4db2-8eea-c2fb7ed3e888",
+          "entry_kind": "justification",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "denied",
+          "payload_digest": "421af9a33d68e6f2ac02c71115985215a03700fb028cdf47044b5be6f1996bd5",
+          "prev_entry_digest": "0fd264c32a6cbecf310c53d89db81d1698c8d3c61e664a142406fc125dc15254",
+          "recorded_at": "2026-10-31T08:42:06.130402Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 5,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "6758046072844a5cc43c719e859a6746009bb80c5a363b78d34abe3fca84f311",
+        "payload": {
+          "decision_id": "e66658b5-44e7-4db2-8eea-c2fb7ed3e888",
+          "issuer_sovereign_id": "contract-na",
+          "proof_id": "a8a95450-a121-4fcf-bdcd-164518291939",
+          "proof_issued_at": "2026-10-31T08:42:06.129032Z",
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "OXxHZxgT7GD5CrKp6Wn7l22NMSiZLFGzbiQbnYjuyICvAXW5RdIUuytAz/bxTjSa2ST30XHt1Pbcmd6cLrfnBw=="
+          },
+          "trace": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "decision_id": "e66658b5-44e7-4db2-8eea-c2fb7ed3e888",
+            "entries": [
+              {
+                "evaluated_at": "2026-10-31T08:42:06.129032Z",
+                "gate_name": "attestation_status",
+                "gate_type": "AttestationStatusGate",
+                "inputs": {
+                  "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+                  "found": true,
+                  "revocation_seq_checked": 0
+                },
+                "metadata": {},
+                "reason": "attestation is active, signed by a trusted key, and not revoked",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.129032Z",
+                "gate_name": "attestation_validity",
+                "gate_type": "AttestationValidityGate",
+                "inputs": {
+                  "expires_at": "2026-11-01T08:42:06.091343+00:00",
+                  "requested_at": "2026-10-31T08:42:06.128811+00:00",
+                  "valid_from": "2026-10-31T08:42:06.091343+00:00"
+                },
+                "metadata": {},
+                "reason": "request at 2026-10-31T08:42:06.128811+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.129032Z",
+                "gate_name": "capability_check",
+                "gate_type": "CapabilityGate",
+                "inputs": {
+                  "capabilities": [
+                    "contract.read"
+                  ],
+                  "requested_capability": "contract.read"
+                },
+                "metadata": {},
+                "reason": "capability 'contract.read' is in attested capabilities",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.129032Z",
+                "gate_name": "freshness_check",
+                "gate_type": "FreshnessGate",
+                "inputs": {
+                  "context_freshness_seq": 0,
+                  "freshness_commitment": 0
+                },
+                "metadata": {},
+                "reason": "freshness seq 0 >= commitment 0",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.129032Z",
+                "gate_name": "contract-policy/max-days",
+                "gate_type": "max_value.v1",
+                "inputs": {
+                  "condition": {
+                    "max": 90.0,
+                    "operator": "<="
+                  },
+                  "path": "request_parameters.days",
+                  "present": true,
+                  "value_type": "number"
+                },
+                "metadata": {
+                  "gate_id": "max-days",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "fail",
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                },
+                "reason": "request_parameters.days violates <= 90.0",
+                "result": false
+              }
+            ],
+            "final_authorized": false,
+            "operator_sovereign_id": "contract-na",
+            "short_circuited_at": "contract-policy/max-days",
+            "trace_id": "7c066a90-b12b-4084-b349-3dff91dc1c4e",
+            "traced_at": "2026-10-31T08:42:06.129032Z"
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "77f7b26a-71b5-4f06-a540-87f21bcc9ae2",
+          "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+          "entry_kind": "execution",
+          "evidence_id": "c8cfb6ea-68cb-4b32-a96a-125fdb7874da",
+          "exec_sequence_no": 1,
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "payload_digest": "4e710c12e09c89fb1689d45b678d4c4ccba1938315aad5112ee270634f91c34b",
+          "prev_entry_digest": "6758046072844a5cc43c719e859a6746009bb80c5a363b78d34abe3fca84f311",
+          "recorded_at": "2026-10-31T08:42:06.223006Z",
+          "resource_action": "create",
+          "resource_id": "contract:app-1/secret",
+          "resource_sequence": 1,
+          "store_sequence": 6,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "d32f3844b9b735163f3d9de09bd19d0b210b84ca5d34c49140327846c8334c8c",
+        "payload": {
+          "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "context_id": "77f7b26a-71b5-4f06-a540-87f21bcc9ae2",
+          "decision_id": "0cb5cc8d-8451-48f7-b1bd-bcc403dcb4a0",
+          "evidence_id": "c8cfb6ea-68cb-4b32-a96a-125fdb7874da",
+          "executed_at": "2026-10-31T08:42:06.210303Z",
+          "executed_capability": "contract.read",
+          "execution_parameters": {
+            "app_id": "app-1",
+            "lifetime_days": 30
+          },
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "outcome_detail": null,
+          "prev_evidence_digest": null,
+          "resource_action": "create",
+          "resource_id": "contract:app-1/secret",
+          "resource_sequence": 1,
+          "sequence_no": 1,
+          "signature": {
+            "key_id": "contract-executor",
+            "sig": "wzgS3meAqNGTLK+x/bdiYtxY6vQWpteaYgwwVzXrJeTyq5VuaZk1CCb0sabmQGsUq6Dqokemdssz/77M1ML5CQ=="
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "37324b90-6d07-422e-9122-30f796cd2cfc",
+          "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+          "entry_kind": "decision",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "6f6e5b7f254532acfbf79f286934f44c5fce44f0f210746d7e1a51d8030aab49",
+          "prev_entry_digest": "d32f3844b9b735163f3d9de09bd19d0b210b84ca5d34c49140327846c8334c8c",
+          "recorded_at": "2026-10-31T08:42:06.261405Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 7,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "5b59a84b0db2f8a18a783d03b14299a91f3eef821d192080410af78d4a6c50cf",
+        "payload": {
+          "context": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attributes": {},
+            "context_freshness_seq": 0,
+            "context_id": "37324b90-6d07-422e-9122-30f796cd2cfc",
+            "parent_kind": "attestation",
+            "provider_sovereign_id": "contract-na",
+            "request_parameters": {
+              "days": 60
+            },
+            "requested_at": "2026-10-31T08:42:06.259370Z",
+            "requested_capability": "contract.read",
+            "requester_sovereign_id": "vendor-evaluate"
+          },
+          "decision": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_binding": {
+              "attestation_digest": "818bd14698f320e81fe0f0349a06347d82f0864bf1575721202f6f80824b2544",
+              "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+              "issuer_sovereign_id": "contract-na",
+              "revocation_seq_checked": 0,
+              "subject_id": "vendor-evaluate"
+            },
+            "authorized": true,
+            "context_id": "37324b90-6d07-422e-9122-30f796cd2cfc",
+            "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+            "decision_made_at": "2026-10-31T08:42:06.259652Z",
+            "decision_valid_until": "2026-10-31T08:47:06.259652Z",
+            "denial_reason": null,
+            "freshness_proof": null,
+            "gate_results": [
+              {
+                "detail": "attestation is active, signed by a trusted key, and not revoked",
+                "gate_name": "attestation_status",
+                "passed": true
+              },
+              {
+                "detail": "request at 2026-10-31T08:42:06.259370+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "gate_name": "attestation_validity",
+                "passed": true
+              },
+              {
+                "detail": "capability 'contract.read' is in attested capabilities",
+                "gate_name": "capability_check",
+                "passed": true
+              },
+              {
+                "detail": "freshness seq 0 >= commitment 0",
+                "gate_name": "freshness_check",
+                "passed": true
+              },
+              {
+                "detail": "request_parameters.days satisfies <= 90.0",
+                "gate_name": "contract-policy/max-days",
+                "passed": true
+              }
+            ],
+            "operator_sovereign_id": "contract-na",
+            "policy_binding": {
+              "context_digest": "1a82e502391e2a4d08a9cb9e2b13ce5169b1e0ad21da88f4fcb662f93478ce34",
+              "gate_evaluations": [
+                {
+                  "gate_id": "max-days",
+                  "gate_type": "max_value.v1",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "passed": true,
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                }
+              ],
+              "policies": [
+                {
+                  "policy_digest": "5d194fe97c9e18969a509add853401bcda8e6b61356bd4b379903056a6f48c09",
+                  "policy_id": "contract-policy",
+                  "signed_by": "na-contract",
+                  "version": 1
+                }
+              ],
+              "policy_set_digest": "a5709d5e0ab4685c8202b3706a54f15f055c94e70da0bb7e9eb4bfade242049e",
+              "registry_gate_types": [
+                "max_value.v1"
+              ],
+              "resolution_failure": null,
+              "resolution_status": "resolved"
+            },
+            "signature": {
+              "key_id": "na-contract",
+              "sig": "mNL5Dsjze0yIMe+0D0NMWPZ5KfqEvC109mEvY2CiY+p0TzSOyk4p6GGbDV/uaUIZl5HqLoyAXz4ahquK49ohAQ=="
+            }
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "37324b90-6d07-422e-9122-30f796cd2cfc",
+          "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+          "entry_kind": "justification",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "9c2de64617479b924a3be5b1f65e8d896314dd15c1253be2e3ce0a2380ab8f8c",
+          "prev_entry_digest": "5b59a84b0db2f8a18a783d03b14299a91f3eef821d192080410af78d4a6c50cf",
+          "recorded_at": "2026-10-31T08:42:06.261405Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 8,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "63e3ee3abc75b458454502fae02d6b257138cd4e290a8c8de29360b5f2ad028d",
+        "payload": {
+          "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+          "issuer_sovereign_id": "contract-na",
+          "proof_id": "5a7c9300-24fc-4831-9b0d-6b4b966d4fe0",
+          "proof_issued_at": "2026-10-31T08:42:06.259652Z",
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "G5X8IzUwnMkCB+pPb1xRNoL9n/FeOPpTPXgv41Zbg7qho9bW5j+6PzbjHAao/8yG5bOge3ewWP8nGHLjOm6tBA=="
+          },
+          "trace": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+            "entries": [
+              {
+                "evaluated_at": "2026-10-31T08:42:06.259652Z",
+                "gate_name": "attestation_status",
+                "gate_type": "AttestationStatusGate",
+                "inputs": {
+                  "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+                  "found": true,
+                  "revocation_seq_checked": 0
+                },
+                "metadata": {},
+                "reason": "attestation is active, signed by a trusted key, and not revoked",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.259652Z",
+                "gate_name": "attestation_validity",
+                "gate_type": "AttestationValidityGate",
+                "inputs": {
+                  "expires_at": "2026-11-01T08:42:06.091343+00:00",
+                  "requested_at": "2026-10-31T08:42:06.259370+00:00",
+                  "valid_from": "2026-10-31T08:42:06.091343+00:00"
+                },
+                "metadata": {},
+                "reason": "request at 2026-10-31T08:42:06.259370+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.259652Z",
+                "gate_name": "capability_check",
+                "gate_type": "CapabilityGate",
+                "inputs": {
+                  "capabilities": [
+                    "contract.read"
+                  ],
+                  "requested_capability": "contract.read"
+                },
+                "metadata": {},
+                "reason": "capability 'contract.read' is in attested capabilities",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.259652Z",
+                "gate_name": "freshness_check",
+                "gate_type": "FreshnessGate",
+                "inputs": {
+                  "context_freshness_seq": 0,
+                  "freshness_commitment": 0
+                },
+                "metadata": {},
+                "reason": "freshness seq 0 >= commitment 0",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.259652Z",
+                "gate_name": "contract-policy/max-days",
+                "gate_type": "max_value.v1",
+                "inputs": {
+                  "condition": {
+                    "max": 90.0,
+                    "operator": "<="
+                  },
+                  "path": "request_parameters.days",
+                  "present": true,
+                  "value_type": "number"
+                },
+                "metadata": {
+                  "gate_id": "max-days",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                },
+                "reason": "request_parameters.days satisfies <= 90.0",
+                "result": true
+              }
+            ],
+            "final_authorized": true,
+            "operator_sovereign_id": "contract-na",
+            "short_circuited_at": null,
+            "trace_id": "e953c3d7-a62d-4f4b-8623-ba58f6d2401a",
+            "traced_at": "2026-10-31T08:42:06.259652Z"
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "37324b90-6d07-422e-9122-30f796cd2cfc",
+          "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+          "entry_kind": "execution",
+          "evidence_id": "7fc2ea11-e4cf-4486-b9b0-b0d679874f6a",
+          "exec_sequence_no": 1,
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "payload_digest": "37cfa89bfacbd848e0e86499da7ad18d14fa0e9b2341744574e33283576eb5c5",
+          "prev_entry_digest": "63e3ee3abc75b458454502fae02d6b257138cd4e290a8c8de29360b5f2ad028d",
+          "recorded_at": "2026-10-31T08:42:06.278157Z",
+          "resource_action": "rotate",
+          "resource_id": "contract:app-1/secret",
+          "resource_sequence": 2,
+          "store_sequence": 9,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "fa6f717655323a13ee2a344fc5882dc991a98d36c3ed431f9d68a93890ec0934",
+        "payload": {
+          "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "context_id": "37324b90-6d07-422e-9122-30f796cd2cfc",
+          "decision_id": "9fe4d649-f4b7-487e-a958-2b75d81243b6",
+          "evidence_id": "7fc2ea11-e4cf-4486-b9b0-b0d679874f6a",
+          "executed_at": "2026-10-31T08:42:06.273823Z",
+          "executed_capability": "contract.read",
+          "execution_parameters": {
+            "app_id": "app-1",
+            "lifetime_days": 30
+          },
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "outcome_detail": null,
+          "prev_evidence_digest": null,
+          "prev_resource_digest": "b532e0bfdbdb5590ef5e32a8b1c9f304efc8a54b96eaa45c9d6a891faf4768e9",
+          "resource_action": "rotate",
+          "resource_id": "contract:app-1/secret",
+          "resource_sequence": 2,
+          "sequence_no": 1,
+          "signature": {
+            "key_id": "contract-executor",
+            "sig": "n9v2csJIrUKNEnkgugNS/qT6mc85vso2b8IeqdVYjdf2n+27kBrZv6dZ5mQSfLk/Yer+7fS0tQaaw1cNc2VEAQ=="
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "52577800-0b7b-4492-84ec-6f2432426907",
+          "decision_id": "64c08b1f-3953-4486-8827-3d295f19933c",
+          "entry_kind": "decision",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "77ab34f418f1d90ad95cf566fc39239d154ff2075f45e0edad1990e353703091",
+          "prev_entry_digest": "fa6f717655323a13ee2a344fc5882dc991a98d36c3ed431f9d68a93890ec0934",
+          "recorded_at": "2026-10-31T08:42:06.291823Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 10,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "b3886465c33cbb9238f638e93e4f8a7d47ba0d03653306330a3f294c0e162c50",
+        "payload": {
+          "context": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attributes": {},
+            "context_freshness_seq": 0,
+            "context_id": "52577800-0b7b-4492-84ec-6f2432426907",
+            "parent_kind": "attestation",
+            "provider_sovereign_id": "contract-na",
+            "request_parameters": {
+              "days": 45
+            },
+            "requested_at": "2026-10-31T08:42:06.289832Z",
+            "requested_capability": "contract.read",
+            "requester_sovereign_id": "vendor-evaluate"
+          },
+          "decision": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_binding": {
+              "attestation_digest": "818bd14698f320e81fe0f0349a06347d82f0864bf1575721202f6f80824b2544",
+              "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+              "issuer_sovereign_id": "contract-na",
+              "revocation_seq_checked": 0,
+              "subject_id": "vendor-evaluate"
+            },
+            "authorized": true,
+            "context_id": "52577800-0b7b-4492-84ec-6f2432426907",
+            "decision_id": "64c08b1f-3953-4486-8827-3d295f19933c",
+            "decision_made_at": "2026-10-31T08:42:06.290169Z",
+            "decision_valid_until": "2026-10-31T08:47:06.290169Z",
+            "denial_reason": null,
+            "freshness_proof": null,
+            "gate_results": [
+              {
+                "detail": "attestation is active, signed by a trusted key, and not revoked",
+                "gate_name": "attestation_status",
+                "passed": true
+              },
+              {
+                "detail": "request at 2026-10-31T08:42:06.289832+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "gate_name": "attestation_validity",
+                "passed": true
+              },
+              {
+                "detail": "capability 'contract.read' is in attested capabilities",
+                "gate_name": "capability_check",
+                "passed": true
+              },
+              {
+                "detail": "freshness seq 0 >= commitment 0",
+                "gate_name": "freshness_check",
+                "passed": true
+              },
+              {
+                "detail": "request_parameters.days satisfies <= 90.0",
+                "gate_name": "contract-policy/max-days",
+                "passed": true
+              }
+            ],
+            "operator_sovereign_id": "contract-na",
+            "policy_binding": {
+              "context_digest": "491c293d968fd4029a8c579311b634e9c1ffb82cb768e29661f9b0c3f5337064",
+              "gate_evaluations": [
+                {
+                  "gate_id": "max-days",
+                  "gate_type": "max_value.v1",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "passed": true,
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                }
+              ],
+              "policies": [
+                {
+                  "policy_digest": "5d194fe97c9e18969a509add853401bcda8e6b61356bd4b379903056a6f48c09",
+                  "policy_id": "contract-policy",
+                  "signed_by": "na-contract",
+                  "version": 1
+                }
+              ],
+              "policy_set_digest": "a5709d5e0ab4685c8202b3706a54f15f055c94e70da0bb7e9eb4bfade242049e",
+              "registry_gate_types": [
+                "max_value.v1"
+              ],
+              "resolution_failure": null,
+              "resolution_status": "resolved"
+            },
+            "signature": {
+              "key_id": "na-contract",
+              "sig": "NXhjF/CYjEigqZGzlbiqtFpjiAXYUIjjmHN0+r3szVE6/NMYH/QTIWc1gzcKOwjG9LiICqrtvhcPjaDEuAP+DQ=="
+            }
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "52577800-0b7b-4492-84ec-6f2432426907",
+          "decision_id": "64c08b1f-3953-4486-8827-3d295f19933c",
+          "entry_kind": "justification",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "85f9a9774024d48e12668cc88636040e9455e09bdaf949e4e23419af8217480f",
+          "prev_entry_digest": "b3886465c33cbb9238f638e93e4f8a7d47ba0d03653306330a3f294c0e162c50",
+          "recorded_at": "2026-10-31T08:42:06.291823Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 11,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "9371dc68023b890679a94f69d1971beb2fc61deaf43600b2d45dcbe18a793668",
+        "payload": {
+          "decision_id": "64c08b1f-3953-4486-8827-3d295f19933c",
+          "issuer_sovereign_id": "contract-na",
+          "proof_id": "555d2582-89a9-4e23-8515-d1d8e6871792",
+          "proof_issued_at": "2026-10-31T08:42:06.290169Z",
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "X2Ruud5MU1QTXH3K7VxfDQMwLBGjq7sc2xLXSfDta3mvZTCqKIEIPG3GaScWTLJMxs1AoN2gXFkBFGlO76vgCw=="
+          },
+          "trace": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "decision_id": "64c08b1f-3953-4486-8827-3d295f19933c",
+            "entries": [
+              {
+                "evaluated_at": "2026-10-31T08:42:06.290169Z",
+                "gate_name": "attestation_status",
+                "gate_type": "AttestationStatusGate",
+                "inputs": {
+                  "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+                  "found": true,
+                  "revocation_seq_checked": 0
+                },
+                "metadata": {},
+                "reason": "attestation is active, signed by a trusted key, and not revoked",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.290169Z",
+                "gate_name": "attestation_validity",
+                "gate_type": "AttestationValidityGate",
+                "inputs": {
+                  "expires_at": "2026-11-01T08:42:06.091343+00:00",
+                  "requested_at": "2026-10-31T08:42:06.289832+00:00",
+                  "valid_from": "2026-10-31T08:42:06.091343+00:00"
+                },
+                "metadata": {},
+                "reason": "request at 2026-10-31T08:42:06.289832+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.290169Z",
+                "gate_name": "capability_check",
+                "gate_type": "CapabilityGate",
+                "inputs": {
+                  "capabilities": [
+                    "contract.read"
+                  ],
+                  "requested_capability": "contract.read"
+                },
+                "metadata": {},
+                "reason": "capability 'contract.read' is in attested capabilities",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.290169Z",
+                "gate_name": "freshness_check",
+                "gate_type": "FreshnessGate",
+                "inputs": {
+                  "context_freshness_seq": 0,
+                  "freshness_commitment": 0
+                },
+                "metadata": {},
+                "reason": "freshness seq 0 >= commitment 0",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.290169Z",
+                "gate_name": "contract-policy/max-days",
+                "gate_type": "max_value.v1",
+                "inputs": {
+                  "condition": {
+                    "max": 90.0,
+                    "operator": "<="
+                  },
+                  "path": "request_parameters.days",
+                  "present": true,
+                  "value_type": "number"
+                },
+                "metadata": {
+                  "gate_id": "max-days",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                },
+                "reason": "request_parameters.days satisfies <= 90.0",
+                "result": true
+              }
+            ],
+            "final_authorized": true,
+            "operator_sovereign_id": "contract-na",
+            "short_circuited_at": null,
+            "trace_id": "6de654da-8e99-4785-8960-c641466a58fa",
+            "traced_at": "2026-10-31T08:42:06.290169Z"
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "6f4bb50e-6120-46c7-bfac-6caa11f0fb60",
+          "decision_id": "973973ad-b2c5-4217-b83a-80d8ea2bc19f",
+          "entry_kind": "decision",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "b4d34e6832352ef6c9f92ab6ae67fa5298324d7d925e07413df37875bac654f3",
+          "prev_entry_digest": "9371dc68023b890679a94f69d1971beb2fc61deaf43600b2d45dcbe18a793668",
+          "recorded_at": "2026-10-31T08:42:06.420400Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 12,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "a6eb42f8fbe1d7d544d1ae660fcfd4a8db89179e10e7c1fa8d927aebf583b2f0",
+        "payload": {
+          "context": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attributes": {},
+            "context_freshness_seq": 0,
+            "context_id": "6f4bb50e-6120-46c7-bfac-6caa11f0fb60",
+            "parent_kind": "attestation",
+            "provider_sovereign_id": "contract-na",
+            "request_parameters": {
+              "days": 30
+            },
+            "requested_at": "2026-10-31T08:42:06.419095Z",
+            "requested_capability": "contract.read",
+            "requester_sovereign_id": "vendor-evaluate"
+          },
+          "decision": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_binding": {
+              "attestation_digest": "818bd14698f320e81fe0f0349a06347d82f0864bf1575721202f6f80824b2544",
+              "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+              "issuer_sovereign_id": "contract-na",
+              "revocation_seq_checked": 0,
+              "subject_id": "vendor-evaluate"
+            },
+            "authorized": true,
+            "context_id": "6f4bb50e-6120-46c7-bfac-6caa11f0fb60",
+            "decision_id": "973973ad-b2c5-4217-b83a-80d8ea2bc19f",
+            "decision_made_at": "2026-10-31T08:42:06.419278Z",
+            "decision_valid_until": "2026-10-31T08:47:06.419278Z",
+            "denial_reason": null,
+            "freshness_proof": null,
+            "gate_results": [
+              {
+                "detail": "attestation is active, signed by a trusted key, and not revoked",
+                "gate_name": "attestation_status",
+                "passed": true
+              },
+              {
+                "detail": "request at 2026-10-31T08:42:06.419095+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "gate_name": "attestation_validity",
+                "passed": true
+              },
+              {
+                "detail": "capability 'contract.read' is in attested capabilities",
+                "gate_name": "capability_check",
+                "passed": true
+              },
+              {
+                "detail": "freshness seq 0 >= commitment 0",
+                "gate_name": "freshness_check",
+                "passed": true
+              },
+              {
+                "detail": "request_parameters.days satisfies <= 90.0",
+                "gate_name": "contract-policy/max-days",
+                "passed": true
+              }
+            ],
+            "operator_sovereign_id": "contract-na",
+            "policy_binding": {
+              "context_digest": "16b24b62b1fb1fb482a12d0a8f49d1e531c1dc3f4a7cd78a2ab30a09eafa5078",
+              "gate_evaluations": [
+                {
+                  "gate_id": "max-days",
+                  "gate_type": "max_value.v1",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "passed": true,
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                }
+              ],
+              "policies": [
+                {
+                  "policy_digest": "5d194fe97c9e18969a509add853401bcda8e6b61356bd4b379903056a6f48c09",
+                  "policy_id": "contract-policy",
+                  "signed_by": "na-contract",
+                  "version": 1
+                }
+              ],
+              "policy_set_digest": "a5709d5e0ab4685c8202b3706a54f15f055c94e70da0bb7e9eb4bfade242049e",
+              "registry_gate_types": [
+                "max_value.v1"
+              ],
+              "resolution_failure": null,
+              "resolution_status": "resolved"
+            },
+            "signature": {
+              "key_id": "na-contract",
+              "sig": "JMXHZO6q3vGCSzjXom64zqrw0s6umrClATQGTzD38kD4hkwdriGq8l8UH7thiazlI37+QwSpX2HUPuy/yx83Ag=="
+            }
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "6f4bb50e-6120-46c7-bfac-6caa11f0fb60",
+          "decision_id": "973973ad-b2c5-4217-b83a-80d8ea2bc19f",
+          "entry_kind": "justification",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "fe1a662ca4a0a2a60a26264b37591aadb631307cb60cc61c48d5ac7bd4e94e83",
+          "prev_entry_digest": "a6eb42f8fbe1d7d544d1ae660fcfd4a8db89179e10e7c1fa8d927aebf583b2f0",
+          "recorded_at": "2026-10-31T08:42:06.420400Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 13,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "c4e5b8b7ca8b37740007fb5b1a362708d0d1d751b55956a189acbd5e13b456ea",
+        "payload": {
+          "decision_id": "973973ad-b2c5-4217-b83a-80d8ea2bc19f",
+          "issuer_sovereign_id": "contract-na",
+          "proof_id": "7d0c82fe-bf80-4ba2-8d61-6e2a9bc14328",
+          "proof_issued_at": "2026-10-31T08:42:06.419278Z",
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "u9boUHLPDOuvPMHpa7fTO6zLZ3LFc1YJ807PHqcrg6Zjs2mInfWFFt+01J350qly/nhqwWYjwe1Hw9itoHkMDA=="
+          },
+          "trace": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "decision_id": "973973ad-b2c5-4217-b83a-80d8ea2bc19f",
+            "entries": [
+              {
+                "evaluated_at": "2026-10-31T08:42:06.419278Z",
+                "gate_name": "attestation_status",
+                "gate_type": "AttestationStatusGate",
+                "inputs": {
+                  "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+                  "found": true,
+                  "revocation_seq_checked": 0
+                },
+                "metadata": {},
+                "reason": "attestation is active, signed by a trusted key, and not revoked",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.419278Z",
+                "gate_name": "attestation_validity",
+                "gate_type": "AttestationValidityGate",
+                "inputs": {
+                  "expires_at": "2026-11-01T08:42:06.091343+00:00",
+                  "requested_at": "2026-10-31T08:42:06.419095+00:00",
+                  "valid_from": "2026-10-31T08:42:06.091343+00:00"
+                },
+                "metadata": {},
+                "reason": "request at 2026-10-31T08:42:06.419095+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.419278Z",
+                "gate_name": "capability_check",
+                "gate_type": "CapabilityGate",
+                "inputs": {
+                  "capabilities": [
+                    "contract.read"
+                  ],
+                  "requested_capability": "contract.read"
+                },
+                "metadata": {},
+                "reason": "capability 'contract.read' is in attested capabilities",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.419278Z",
+                "gate_name": "freshness_check",
+                "gate_type": "FreshnessGate",
+                "inputs": {
+                  "context_freshness_seq": 0,
+                  "freshness_commitment": 0
+                },
+                "metadata": {},
+                "reason": "freshness seq 0 >= commitment 0",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.419278Z",
+                "gate_name": "contract-policy/max-days",
+                "gate_type": "max_value.v1",
+                "inputs": {
+                  "condition": {
+                    "max": 90.0,
+                    "operator": "<="
+                  },
+                  "path": "request_parameters.days",
+                  "present": true,
+                  "value_type": "number"
+                },
+                "metadata": {
+                  "gate_id": "max-days",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                },
+                "reason": "request_parameters.days satisfies <= 90.0",
+                "result": true
+              }
+            ],
+            "final_authorized": true,
+            "operator_sovereign_id": "contract-na",
+            "short_circuited_at": null,
+            "trace_id": "56e98793-bb69-45e9-b557-8a597db59a85",
+            "traced_at": "2026-10-31T08:42:06.419278Z"
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "6f4bb50e-6120-46c7-bfac-6caa11f0fb60",
+          "decision_id": "973973ad-b2c5-4217-b83a-80d8ea2bc19f",
+          "entry_kind": "execution",
+          "evidence_id": "0a032a86-a24d-46cd-a8fc-c270353ed5b4",
+          "exec_sequence_no": 1,
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "payload_digest": "cabd4de33127856dad894850c648f2e79572f9cc786632632df180d387a3c168",
+          "prev_entry_digest": "c4e5b8b7ca8b37740007fb5b1a362708d0d1d751b55956a189acbd5e13b456ea",
+          "recorded_at": "2026-10-31T08:42:06.490519Z",
+          "resource_action": "create",
+          "resource_id": "contract:app-4/secret",
+          "resource_sequence": 1,
+          "store_sequence": 14,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "83671c28cf3e9b34d3ec3f94cd304ba596c222666edd30466cbcdfcc5d995934",
+        "payload": {
+          "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "context_id": "6f4bb50e-6120-46c7-bfac-6caa11f0fb60",
+          "decision_id": "973973ad-b2c5-4217-b83a-80d8ea2bc19f",
+          "evidence_id": "0a032a86-a24d-46cd-a8fc-c270353ed5b4",
+          "executed_at": "2026-10-31T08:42:06.459925Z",
+          "executed_capability": "contract.read",
+          "execution_parameters": {
+            "secret_version": "v1"
+          },
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "outcome_detail": null,
+          "prev_evidence_digest": null,
+          "resource_action": "create",
+          "resource_id": "contract:app-4/secret",
+          "resource_sequence": 1,
+          "sequence_no": 1,
+          "signature": {
+            "key_id": "contract-executor",
+            "sig": "ahLfydM9C4IEd+72vYb8oDG/AK/686Sym0xplz2lOynP0qjFNtZispJRaoDbhkPeXN4xmxwBYpVvqc49vqpvDQ=="
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "7732522e-93c9-46f6-b4cd-a9a9f2bc9be9",
+          "decision_id": "833ae00e-34a4-40a9-ac62-cf016aa9b4a1",
+          "entry_kind": "decision",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "denied",
+          "payload_digest": "86e0bde92196c9c937447149235dbc74ab764a44cca46fe0f871aef1014b824c",
+          "prev_entry_digest": "83671c28cf3e9b34d3ec3f94cd304ba596c222666edd30466cbcdfcc5d995934",
+          "recorded_at": "2026-10-31T08:42:06.511314Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 15,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "811514e96a92e50c6bc794d4554108213609d81fdbbd3b41635f94f97922c78b",
+        "payload": {
+          "context": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attributes": {},
+            "context_freshness_seq": 0,
+            "context_id": "7732522e-93c9-46f6-b4cd-a9a9f2bc9be9",
+            "parent_kind": "attestation",
+            "provider_sovereign_id": "contract-na",
+            "request_parameters": {
+              "days": 120
+            },
+            "requested_at": "2026-10-31T08:42:06.509435Z",
+            "requested_capability": "contract.read",
+            "requester_sovereign_id": "vendor-evaluate"
+          },
+          "decision": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_binding": {
+              "attestation_digest": "818bd14698f320e81fe0f0349a06347d82f0864bf1575721202f6f80824b2544",
+              "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+              "issuer_sovereign_id": "contract-na",
+              "revocation_seq_checked": 0,
+              "subject_id": "vendor-evaluate"
+            },
+            "authorized": false,
+            "context_id": "7732522e-93c9-46f6-b4cd-a9a9f2bc9be9",
+            "decision_id": "833ae00e-34a4-40a9-ac62-cf016aa9b4a1",
+            "decision_made_at": "2026-10-31T08:42:06.509722Z",
+            "decision_valid_until": "2026-10-31T08:47:06.509722Z",
+            "denial_reason": "policy gate 'contract-policy/max-days' failed",
+            "freshness_proof": null,
+            "gate_results": [
+              {
+                "detail": "attestation is active, signed by a trusted key, and not revoked",
+                "gate_name": "attestation_status",
+                "passed": true
+              },
+              {
+                "detail": "request at 2026-10-31T08:42:06.509435+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "gate_name": "attestation_validity",
+                "passed": true
+              },
+              {
+                "detail": "capability 'contract.read' is in attested capabilities",
+                "gate_name": "capability_check",
+                "passed": true
+              },
+              {
+                "detail": "freshness seq 0 >= commitment 0",
+                "gate_name": "freshness_check",
+                "passed": true
+              },
+              {
+                "detail": "request_parameters.days violates <= 90.0",
+                "gate_name": "contract-policy/max-days",
+                "passed": false
+              }
+            ],
+            "operator_sovereign_id": "contract-na",
+            "policy_binding": {
+              "context_digest": "09cd729e04ec821940fb26f2a5e04748c4feb635692f365d1a6e15a38dbd17b8",
+              "gate_evaluations": [
+                {
+                  "gate_id": "max-days",
+                  "gate_type": "max_value.v1",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "fail",
+                  "passed": false,
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                }
+              ],
+              "policies": [
+                {
+                  "policy_digest": "5d194fe97c9e18969a509add853401bcda8e6b61356bd4b379903056a6f48c09",
+                  "policy_id": "contract-policy",
+                  "signed_by": "na-contract",
+                  "version": 1
+                }
+              ],
+              "policy_set_digest": "a5709d5e0ab4685c8202b3706a54f15f055c94e70da0bb7e9eb4bfade242049e",
+              "registry_gate_types": [
+                "max_value.v1"
+              ],
+              "resolution_failure": null,
+              "resolution_status": "resolved"
+            },
+            "signature": {
+              "key_id": "na-contract",
+              "sig": "RMcBzCpHIRTY0lkmrMV4SRik1PHOHIsP9VVaiUjp6XJ6qjS3Ndctbw5HY6r9DyZqihMK3gEpM4RT1H87lR71DA=="
+            }
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "7732522e-93c9-46f6-b4cd-a9a9f2bc9be9",
+          "decision_id": "833ae00e-34a4-40a9-ac62-cf016aa9b4a1",
+          "entry_kind": "justification",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "denied",
+          "payload_digest": "ddc4136b2d8dba74defa8ed29f42b3b774378dada6adcbb383bc61f3aa6d4aa6",
+          "prev_entry_digest": "811514e96a92e50c6bc794d4554108213609d81fdbbd3b41635f94f97922c78b",
+          "recorded_at": "2026-10-31T08:42:06.511314Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 16,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "c177efe5a49ad36303133346ada3bba5ceae8e0470b49425479868903fa284a5",
+        "payload": {
+          "decision_id": "833ae00e-34a4-40a9-ac62-cf016aa9b4a1",
+          "issuer_sovereign_id": "contract-na",
+          "proof_id": "b168c5e7-c018-4b21-81ac-6a717ed2f3b4",
+          "proof_issued_at": "2026-10-31T08:42:06.509722Z",
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "2swtc40X5lZxmJIcRv9KYpa4yIONO0v55kZ5Tro6Ti4YZtWwY4c5g3605qPwHgmf19cKBQw0xpp0rZYnrOMXCA=="
+          },
+          "trace": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "decision_id": "833ae00e-34a4-40a9-ac62-cf016aa9b4a1",
+            "entries": [
+              {
+                "evaluated_at": "2026-10-31T08:42:06.509722Z",
+                "gate_name": "attestation_status",
+                "gate_type": "AttestationStatusGate",
+                "inputs": {
+                  "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+                  "found": true,
+                  "revocation_seq_checked": 0
+                },
+                "metadata": {},
+                "reason": "attestation is active, signed by a trusted key, and not revoked",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.509722Z",
+                "gate_name": "attestation_validity",
+                "gate_type": "AttestationValidityGate",
+                "inputs": {
+                  "expires_at": "2026-11-01T08:42:06.091343+00:00",
+                  "requested_at": "2026-10-31T08:42:06.509435+00:00",
+                  "valid_from": "2026-10-31T08:42:06.091343+00:00"
+                },
+                "metadata": {},
+                "reason": "request at 2026-10-31T08:42:06.509435+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.509722Z",
+                "gate_name": "capability_check",
+                "gate_type": "CapabilityGate",
+                "inputs": {
+                  "capabilities": [
+                    "contract.read"
+                  ],
+                  "requested_capability": "contract.read"
+                },
+                "metadata": {},
+                "reason": "capability 'contract.read' is in attested capabilities",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.509722Z",
+                "gate_name": "freshness_check",
+                "gate_type": "FreshnessGate",
+                "inputs": {
+                  "context_freshness_seq": 0,
+                  "freshness_commitment": 0
+                },
+                "metadata": {},
+                "reason": "freshness seq 0 >= commitment 0",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.509722Z",
+                "gate_name": "contract-policy/max-days",
+                "gate_type": "max_value.v1",
+                "inputs": {
+                  "condition": {
+                    "max": 90.0,
+                    "operator": "<="
+                  },
+                  "path": "request_parameters.days",
+                  "present": true,
+                  "value_type": "number"
+                },
+                "metadata": {
+                  "gate_id": "max-days",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "fail",
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                },
+                "reason": "request_parameters.days violates <= 90.0",
+                "result": false
+              }
+            ],
+            "final_authorized": false,
+            "operator_sovereign_id": "contract-na",
+            "short_circuited_at": "contract-policy/max-days",
+            "trace_id": "8b1ea976-ae1b-48b7-a1e2-7e0c93cac7d0",
+            "traced_at": "2026-10-31T08:42:06.509722Z"
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "6ad0f916-dfd7-4791-9849-00ab7d10a4c9",
+          "decision_id": "3ff4a334-a89c-410f-b652-9cb92b3db864",
+          "entry_kind": "decision",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "39c9afb8188d1da83be2be02e932ee76da4533ff78154684f803b308cae1a28b",
+          "prev_entry_digest": "c177efe5a49ad36303133346ada3bba5ceae8e0470b49425479868903fa284a5",
+          "recorded_at": "2026-10-31T08:42:06.526398Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 17,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "aa76ba0dfa938f569c6922596a8572206f55fd3e5f7e6536e833a386246c8fb5",
+        "payload": {
+          "context": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attributes": {},
+            "context_freshness_seq": 0,
+            "context_id": "6ad0f916-dfd7-4791-9849-00ab7d10a4c9",
+            "parent_kind": "attestation",
+            "provider_sovereign_id": "contract-na",
+            "request_parameters": {
+              "days": 60
+            },
+            "requested_at": "2026-10-31T08:42:06.524467Z",
+            "requested_capability": "contract.read",
+            "requester_sovereign_id": "vendor-evaluate"
+          },
+          "decision": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_binding": {
+              "attestation_digest": "818bd14698f320e81fe0f0349a06347d82f0864bf1575721202f6f80824b2544",
+              "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+              "issuer_sovereign_id": "contract-na",
+              "revocation_seq_checked": 0,
+              "subject_id": "vendor-evaluate"
+            },
+            "authorized": true,
+            "context_id": "6ad0f916-dfd7-4791-9849-00ab7d10a4c9",
+            "decision_id": "3ff4a334-a89c-410f-b652-9cb92b3db864",
+            "decision_made_at": "2026-10-31T08:42:06.524763Z",
+            "decision_valid_until": "2026-10-31T08:47:06.524763Z",
+            "denial_reason": null,
+            "freshness_proof": null,
+            "gate_results": [
+              {
+                "detail": "attestation is active, signed by a trusted key, and not revoked",
+                "gate_name": "attestation_status",
+                "passed": true
+              },
+              {
+                "detail": "request at 2026-10-31T08:42:06.524467+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "gate_name": "attestation_validity",
+                "passed": true
+              },
+              {
+                "detail": "capability 'contract.read' is in attested capabilities",
+                "gate_name": "capability_check",
+                "passed": true
+              },
+              {
+                "detail": "freshness seq 0 >= commitment 0",
+                "gate_name": "freshness_check",
+                "passed": true
+              },
+              {
+                "detail": "request_parameters.days satisfies <= 90.0",
+                "gate_name": "contract-policy/max-days",
+                "passed": true
+              }
+            ],
+            "operator_sovereign_id": "contract-na",
+            "policy_binding": {
+              "context_digest": "07c22b8c3f2db56831692f1ceef5e544402ed1bb8afea1a0fd0ec8db9d1e9c96",
+              "gate_evaluations": [
+                {
+                  "gate_id": "max-days",
+                  "gate_type": "max_value.v1",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "passed": true,
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                }
+              ],
+              "policies": [
+                {
+                  "policy_digest": "5d194fe97c9e18969a509add853401bcda8e6b61356bd4b379903056a6f48c09",
+                  "policy_id": "contract-policy",
+                  "signed_by": "na-contract",
+                  "version": 1
+                }
+              ],
+              "policy_set_digest": "a5709d5e0ab4685c8202b3706a54f15f055c94e70da0bb7e9eb4bfade242049e",
+              "registry_gate_types": [
+                "max_value.v1"
+              ],
+              "resolution_failure": null,
+              "resolution_status": "resolved"
+            },
+            "signature": {
+              "key_id": "na-contract",
+              "sig": "5+2c7tIp+MEWKwnccCVacDjO0OqCZRx9uHyPyab1+Wyexe07KEE35rd+JWTwdK9vJG4vwQQ2JrFp/YCADg1FAw=="
+            }
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "6ad0f916-dfd7-4791-9849-00ab7d10a4c9",
+          "decision_id": "3ff4a334-a89c-410f-b652-9cb92b3db864",
+          "entry_kind": "justification",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "4c71375fae4ff97f340ab9abec26f96873f7e239a579478f61b16f8c2bc141c0",
+          "prev_entry_digest": "aa76ba0dfa938f569c6922596a8572206f55fd3e5f7e6536e833a386246c8fb5",
+          "recorded_at": "2026-10-31T08:42:06.526398Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 18,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "fdab05191803c3a9972c2aca414e1a19aa1d1754e8b386560444b588036f21f3",
+        "payload": {
+          "decision_id": "3ff4a334-a89c-410f-b652-9cb92b3db864",
+          "issuer_sovereign_id": "contract-na",
+          "proof_id": "bb558843-04c9-48a1-bd3f-2f5b33f11581",
+          "proof_issued_at": "2026-10-31T08:42:06.524763Z",
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "clXXa8J3PsejkqBRrX7YMWaj6xdcH1Jh9x9ai1GvFgfPBwZNKGSHDn5JjS+OlOL8OPPamKKEz53fw4OdkokMDA=="
+          },
+          "trace": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "decision_id": "3ff4a334-a89c-410f-b652-9cb92b3db864",
+            "entries": [
+              {
+                "evaluated_at": "2026-10-31T08:42:06.524763Z",
+                "gate_name": "attestation_status",
+                "gate_type": "AttestationStatusGate",
+                "inputs": {
+                  "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+                  "found": true,
+                  "revocation_seq_checked": 0
+                },
+                "metadata": {},
+                "reason": "attestation is active, signed by a trusted key, and not revoked",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.524763Z",
+                "gate_name": "attestation_validity",
+                "gate_type": "AttestationValidityGate",
+                "inputs": {
+                  "expires_at": "2026-11-01T08:42:06.091343+00:00",
+                  "requested_at": "2026-10-31T08:42:06.524467+00:00",
+                  "valid_from": "2026-10-31T08:42:06.091343+00:00"
+                },
+                "metadata": {},
+                "reason": "request at 2026-10-31T08:42:06.524467+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.524763Z",
+                "gate_name": "capability_check",
+                "gate_type": "CapabilityGate",
+                "inputs": {
+                  "capabilities": [
+                    "contract.read"
+                  ],
+                  "requested_capability": "contract.read"
+                },
+                "metadata": {},
+                "reason": "capability 'contract.read' is in attested capabilities",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.524763Z",
+                "gate_name": "freshness_check",
+                "gate_type": "FreshnessGate",
+                "inputs": {
+                  "context_freshness_seq": 0,
+                  "freshness_commitment": 0
+                },
+                "metadata": {},
+                "reason": "freshness seq 0 >= commitment 0",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.524763Z",
+                "gate_name": "contract-policy/max-days",
+                "gate_type": "max_value.v1",
+                "inputs": {
+                  "condition": {
+                    "max": 90.0,
+                    "operator": "<="
+                  },
+                  "path": "request_parameters.days",
+                  "present": true,
+                  "value_type": "number"
+                },
+                "metadata": {
+                  "gate_id": "max-days",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                },
+                "reason": "request_parameters.days satisfies <= 90.0",
+                "result": true
+              }
+            ],
+            "final_authorized": true,
+            "operator_sovereign_id": "contract-na",
+            "short_circuited_at": null,
+            "trace_id": "ba028673-f3f3-4ae1-a516-85cd64a8a9bb",
+            "traced_at": "2026-10-31T08:42:06.524763Z"
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "6ad0f916-dfd7-4791-9849-00ab7d10a4c9",
+          "decision_id": "3ff4a334-a89c-410f-b652-9cb92b3db864",
+          "entry_kind": "execution",
+          "evidence_id": "4f7b5e73-aee9-4017-bf3e-ed6adbb2480d",
+          "exec_sequence_no": 1,
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "payload_digest": "23d580b3cb98a7c09f5597aa1acae42c0bf98397c293ab4ebe0d8aa6293bdad8",
+          "prev_entry_digest": "fdab05191803c3a9972c2aca414e1a19aa1d1754e8b386560444b588036f21f3",
+          "recorded_at": "2026-10-31T08:42:06.548181Z",
+          "resource_action": "rotate",
+          "resource_id": "contract:app-4/secret",
+          "resource_sequence": 2,
+          "store_sequence": 19,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "2d96dc7ee97c12fb87b868f7cad916044d8033fdac71a6c3d29d923250eed5e4",
+        "payload": {
+          "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "context_id": "6ad0f916-dfd7-4791-9849-00ab7d10a4c9",
+          "decision_id": "3ff4a334-a89c-410f-b652-9cb92b3db864",
+          "evidence_id": "4f7b5e73-aee9-4017-bf3e-ed6adbb2480d",
+          "executed_at": "2026-10-31T08:42:06.539690Z",
+          "executed_capability": "contract.read",
+          "execution_parameters": {
+            "secret_version": "v2"
+          },
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "outcome_detail": null,
+          "prev_evidence_digest": null,
+          "prev_resource_digest": "d356c218b204401874dc313cdc67d8bb2715dcc59995e1016c543507cee2f04e",
+          "resource_action": "rotate",
+          "resource_id": "contract:app-4/secret",
+          "resource_sequence": 2,
+          "sequence_no": 1,
+          "signature": {
+            "key_id": "contract-executor",
+            "sig": "+k4959fxk6HTTxbCROkpmjLQWAoWOmTd0JgcgH6JFUgVA+DLs0djVuJi79WUn3yRvIDRfXvk8X/RtSoh1XREAQ=="
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "7e15a38f-4874-45f3-91f3-4b7a1f9275cb",
+          "decision_id": "a2ddbca3-210d-4685-b33b-8d38718b3776",
+          "entry_kind": "decision",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "51d55a9a9bd7806784fc3f869c710070abb2982311930cc2e83b93c3feb2603e",
+          "prev_entry_digest": "2d96dc7ee97c12fb87b868f7cad916044d8033fdac71a6c3d29d923250eed5e4",
+          "recorded_at": "2026-10-31T08:42:06.565484Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 20,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "65353784e1198d57be3d87e1fd96b1a9e766d9b43c7ed34a0f68164e1c71bedf",
+        "payload": {
+          "context": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attributes": {},
+            "context_freshness_seq": 0,
+            "context_id": "7e15a38f-4874-45f3-91f3-4b7a1f9275cb",
+            "parent_kind": "attestation",
+            "provider_sovereign_id": "contract-na",
+            "request_parameters": {
+              "days": 45
+            },
+            "requested_at": "2026-10-31T08:42:06.563375Z",
+            "requested_capability": "contract.read",
+            "requester_sovereign_id": "vendor-evaluate"
+          },
+          "decision": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_binding": {
+              "attestation_digest": "818bd14698f320e81fe0f0349a06347d82f0864bf1575721202f6f80824b2544",
+              "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+              "issuer_sovereign_id": "contract-na",
+              "revocation_seq_checked": 0,
+              "subject_id": "vendor-evaluate"
+            },
+            "authorized": true,
+            "context_id": "7e15a38f-4874-45f3-91f3-4b7a1f9275cb",
+            "decision_id": "a2ddbca3-210d-4685-b33b-8d38718b3776",
+            "decision_made_at": "2026-10-31T08:42:06.563692Z",
+            "decision_valid_until": "2026-10-31T08:47:06.563692Z",
+            "denial_reason": null,
+            "freshness_proof": null,
+            "gate_results": [
+              {
+                "detail": "attestation is active, signed by a trusted key, and not revoked",
+                "gate_name": "attestation_status",
+                "passed": true
+              },
+              {
+                "detail": "request at 2026-10-31T08:42:06.563375+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "gate_name": "attestation_validity",
+                "passed": true
+              },
+              {
+                "detail": "capability 'contract.read' is in attested capabilities",
+                "gate_name": "capability_check",
+                "passed": true
+              },
+              {
+                "detail": "freshness seq 0 >= commitment 0",
+                "gate_name": "freshness_check",
+                "passed": true
+              },
+              {
+                "detail": "request_parameters.days satisfies <= 90.0",
+                "gate_name": "contract-policy/max-days",
+                "passed": true
+              }
+            ],
+            "operator_sovereign_id": "contract-na",
+            "policy_binding": {
+              "context_digest": "253bacead0cc49f433807519cc1175f3323bed41695cdc215fa9dbcb90c611ee",
+              "gate_evaluations": [
+                {
+                  "gate_id": "max-days",
+                  "gate_type": "max_value.v1",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "passed": true,
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                }
+              ],
+              "policies": [
+                {
+                  "policy_digest": "5d194fe97c9e18969a509add853401bcda8e6b61356bd4b379903056a6f48c09",
+                  "policy_id": "contract-policy",
+                  "signed_by": "na-contract",
+                  "version": 1
+                }
+              ],
+              "policy_set_digest": "a5709d5e0ab4685c8202b3706a54f15f055c94e70da0bb7e9eb4bfade242049e",
+              "registry_gate_types": [
+                "max_value.v1"
+              ],
+              "resolution_failure": null,
+              "resolution_status": "resolved"
+            },
+            "signature": {
+              "key_id": "na-contract",
+              "sig": "WZGbgUjLH8mH9anaiogZx2bMEsjUlDUQaUA133USE0P990SmU/pXzDWfmAqt5jIKxurRtEozjd3a5vkNJLFzDg=="
+            }
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "7e15a38f-4874-45f3-91f3-4b7a1f9275cb",
+          "decision_id": "a2ddbca3-210d-4685-b33b-8d38718b3776",
+          "entry_kind": "justification",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "2c02c2667dbf1401acb5e0cc858f5c77f542ae9cbb4faec8efaed164e0a1db27",
+          "prev_entry_digest": "65353784e1198d57be3d87e1fd96b1a9e766d9b43c7ed34a0f68164e1c71bedf",
+          "recorded_at": "2026-10-31T08:42:06.565484Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 21,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "ba1ccdce16b3ac75c2d0a7bdf5796a64fd2f6374344d49c08baf676b59b977c9",
+        "payload": {
+          "decision_id": "a2ddbca3-210d-4685-b33b-8d38718b3776",
+          "issuer_sovereign_id": "contract-na",
+          "proof_id": "6e6c38ff-0938-4734-98bd-c953bade7721",
+          "proof_issued_at": "2026-10-31T08:42:06.563692Z",
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "LUo9p2LRIIV8lg2cQbqpLDX+8MWpQbjg0Z0thU4A1mI6JYMGlzNiq8KMHX1tqd7qtmjlJqEFSrcyrCC3EvwuAw=="
+          },
+          "trace": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "decision_id": "a2ddbca3-210d-4685-b33b-8d38718b3776",
+            "entries": [
+              {
+                "evaluated_at": "2026-10-31T08:42:06.563692Z",
+                "gate_name": "attestation_status",
+                "gate_type": "AttestationStatusGate",
+                "inputs": {
+                  "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+                  "found": true,
+                  "revocation_seq_checked": 0
+                },
+                "metadata": {},
+                "reason": "attestation is active, signed by a trusted key, and not revoked",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.563692Z",
+                "gate_name": "attestation_validity",
+                "gate_type": "AttestationValidityGate",
+                "inputs": {
+                  "expires_at": "2026-11-01T08:42:06.091343+00:00",
+                  "requested_at": "2026-10-31T08:42:06.563375+00:00",
+                  "valid_from": "2026-10-31T08:42:06.091343+00:00"
+                },
+                "metadata": {},
+                "reason": "request at 2026-10-31T08:42:06.563375+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.563692Z",
+                "gate_name": "capability_check",
+                "gate_type": "CapabilityGate",
+                "inputs": {
+                  "capabilities": [
+                    "contract.read"
+                  ],
+                  "requested_capability": "contract.read"
+                },
+                "metadata": {},
+                "reason": "capability 'contract.read' is in attested capabilities",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.563692Z",
+                "gate_name": "freshness_check",
+                "gate_type": "FreshnessGate",
+                "inputs": {
+                  "context_freshness_seq": 0,
+                  "freshness_commitment": 0
+                },
+                "metadata": {},
+                "reason": "freshness seq 0 >= commitment 0",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.563692Z",
+                "gate_name": "contract-policy/max-days",
+                "gate_type": "max_value.v1",
+                "inputs": {
+                  "condition": {
+                    "max": 90.0,
+                    "operator": "<="
+                  },
+                  "path": "request_parameters.days",
+                  "present": true,
+                  "value_type": "number"
+                },
+                "metadata": {
+                  "gate_id": "max-days",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                },
+                "reason": "request_parameters.days satisfies <= 90.0",
+                "result": true
+              }
+            ],
+            "final_authorized": true,
+            "operator_sovereign_id": "contract-na",
+            "short_circuited_at": null,
+            "trace_id": "5b71965e-f644-4716-8088-6643f83b23c3",
+            "traced_at": "2026-10-31T08:42:06.563692Z"
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "7e15a38f-4874-45f3-91f3-4b7a1f9275cb",
+          "decision_id": "a2ddbca3-210d-4685-b33b-8d38718b3776",
+          "entry_kind": "execution",
+          "evidence_id": "eba32178-3d8e-4452-8ceb-20055b5e34a5",
+          "exec_sequence_no": 1,
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "payload_digest": "bc22740471d3a38ff74216743bd561ade83d8fc7207e7c18c8fce718be68e52c",
+          "prev_entry_digest": "ba1ccdce16b3ac75c2d0a7bdf5796a64fd2f6374344d49c08baf676b59b977c9",
+          "recorded_at": "2026-10-31T08:42:06.587944Z",
+          "resource_action": "update",
+          "resource_id": "contract:app-4/secret",
+          "resource_sequence": 3,
+          "store_sequence": 22,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "e192be4dd818613dc2a886f560f50b0253d8fd57b9283bbe254628c46ead4fd3",
+        "payload": {
+          "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "context_id": "7e15a38f-4874-45f3-91f3-4b7a1f9275cb",
+          "decision_id": "a2ddbca3-210d-4685-b33b-8d38718b3776",
+          "evidence_id": "eba32178-3d8e-4452-8ceb-20055b5e34a5",
+          "executed_at": "2026-10-31T08:42:06.581405Z",
+          "executed_capability": "contract.read",
+          "execution_parameters": {
+            "secret_version": "v3"
+          },
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "outcome_detail": "[secret guard dropped: client_secret]",
+          "prev_evidence_digest": null,
+          "prev_resource_digest": "e12997f1fe0763c33788edee6a923617eabbfd59a44b56acc395aa4ab12ed125",
+          "resource_action": "update",
+          "resource_id": "contract:app-4/secret",
+          "resource_sequence": 3,
+          "sequence_no": 1,
+          "signature": {
+            "key_id": "contract-executor",
+            "sig": "e0Q8rn2y3JnrzpqJRfZS8GK821SEMYaMXIrBN5G/aEMIuIyyjUjTNC8jMlX1W7RrI1SB0BBrJSDZ7R8GbBdlDg=="
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "4f13b724-fbd2-4a68-8f94-1436b935a279",
+          "decision_id": "4b6136ff-7a43-4334-8024-d007798de505",
+          "entry_kind": "decision",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "f016a269f4743bdf12ed39ac8d4698b08298e3dd587307a81b92eae89aaf4151",
+          "prev_entry_digest": "e192be4dd818613dc2a886f560f50b0253d8fd57b9283bbe254628c46ead4fd3",
+          "recorded_at": "2026-10-31T08:42:06.604214Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 23,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "5fdb335e8bad3198499224172c723c78c3114fb3918956d24bead3b747ead763",
+        "payload": {
+          "context": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attributes": {},
+            "context_freshness_seq": 0,
+            "context_id": "4f13b724-fbd2-4a68-8f94-1436b935a279",
+            "parent_kind": "attestation",
+            "provider_sovereign_id": "contract-na",
+            "request_parameters": {
+              "days": 30
+            },
+            "requested_at": "2026-10-31T08:42:06.602327Z",
+            "requested_capability": "contract.read",
+            "requester_sovereign_id": "vendor-evaluate"
+          },
+          "decision": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "attestation_binding": {
+              "attestation_digest": "818bd14698f320e81fe0f0349a06347d82f0864bf1575721202f6f80824b2544",
+              "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+              "issuer_sovereign_id": "contract-na",
+              "revocation_seq_checked": 0,
+              "subject_id": "vendor-evaluate"
+            },
+            "authorized": true,
+            "context_id": "4f13b724-fbd2-4a68-8f94-1436b935a279",
+            "decision_id": "4b6136ff-7a43-4334-8024-d007798de505",
+            "decision_made_at": "2026-10-31T08:42:06.602587Z",
+            "decision_valid_until": "2026-10-31T08:47:06.602587Z",
+            "denial_reason": null,
+            "freshness_proof": null,
+            "gate_results": [
+              {
+                "detail": "attestation is active, signed by a trusted key, and not revoked",
+                "gate_name": "attestation_status",
+                "passed": true
+              },
+              {
+                "detail": "request at 2026-10-31T08:42:06.602327+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "gate_name": "attestation_validity",
+                "passed": true
+              },
+              {
+                "detail": "capability 'contract.read' is in attested capabilities",
+                "gate_name": "capability_check",
+                "passed": true
+              },
+              {
+                "detail": "freshness seq 0 >= commitment 0",
+                "gate_name": "freshness_check",
+                "passed": true
+              },
+              {
+                "detail": "request_parameters.days satisfies <= 90.0",
+                "gate_name": "contract-policy/max-days",
+                "passed": true
+              }
+            ],
+            "operator_sovereign_id": "contract-na",
+            "policy_binding": {
+              "context_digest": "49f90a5e8f283d4e38c35e963ffa34b538174c8a66bc2252d7ef78988ea49aeb",
+              "gate_evaluations": [
+                {
+                  "gate_id": "max-days",
+                  "gate_type": "max_value.v1",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "passed": true,
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                }
+              ],
+              "policies": [
+                {
+                  "policy_digest": "5d194fe97c9e18969a509add853401bcda8e6b61356bd4b379903056a6f48c09",
+                  "policy_id": "contract-policy",
+                  "signed_by": "na-contract",
+                  "version": 1
+                }
+              ],
+              "policy_set_digest": "a5709d5e0ab4685c8202b3706a54f15f055c94e70da0bb7e9eb4bfade242049e",
+              "registry_gate_types": [
+                "max_value.v1"
+              ],
+              "resolution_failure": null,
+              "resolution_status": "resolved"
+            },
+            "signature": {
+              "key_id": "na-contract",
+              "sig": "cEavJuh8DLWImS1CUbd5j2rTW5hUvEaysX533f3FyD4NCRkLelIy05tiM6qKZcnMF5/d4fbfS9YXGRmLgcQBAw=="
+            }
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "4f13b724-fbd2-4a68-8f94-1436b935a279",
+          "decision_id": "4b6136ff-7a43-4334-8024-d007798de505",
+          "entry_kind": "justification",
+          "evidence_id": null,
+          "exec_sequence_no": null,
+          "executor_sovereign_id": null,
+          "outcome": "authorized",
+          "payload_digest": "f017b1b95adbcb762460b9e6adab4790bd7fd64be16694aebb2e2fa55cde0adb",
+          "prev_entry_digest": "5fdb335e8bad3198499224172c723c78c3114fb3918956d24bead3b747ead763",
+          "recorded_at": "2026-10-31T08:42:06.604214Z",
+          "resource_action": null,
+          "resource_id": null,
+          "resource_sequence": null,
+          "store_sequence": 24,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "ddd6f9c9a5eb769af9efec8f9cbf56da2cb2ecbf81a0244b7164de616717f091",
+        "payload": {
+          "decision_id": "4b6136ff-7a43-4334-8024-d007798de505",
+          "issuer_sovereign_id": "contract-na",
+          "proof_id": "418b700e-d4fb-4cdb-b255-5e82ea6cb02d",
+          "proof_issued_at": "2026-10-31T08:42:06.602587Z",
+          "signature": {
+            "key_id": "na-contract",
+            "sig": "BFb1mDaMmJO3sv8tMY3xYnpJS+VTN+HEUd7TKKhDreRKnGNitURYagf6twYp/30XVGqmUm6cOtrZPoDrLBFLBw=="
+          },
+          "trace": {
+            "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+            "decision_id": "4b6136ff-7a43-4334-8024-d007798de505",
+            "entries": [
+              {
+                "evaluated_at": "2026-10-31T08:42:06.602587Z",
+                "gate_name": "attestation_status",
+                "gate_type": "AttestationStatusGate",
+                "inputs": {
+                  "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+                  "found": true,
+                  "revocation_seq_checked": 0
+                },
+                "metadata": {},
+                "reason": "attestation is active, signed by a trusted key, and not revoked",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.602587Z",
+                "gate_name": "attestation_validity",
+                "gate_type": "AttestationValidityGate",
+                "inputs": {
+                  "expires_at": "2026-11-01T08:42:06.091343+00:00",
+                  "requested_at": "2026-10-31T08:42:06.602327+00:00",
+                  "valid_from": "2026-10-31T08:42:06.091343+00:00"
+                },
+                "metadata": {},
+                "reason": "request at 2026-10-31T08:42:06.602327+00:00 is within [2026-10-31T08:42:06.091343+00:00, 2026-11-01T08:42:06.091343+00:00]",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.602587Z",
+                "gate_name": "capability_check",
+                "gate_type": "CapabilityGate",
+                "inputs": {
+                  "capabilities": [
+                    "contract.read"
+                  ],
+                  "requested_capability": "contract.read"
+                },
+                "metadata": {},
+                "reason": "capability 'contract.read' is in attested capabilities",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.602587Z",
+                "gate_name": "freshness_check",
+                "gate_type": "FreshnessGate",
+                "inputs": {
+                  "context_freshness_seq": 0,
+                  "freshness_commitment": 0
+                },
+                "metadata": {},
+                "reason": "freshness seq 0 >= commitment 0",
+                "result": true
+              },
+              {
+                "evaluated_at": "2026-10-31T08:42:06.602587Z",
+                "gate_name": "contract-policy/max-days",
+                "gate_type": "max_value.v1",
+                "inputs": {
+                  "condition": {
+                    "max": 90.0,
+                    "operator": "<="
+                  },
+                  "path": "request_parameters.days",
+                  "present": true,
+                  "value_type": "number"
+                },
+                "metadata": {
+                  "gate_id": "max-days",
+                  "mode": "enforce",
+                  "order": 0,
+                  "outcome": "pass",
+                  "policy_id": "contract-policy",
+                  "policy_version": 1
+                },
+                "reason": "request_parameters.days satisfies <= 90.0",
+                "result": true
+              }
+            ],
+            "final_authorized": true,
+            "operator_sovereign_id": "contract-na",
+            "short_circuited_at": null,
+            "trace_id": "49ed33dc-ea4f-416c-a082-1d3bcaa5710f",
+            "traced_at": "2026-10-31T08:42:06.602587Z"
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      },
+      {
+        "entry": {
+          "attestation_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "capability": "contract.read",
+          "context_id": "4f13b724-fbd2-4a68-8f94-1436b935a279",
+          "decision_id": "4b6136ff-7a43-4334-8024-d007798de505",
+          "entry_kind": "execution",
+          "evidence_id": "b0162d67-904b-4378-9dfa-18874e5f3d59",
+          "exec_sequence_no": 1,
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "payload_digest": "ffc299f20aa2b32526afaf4adac17e26a031cc7e4ec2df1d2bc2e5a08f1fa1bc",
+          "prev_entry_digest": "ddd6f9c9a5eb769af9efec8f9cbf56da2cb2ecbf81a0244b7164de616717f091",
+          "recorded_at": "2026-10-31T08:42:08.674789Z",
+          "resource_action": "create",
+          "resource_id": "contract:app-5/secret",
+          "resource_sequence": 1,
+          "store_sequence": 25,
+          "vendor_id": "vendor-evaluate"
+        },
+        "entry_digest": "28dc29cad8f1f508f545ffb106fe9482c3f4119989a3ecfed966e6ebe9f9708b",
+        "payload": {
+          "agreement_id": "0c137cf5-18d8-464d-a2a1-e6b4a79873fb",
+          "context_id": "4f13b724-fbd2-4a68-8f94-1436b935a279",
+          "decision_id": "4b6136ff-7a43-4334-8024-d007798de505",
+          "evidence_id": "b0162d67-904b-4378-9dfa-18874e5f3d59",
+          "executed_at": "2026-10-31T08:42:06.609936Z",
+          "executed_capability": "contract.read",
+          "execution_parameters": {
+            "app_id": "app-1",
+            "lifetime_days": 30
+          },
+          "executor_sovereign_id": "contract-executor",
+          "outcome": "success",
+          "outcome_detail": null,
+          "prev_evidence_digest": null,
+          "resource_action": "create",
+          "resource_id": "contract:app-5/secret",
+          "resource_sequence": 1,
+          "sequence_no": 1,
+          "signature": {
+            "key_id": "contract-executor",
+            "sig": "qhWu1UtsLJ1TYPfaJnH4kbnhzB0t4Y/z+0z9Bd/7PzewLb6n/aMut92GeoYlo7M1fZRpfl393Dvo1/6wuA5qAg=="
+          }
+        },
+        "schema": "gm.evidence.event",
+        "schema_version": 1
+      }
+    ],
+    "truncated": false,
+    "vendor_id": "vendor-evaluate",
+    "verification": {
+      "checked_entries": 24,
+      "decisions": 9,
+      "executions": 6,
+      "failures": [],
+      "verified": true
+    }
+  },
   "evidence_verify": {
     "accepted": true,
     "evidence_id": "e4a8715d-a2a4-48eb-834a-005ca513382c",
     "issuer_sovereign_id": "contract-na",
     "reason": "accepted",
     "verdict": "allow"
+  },
+  "evidence_verify_store": {
+    "anchors": {
+      "anchored_through_sequence": 1,
+      "anchors_after_export": 0,
+      "anchors_before_export": 0,
+      "anchors_checked": 1,
+      "anchors_matched": 1,
+      "chain": {
+        "anchored_through_sequence": 1,
+        "checked_anchors": 1,
+        "failures": [],
+        "first_anchor_sequence": 1,
+        "last_anchor_sequence": 1,
+        "verified": true
+      },
+      "linked_start": true,
+      "unanchored_entries": 24
+    },
+    "checked_entries": 25,
+    "decisions": 10,
+    "executions": 6,
+    "failures": [],
+    "verified": true
   },
   "health_liveness": {
     "status": "ok"

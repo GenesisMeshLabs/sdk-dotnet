@@ -7,7 +7,10 @@ using Xunit;
 
 namespace GenesisMesh.Tests;
 
-/// <summary>The evidence store client (1.9.0): submission, search, resource heads, resource states and executor keys.</summary>
+/// <summary>
+/// The evidence store client (1.9.0): submission, search, resource heads, resource states, executor keys, and the store's
+/// status, verification, histories, export and retention.
+/// </summary>
 public class EvidenceStoreTests
 {
     // Records the Python reference signed (see ExecutionTests): two on one resource, one without a resource.
@@ -316,5 +319,315 @@ public class EvidenceStoreTests
         Assert.False(body.ContainsKey("role"));
         var missing = gm.EvidenceStore.RegisterExecutorKey(null!);
         await Assert.ThrowsAsync<ArgumentNullException>(() => missing);
+    }
+
+    // ── Status, verification and histories (1.9.0) ───────────────────────────
+
+    private static readonly Lazy<JsonObject> Reference = new(() => JsonNode.Parse(File.ReadAllText(
+        Path.Combine(AppContext.BaseDirectory, "testdata", "reference", "python-vectors.json")))!.AsObject());
+
+    /// <summary>The retention checkpoint the Python reference signed.</summary>
+    private static string Checkpoint() => Reference.Value["checkpoint"]!.ToJsonString();
+
+    private static HttpResponseMessage Error(int status, string code) =>
+        Json(status, new JsonObject { ["error"] = new JsonObject { ["code"] = code, ["message"] = "refused" } }.ToJsonString());
+
+    private static string Event(long sequence, string kind, string payload) =>
+        $$"""{"schema":"gm.evidence.event","schema_version":1,"entry":{{Entry(sequence, kind)}},"entry_digest":"aa","payload":{{payload}}}""";
+
+    private const string Verified = """{"verified":true,"checked_entries":3,"decisions":1,"executions":2,"failures":[]}""";
+
+    [Fact]
+    public async Task Status_ReadsTheStoresPositionAndCounts()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Json(200, """
+            {"evidence_store":"on","entries":5,"last_store_sequence":5,"rejections":1,"active_executor_keys":2,
+            "retention_checkpoint":null,"latest_anchor":{"anchor_sequence":1,"store_sequence":4,"anchored_at":"2026-10-31T08:00:00+00:00"},
+            "unanchored_entries":1,"unjudged_records":0,"policy_history_started":null,"registry_healthy":false,
+            "registry_problems":["the policy history has not started"],"evidence_remediation":"on",
+            "remediation":{"due":1,"review_pending":0},"evidence_grants":"on","grants_issued":2,"grants_active":1,
+            "grants_revoked":1,"grant_uses":3}
+            """));
+        var status = await gm.EvidenceStore.Status();
+        Assert.Equal(("on", 5L, 5L, 1L, 2L, (long?)null), (status.EvidenceStore, status.Entries, status.LastStoreSequence,
+            status.Rejections, status.ActiveExecutorKeys, status.RetentionCheckpoint));
+        Assert.Equal((1L, 4L, 1L), (status.LatestAnchor!.AnchorSequence, status.LatestAnchor.StoreSequence, status.UnanchoredEntries));
+        Assert.Equal((false, "the policy history has not started"), (status.RegistryHealthy, Assert.Single(status.RegistryProblems!)));
+        Assert.Equal(("on", 1L), (status.EvidenceRemediation, status.Remediation!["due"]));
+        Assert.Equal(("on", 2L, 1L, 1L, 3L), (status.EvidenceGrants, status.GrantsIssued, status.GrantsActive, status.GrantsRevoked, status.GrantUses));
+        Assert.Equal(("GET", "/admin/evidence/status", true), (sent[0].Method, sent[0].Path, sent[0].Admin));
+    }
+
+    [Fact]
+    public async Task Status_WithTheStoreOff_LeavesTheRestNull()
+    {
+        using var gm = Client([], _ => Json(200, """{"evidence_store":"off","retention_checkpoint":null}"""));
+        var status = await gm.EvidenceStore.Status();
+        Assert.Equal("off", status.EvidenceStore);
+        Assert.Null(status.Entries);
+        Assert.Null(status.LatestAnchor);
+        Assert.Null(status.EvidenceGrants);
+    }
+
+    [Fact]
+    public async Task Verify_ReadsTheNAsVerification_WithItsAnchors()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Json(200, """
+            {"verified":false,"checked_entries":4,"decisions":1,"executions":1,"observations":2,
+            "failures":[{"store_sequence":null,"reason":"invalid_signature","detail":"retention_checkpoint"},
+                        {"store_sequence":3,"reason":"store_chain_break","detail":""}],
+            "anchors":{"anchors_checked":1,"anchors_matched":1,"anchors_before_export":0,"anchors_after_export":0,
+                       "linked_start":true,"anchored_through_sequence":2,"unanchored_entries":2,
+                       "chain":{"verified":true,"checked_anchors":1,"first_anchor_sequence":1,"last_anchor_sequence":1,
+                                "anchored_through_sequence":2,"failures":[]}},
+            "warnings":[{"store_sequence":4,"reason":"unsigned_field","detail":"x"}]}
+            """));
+        var v = await gm.EvidenceStore.Verify();
+        Assert.Equal((false, 4L, 1L, 1L, 2L, 0L), (v.Verified, v.CheckedEntries, v.Decisions, v.Executions, v.Observations, v.BreakGlass));
+        Assert.Equal(new (long?, string)[] { (null, "invalid_signature"), (3, "store_chain_break") },
+            v.Failures.Select(f => (f.StoreSequence, f.Reason)));
+        Assert.Equal((true, 2L, 2L), (v.Anchors!.LinkedStart, v.Anchors.AnchoredThroughSequence, v.Anchors.UnanchoredEntries));
+        Assert.Equal((true, 1L, 2L), (v.Anchors.Chain!.Verified, v.Anchors.Chain.CheckedAnchors, v.Anchors.Chain.AnchoredThroughSequence));
+        Assert.Equal("unsigned_field", Assert.Single(v.Warnings!).Reason);
+        Assert.Equal(("GET", "/admin/evidence/verify", true), (sent[0].Method, sent[0].Path, sent[0].Admin));
+
+        // Written back as the NA sends it: counts of 0 left out, a null position kept.
+        var again = JsonNode.Parse(JsonSerializer.Serialize(v, Auth.SerializerOptions))!.AsObject();
+        Assert.False(again.ContainsKey("break_glass"));
+        Assert.Equal(2, (long)again["observations"]!);
+        Assert.True(again["failures"]![0]!.AsObject().ContainsKey("store_sequence"));
+    }
+
+    [Fact]
+    public async Task ResourceHistory_KeepsTheResourcePath_AndReadsTheVerification()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Json(200,
+            $$"""{"resource_id":"kv:vault/secret","truncated":false,"entries":[{{Event(2, "execution", First)}}],"verification":{{Verified}}}"""));
+        var history = await gm.EvidenceStore.ResourceHistory("kv:vault/secret");
+        Assert.Equal(("kv:vault/secret", false, 2L, true), (history.ResourceId, history.Truncated,
+            Assert.Single(history.Entries).Entry.StoreSequence, history.Verification.Verified));
+        Assert.Equal(("GET", "/admin/evidence/resources/kv:vault/secret", true), (sent[0].Method, sent[0].Path, sent[0].Admin));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.ResourceHistory("kv:vault//secret"));
+        Assert.Single(sent);
+        using var none = Client([], _ => Error(404, "resource_not_found"));
+        Assert.Equal("resource_not_found", (await Assert.ThrowsAsync<NotFoundException>(() => none.EvidenceStore.ResourceHistory("kv:x"))).Code);
+    }
+
+    [Fact]
+    public async Task VendorHistory_SendsTheVendorAsOneSegment()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Json(200, $$"""{"vendor_id":"vendor-1","truncated":true,"entries":[],"verification":{{Verified}}}"""));
+        var history = await gm.EvidenceStore.VendorHistory("vendor-1");
+        Assert.Equal(("vendor-1", true), (history.VendorId, history.Truncated));
+        Assert.Equal(("GET", "/admin/evidence/vendors/vendor-1"), (sent[0].Method, sent[0].Path));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.VendorHistory("vendor/1"));
+        await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.VendorHistory("vendor%2F1"));
+        Assert.Single(sent);
+        using var none = Client([], _ => Error(404, "vendor_not_found"));
+        Assert.Equal("vendor_not_found", (await Assert.ThrowsAsync<NotFoundException>(() => none.EvidenceStore.VendorHistory("v"))).Code);
+    }
+
+    // ── Export (1.9.0) ───────────────────────────────────────────────────────
+
+    private static string Line(long sequence) => Event(sequence, "execution", First);
+
+    private static HttpResponseMessage Lines(params long[] sequences) =>
+        new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(string.Concat(sequences.Select(s => Line(s) + "\n")), Encoding.UTF8, "application/x-ndjson"),
+        };
+
+    [Fact]
+    public async Task ExportText_SendsThePage_AndReturnsTheLinesAsSent()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Lines(5, 6));
+        var text = await gm.EvidenceStore.ExportText(new EvidenceExportParams { SinceSequence = 4, Limit = 2 });
+        Assert.Equal(Line(5) + "\n" + Line(6) + "\n", text);
+        Assert.Equal(("GET", "/admin/evidence/export?since_sequence=4&limit=2", true), (sent[0].Method, sent[0].Path, sent[0].Admin));
+        await gm.EvidenceStore.ExportText();
+        Assert.Equal("/admin/evidence/export", sent[1].Path);
+    }
+
+    [Fact]
+    public async Task Export_ParsesTheLines()
+    {
+        using var gm = Client([], _ => Lines(5, 6));
+        var events = await gm.EvidenceStore.Export();
+        Assert.Equal([5L, 6L], events.Select(e => e.Entry.StoreSequence));
+        Assert.Equal("dec-1", Record(events[0].Payload.GetRawText()).DecisionId);
+    }
+
+    private static long Since(HttpRequestMessage req) =>
+        long.Parse(System.Web.HttpUtility.ParseQueryString(req.RequestUri!.Query)["since_sequence"]!, System.Globalization.CultureInfo.InvariantCulture);
+
+    [Fact]
+    public async Task ExportAll_FollowsThePages_UntilAShortOne()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, req => Since(req) switch
+        {
+            0 => Lines(1, 2),
+            2 => Lines(3, 4),
+            _ => Lines(5),
+        });
+        var sequences = new List<long>();
+        await foreach (var e in gm.EvidenceStore.ExportAll(pageSize: 2)) sequences.Add(e.Entry.StoreSequence);
+        Assert.Equal([1L, 2L, 3L, 4L, 5L], sequences);
+        Assert.Equal(["since_sequence=0&limit=2", "since_sequence=2&limit=2", "since_sequence=4&limit=2"],
+            sent.Select(s => s.Path.Split('?')[1]));
+    }
+
+    [Fact]
+    public async Task ExportAll_StopsAtAnEmptyPage_AfterAFullOne()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, req => Since(req) == 7 ? Lines(8, 9) : Lines());
+        var sequences = new List<long>();
+        await foreach (var e in gm.EvidenceStore.ExportAll(7, 2)) sequences.Add(e.Entry.StoreSequence);
+        Assert.Equal([8L, 9L], sequences);
+        Assert.Equal(2, sent.Count);
+    }
+
+    [Theory]
+    [InlineData(new long[] { 4 })]
+    [InlineData(new long[] { 5, 5 })]
+    [InlineData(new long[] { 6, 5 })]
+    public async Task ExportAll_RefusesAnExportThatDoesNotAdvance(long[] sequences)
+    {
+        using var gm = Client([], _ => Lines(sequences));
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var _ in gm.EvidenceStore.ExportAll(4)) { }
+        });
+    }
+
+    [Fact]
+    public void ExportAll_RefusesACursorOrPageSizeOutOfRange_BeforeSending()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Lines());
+        Assert.Throws<ArgumentOutOfRangeException>(() => gm.EvidenceStore.ExportAll(-1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => gm.EvidenceStore.ExportAll(pageSize: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => gm.EvidenceStore.ExportAll(pageSize: 1001));
+        Assert.Empty(sent);
+    }
+
+    // ── Executor keys and retention (1.9.0) ──────────────────────────────────
+
+    [Fact]
+    public async Task ListExecutorKeys_ReadsRetiredKeysToo()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Json(200, """
+            {"executor_keys":[
+              {"key_id":"k1","public_key":"O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=","executor_sovereign_id":"ex",
+               "registered_at":"2026-10-31T08:00:00+00:00","retired_at":"2026-10-31T09:00:00+00:00","role":"executor","resource_prefix":null},
+              {"key_id":"k2","public_key":"O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=","executor_sovereign_id":"ex",
+               "registered_at":"2026-10-31T09:00:00+00:00","retired_at":null,"role":"observer","resource_prefix":"partner:"}]}
+            """));
+        var keys = await gm.EvidenceStore.ListExecutorKeys();
+        Assert.Equal(new (string, string?, string?, string?)[]
+            {
+                ("k1", "2026-10-31T09:00:00+00:00", "executor", null),
+                ("k2", null, "observer", "partner:"),
+            }, keys.Select(k => (k.KeyId, k.RetiredAt, k.Role, k.ResourcePrefix)));
+        Assert.Equal(("GET", "/admin/evidence/executor-keys", true), (sent[0].Method, sent[0].Path, sent[0].Admin));
+    }
+
+    [Fact]
+    public async Task RetireExecutorKey_PostsToTheKeysRoute()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Json(200, """{"key_id":"portal-executor","active":false}"""));
+        var state = await gm.EvidenceStore.RetireExecutorKey("portal-executor");
+        Assert.Equal(("portal-executor", false, (string?)null), (state.KeyId, state.Active, state.ExecutorSovereignId));
+        Assert.Equal(("POST", "/admin/evidence/executor-keys/portal-executor/retire", "{}", true),
+            (sent[0].Method, sent[0].Path, sent[0].Body, sent[0].Admin));
+        await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.RetireExecutorKey("../ops"));
+        Assert.Single(sent);
+
+        using var retired = Client([], _ => Error(409, "executor_key_retired"));
+        Assert.Equal("executor_key_retired", (await Assert.ThrowsAsync<ConflictException>(() => retired.EvidenceStore.RetireExecutorKey("k"))).Code);
+        using var unknown = Client([], _ => Error(404, "executor_key_not_found"));
+        Assert.Equal("executor_key_not_found", (await Assert.ThrowsAsync<NotFoundException>(() => unknown.EvidenceStore.RetireExecutorKey("k"))).Code);
+    }
+
+    [Theory]
+    [InlineData(30, null, """{"older_than_days":30}""")]
+    [InlineData(null, 12L, """{"through_sequence":12}""")]
+    [InlineData(30, 12L, """{"older_than_days":30,"through_sequence":12}""")]
+    public async Task ApplyRetention_SendsWhatIsGiven(int? days, long? through, string body)
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Json(200, $$"""{"removed_count":3,"checkpoint":{{Checkpoint()}}}"""));
+        var result = await gm.EvidenceStore.ApplyRetention(days, through);
+        Assert.Equal((3L, 3L, (RetentionHeldBack?)null), (result.RemovedCount, result.Checkpoint!.RemovedThroughSequence, result.HeldBack));
+        Assert.Equal(("POST", "/admin/evidence/retention/apply", true), (sent[0].Method, sent[0].Path, sent[0].Admin));
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(body), JsonNode.Parse(sent[0].Body!)));
+    }
+
+    [Fact]
+    public async Task ApplyRetention_RefusesNothingOrLessThanOne_BeforeSending()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Json(200, """{"removed_count":0,"checkpoint":null}"""));
+        await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.ApplyRetention(null));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => gm.EvidenceStore.ApplyRetention(0));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => gm.EvidenceStore.ApplyRetention(null, 0));
+        Assert.Empty(sent);
+    }
+
+    [Fact]
+    public async Task ApplyRetention_ReadsWhatHeldItBack()
+    {
+        using var gm = Client([], _ => Json(200, """
+            {"removed_count":0,"checkpoint":null,"held_back":{"reason":"not_archived","archived_through_sequence":0,
+             "message":"retention stops after entry 0, the last one an archive covers"}}
+            """));
+        var result = await gm.EvidenceStore.ApplyRetention(30);
+        Assert.Equal((0L, (RetentionCheckpoint?)null), (result.RemovedCount, result.Checkpoint));
+        Assert.Equal(("not_archived", (long?)0, (long?)null), (result.HeldBack!.Reason, result.HeldBack.ArchivedThroughSequence, result.HeldBack.StoreSequence));
+
+        using var unjudged = Client([], _ => Json(200, """
+            {"removed_count":0,"checkpoint":null,"held_back":{"reason":"unjudged_records","store_sequence":4,
+             "entry_kind":"observation","record_id":"obs-1","unjudged_records":2,"message":"judge them"}}
+            """));
+        var held = (await unjudged.EvidenceStore.ApplyRetention(30)).HeldBack!;
+        Assert.Equal((4L, "observation", "obs-1", 2L), (held.StoreSequence, held.EntryKind, held.RecordId, held.UnjudgedRecords));
+    }
+
+    [Fact]
+    public void ARetentionCheckpointKeepsItsSignedForm()
+    {
+        // The checkpoint the reference signed, read and written back: previous_checkpoint_id null is kept, the
+        // absent observation_heads stays absent, and (v1.3.0) a present one is kept.
+        var signed = JsonNode.Parse(Checkpoint())!.AsObject();
+        var typed = JsonSerializer.Deserialize<RetentionCheckpoint>(signed.ToJsonString(), Auth.SerializerOptions)!;
+        Assert.Equal((3L, 1L), (typed.RemovedThroughSequence, typed.ResourceHeads.Single().Value.ResourceSequence));
+        Assert.True(JsonNode.DeepEquals(signed, JsonNode.Parse(JsonSerializer.Serialize(typed, Auth.SerializerOptions))));
+        signed["observation_heads"] = new JsonObject { ["kv:vault/a"] = 2 };
+        typed = JsonSerializer.Deserialize<RetentionCheckpoint>(signed.ToJsonString(), Auth.SerializerOptions)!;
+        Assert.True(JsonNode.DeepEquals(signed, JsonNode.Parse(JsonSerializer.Serialize(typed, Auth.SerializerOptions))));
+    }
+
+    [Fact]
+    public async Task LatestCheckpoint_IsTheLastCheckpointEntry_OrNull()
+    {
+        var later = JsonNode.Parse(Checkpoint())!.AsObject();
+        later["checkpoint_id"] = "later";
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Json(200,
+            Page(null, (3, "retention_checkpoint", Checkpoint()), (9, "retention_checkpoint", later.ToJsonString()))));
+        Assert.Equal("later", (await gm.EvidenceStore.LatestCheckpoint())!.CheckpointId);
+        Assert.Contains("entry_kind=retention_checkpoint", sent[0].Path);
+        using var none = Client([], _ => Json(200, Page(null)));
+        Assert.Null(await none.EvidenceStore.LatestCheckpoint());
     }
 }
