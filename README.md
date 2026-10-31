@@ -15,17 +15,18 @@ boundary policies, trust evidence, attestations, selective disclosure,
 consensus and data usage), offline verification of their signed records, and
 signed admin calls to any other route. It is growing to the TypeScript SDK's
 governed lifecycle (decision 0008 of the core). From 1.9 it records and
-submits execution evidence, reads where each resource's chain ends (see
-[EvidenceStore](#evidencestore)), and runs governed actions with the evidence
+submits execution evidence, reads where each resource's chain ends, and reads
+and administers the store: its status, the NA's verification of it, resource
+and vendor histories, the export, executor keys and retention (see
+[EvidenceStore](#evidencestore)). It runs governed actions with the evidence
 outbox and reconciliation (see [Governed actions](#governed-actions)). Not yet
-here: the evidence store's history and export, its administration beyond
-registering executor keys (listing and retiring them, retention), none of the
-1.3.0 changes outside the controlled path (observations, break-glass records,
-the record outbox), and none of the 1.4.0 remediation and review APIs
-(remediation records, the due queue, reviews, urgent actions). Those live in the
-[TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript) and the
-[Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust). The embedded field
-registry lists their records, but this SDK does not verify evidence exports.
+here: verifying an evidence export offline (this SDK parses one), store anchors,
+none of the 1.3.0 changes outside the controlled path (observations,
+break-glass records, the record outbox), and none of the 1.4.0 remediation and
+review APIs (remediation records, the due queue, reviews, urgent actions).
+Those live in the [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript)
+and the [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust). The embedded
+field registry lists their records.
 A boundary policy with the 1.4.0 sections (`remediation`, `review_required`,
 `emergency`) verifies here like any other.
 
@@ -356,6 +357,55 @@ var submission = await client.EvidenceStore.Submit(record);            // "recor
 `Governance.GovernedAction` does all of this in one call, and with an
 outbox keeps the record until the NA admits it (see
 [Governed actions](#governed-actions)).
+
+#### Reading and administering the store
+
+From 1.9 an operator reads the whole store and administers it. Reads need a
+read-tier key or above. Retiring a key and applying retention need a
+privileged one: a standard key gets 403 `insufficient_operator_tier`.
+
+```csharp
+var status = await client.EvidenceStore.Status();     // entries, last position, anchoring, retention
+var check = await client.EvidenceStore.Verify();      // the NA verifies every entry, chain and signature
+// check.Verified, check.Failures: StoreSequence, Reason, Detail
+
+var history = await client.EvidenceStore.ResourceHistory("partner:org-1/app-orders/secret");
+// history.Entries (decisions, proofs, records), history.Verification, history.Truncated
+var vendor = await client.EvidenceStore.VendorHistory("partner-org-1");
+
+// An incremental pull for a SIEM pipeline: every entry after the last position kept.
+await foreach (var e in client.EvidenceStore.ExportAll(sinceSequence: lastKept))
+    Keep(e);                                          // e.Entry.StoreSequence is the next cursor
+string page = await client.EvidenceStore.ExportText(new EvidenceExportParams { SinceSequence = lastKept, Limit = 500 });
+var events = OfflineVerifier.ParseExportLines(page);  // gm.evidence.event lines, payloads as received
+
+var keys = await client.EvidenceStore.ListExecutorKeys();        // retired keys included
+await admin.EvidenceStore.RetireExecutorKey("portal-executor");
+var retention = await admin.EvidenceStore.ApplyRetention(olderThanDays: 365);
+// retention.RemovedCount, retention.Checkpoint, retention.HeldBack (why it stopped short)
+var checkpoint = await client.EvidenceStore.LatestCheckpoint();  // null before the first retention
+```
+
+- `Verify`, and the verification each history comes with, is the NA's own. A
+  history is not a run of the store, so its store links are checked only
+  between adjacent positions. It holds at most the oldest 10,000 records
+  (`Truncated`); read the rest through the export. A resource whose records
+  retention removed has no history (`resource_not_found`), but `ResourceHead`
+  still reads where its chain ends.
+- `ExportAll` follows the export's pages (1 to 1000 entries each) and refuses
+  an export whose positions do not advance. `ParseExportLines` refuses a line
+  that is not strict JSON (`StrictJsonException`), or not an event of schema
+  version 1 with exactly the reference's envelope (`JsonException`, with the
+  line number). Verifying an export offline is not in this SDK yet.
+- A retired key still verifies the records it signed and signs no new one
+  (`evidence_executor_key_retired`). Its ID cannot be registered again, and
+  retiring it again is `executor_key_retired` (`ConflictException`).
+- `ApplyRetention` removes a prefix of the store behind a checkpoint the NA
+  signs, so the rest still verifies. The prefix ends before the first entry
+  recorded within the days given, under a decision still valid, or not judged
+  yet. From NA 1.5.0 it also ends at `throughSequence`, and at what archive
+  records cover while the NA requires archives (its default). `HeldBack` says
+  what stopped it short.
 
 ### Governed actions
 
@@ -700,6 +750,7 @@ var v = OfflineVerifier.VerifyDataAccessIntent(intentJson, licensePolicyJson, ne
 bool executed = OfflineVerifier.VerifyExecutionSignature(evidenceJson, executorPublicKey);
 bool justified = OfflineVerifier.VerifyJustificationSignature(evaluation.JustificationProof.GetRawText(), history);
 string digest = OfflineVerifier.ExecutionDigest(evidenceJson);   // what the next record links to
+var events = OfflineVerifier.ParseExportLines(exportText);       // gm.evidence.event JSON Lines
 ```
 
 An accepted DENY has `Accepted` true and `Authorized` false: the decision

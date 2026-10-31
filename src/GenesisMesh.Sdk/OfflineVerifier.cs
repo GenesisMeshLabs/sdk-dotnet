@@ -433,6 +433,156 @@ public static partial class OfflineVerifier
             && SignedAsReceived(model, record, keys(record));
     }
 
+    // ── evidence exports ───────────────────────────────────────────────────
+
+    /// <summary>The fields of an export event; every one is sent.</summary>
+    private static readonly string[] EventFields = ["schema", "schema_version", "entry", "entry_digest", "payload"];
+
+    /// <summary>The store envelope's fields that every entry carries, string or null.</summary>
+    private static readonly string[] EntryNullableStrings =
+    [
+        "prev_entry_digest", "decision_id", "context_id", "vendor_id", "attestation_id", "capability", "outcome",
+        "evidence_id", "executor_sovereign_id", "resource_id", "resource_action",
+    ];
+
+    /// <summary>v1.3.0: the envelope's fields left out when absent (a null reads as absent).</summary>
+    private static readonly string[] EntryOptionalStrings = ["record_id", "subject_id", "matched_evidence_id"];
+
+    private static readonly HashSet<string> EntryFields = new(
+        ["store_sequence", "entry_kind", "recorded_at", "payload_digest", "exec_sequence_no", "resource_sequence",
+         "observation_sequence", .. EntryNullableStrings, .. EntryOptionalStrings], StringComparer.Ordinal);
+
+    /// <summary>
+    /// Parses <c>gm.evidence.event</c> JSON Lines, such as an export (<see cref="EvidenceStoreClient.ExportText"/>) or a
+    /// file a SIEM pipeline kept. Blank lines are skipped. Each line must be strict JSON and an event of schema version 1
+    /// with exactly the envelope fields the reference writes, as every implementation reads it: an integer written as a
+    /// float (<c>7.0</c>), or beyond 2^53 - 1 either way, is refused. The payload is kept as received, for verification.
+    /// </summary>
+    /// <param name="text">The lines, separated by <c>\n</c> (a <c>\r</c> before it is ignored).</param>
+    /// <exception cref="StrictJsonException">A line is not strict JSON.</exception>
+    /// <exception cref="JsonException">A line is not such an event; the message gives its line number, from 1.</exception>
+    public static IReadOnlyList<EvidenceEvent> ParseExportLines(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return ParseExportLines(text.Split('\n'));
+    }
+
+    /// <summary>As <see cref="ParseExportLines(string)"/>, one line at a time.</summary>
+    /// <param name="lines">The lines.</param>
+    /// <exception cref="StrictJsonException">A line is not strict JSON.</exception>
+    /// <exception cref="JsonException">A line is not such an event; the message gives its line number, from 1.</exception>
+    public static IReadOnlyList<EvidenceEvent> ParseExportLines(IEnumerable<string> lines)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        var events = new List<EvidenceEvent>();
+        var number = 0;
+        foreach (var raw in lines)
+        {
+            number++;
+            var line = raw.Trim(' ', '\t', '\r', '\n');
+            if (line.Length == 0) continue;
+            using var doc = StrictJsonReader.Parse(line);
+            if (!IsEvent(doc.RootElement))
+                throw new JsonException($"genesismesh: line {number} is not a gm.evidence.event of schema version 1");
+            events.Add(doc.RootElement.Deserialize<EvidenceEvent>()!);
+        }
+        return events;
+    }
+
+    /// <summary>An export event in the shape the reference writes (TypeScript <c>validEvent</c>).</summary>
+    private static bool IsEvent(JsonElement e) =>
+        e.ValueKind == JsonValueKind.Object
+        && e.EnumerateObject().All(p => EventFields.Contains(p.Name))
+        && EventFields.All(f => e.TryGetProperty(f, out _))
+        && Str(e, "schema") == "gm.evidence.event"
+        && Integer(e.GetProperty("schema_version")) == 1
+        && IsEntry(e.GetProperty("entry"))
+        && e.GetProperty("entry_digest").ValueKind == JsonValueKind.String
+        && e.GetProperty("payload").ValueKind == JsonValueKind.Object;
+
+    private static bool IsEntry(JsonElement e)
+    {
+        if (e.ValueKind != JsonValueKind.Object || e.EnumerateObject().Any(p => !EntryFields.Contains(p.Name))) return false;
+        bool Present(string name, out JsonElement value) => e.TryGetProperty(name, out value);
+        bool NullOr(string name, JsonValueKind kind) =>
+            Present(name, out var v) && (v.ValueKind == JsonValueKind.Null || v.ValueKind == kind);
+        bool NullOrInteger(string name, long min) =>
+            Present(name, out var v) && (v.ValueKind == JsonValueKind.Null || Integer(v) >= min);
+        return Present("store_sequence", out var sequence) && Integer(sequence) >= 1
+            && Present("entry_kind", out var kind) && kind.ValueKind == JsonValueKind.String
+            && Present("recorded_at", out var at) && at.ValueKind == JsonValueKind.String && IsTimestamp(at.GetString()!)
+            && Present("payload_digest", out var digest) && digest.ValueKind == JsonValueKind.String
+            && EntryNullableStrings.All(f => NullOr(f, JsonValueKind.String))
+            && NullOrInteger("exec_sequence_no", long.MinValue) && NullOrInteger("resource_sequence", long.MinValue)
+            && EntryOptionalStrings.All(f => !Present(f, out _) || NullOr(f, JsonValueKind.String))
+            && (!Present("observation_sequence", out _) || NullOrInteger("observation_sequence", 1));
+    }
+
+    /// <summary>The largest integer every implementation reads exactly (JavaScript's safe integers).</summary>
+    private const long MaxSafeInteger = (1L << 53) - 1;
+
+    /// <summary>The value of an integer written as one (not <c>7.0</c> or <c>7e0</c>) and within 2^53 - 1, or null.</summary>
+    private static long? Integer(JsonElement value) =>
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var n) && n is >= -MaxSafeInteger and <= MaxSafeInteger
+            ? n
+            : null;
+
+    /// <summary>
+    /// An ISO 8601 timestamp as the reference reads one: <c>YYYY-MM-DDTHH:MM:SS</c> with ASCII digits, up to six fraction
+    /// digits, and <c>Z</c>, an offset <c>+HH:MM</c> under 24 hours, or none (UTC); a valid date and time.
+    /// </summary>
+    private static bool IsTimestamp(string value)
+    {
+        var at = 0;
+        int Number(int digits)
+        {
+            if (at + digits > value.Length) return -1;
+            var n = 0;
+            for (var end = at + digits; at < end; at++)
+            {
+                if (value[at] is < '0' or > '9') return -1;
+                n = n * 10 + value[at] - '0';
+            }
+            return n;
+        }
+        bool Next(char c)
+        {
+            if (at >= value.Length || value[at] != c) return false;
+            at++;
+            return true;
+        }
+        var year = Number(4);
+        var month = Next('-') ? Number(2) : -1;
+        var day = Next('-') ? Number(2) : -1;
+        var hour = Next('T') ? Number(2) : -1;
+        var minute = Next(':') ? Number(2) : -1;
+        var second = Next(':') ? Number(2) : -1;
+        if (year < 1 || month is < 1 or > 12 || day < 1 || day > DateTime.DaysInMonth(year, month)
+            || hour is < 0 or > 23 || minute is < 0 or > 59 || second is < 0 or > 59)
+            return false;
+        if (Next('.'))
+        {
+            var digits = 0;
+            while (at < value.Length && value[at] is >= '0' and <= '9' && digits <= 6)
+            {
+                at++;
+                digits++;
+            }
+            if (digits is 0 or > 6) return false;
+        }
+        if (Next('+') || Next('-'))
+        {
+            var offsetHour = Number(2);
+            var offsetMinute = Next(':') ? Number(2) : -1;
+            if (offsetHour is < 0 or > 23 || offsetMinute is < 0 or > 59) return false;
+        }
+        else
+        {
+            Next('Z');
+        }
+        return at == value.Length;
+    }
+
     // ── data usage ─────────────────────────────────────────────────────────
 
     /// <summary>True when the licensor signed the DataLicensePolicy.</summary>
