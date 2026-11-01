@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Net;
 using System.Text;
 using GenesisMesh;
@@ -86,11 +85,14 @@ public class TransportConcurrencyTests
     {
         var hosts = new Hosts(_ => "hang");
         using var gm = Client(hosts, timeoutMs: 300);
-        var clock = Stopwatch.StartNew();
-        var calls = Enumerable.Range(0, 8).Select(_ => Task.Run(() => gm.Attestation.Issue(Attestation()))).ToList();
-        foreach (var call in calls) await Assert.ThrowsAsync<NetworkException>(() => call);
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(3), $"took {clock.Elapsed}");
-        Assert.InRange(hosts.Calls.Count(c => c.EndsWith("/sovereign.json", StringComparison.Ordinal)), 2, 4);
+        // Started together, all eight wait for the first lookup; each would make its own if the lookup were not shared.
+        var calls = Enumerable.Range(0, 8).Select(_ => gm.Attestation.Issue(Attestation())).ToList();
+        foreach (var call in calls) await Assert.ThrowsAsync<NetworkException>(() => call.WaitAsync(TimeSpan.FromSeconds(30)));
+        // One lookup at each instance, in turn; a request that starts or resumes after the second failed may start a third
+        // or a fourth.
+        var lookups = hosts.Calls.Where(c => c.EndsWith("/sovereign.json", StringComparison.Ordinal)).ToList();
+        Assert.InRange(lookups.Count, 2, 4);
+        Assert.Equal(["na-a/sovereign.json", "na-b/sovereign.json"], lookups.Take(2));
         Assert.DoesNotContain(hosts.Calls, c => c.EndsWith("/admin/attestations", StringComparison.Ordinal));
     }
 }
