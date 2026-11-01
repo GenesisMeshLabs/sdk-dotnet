@@ -26,7 +26,7 @@ It signs observations and break-glass records, the changes made outside the
 governed path, submits and judges them, keeps them in a record outbox until the
 NA admits them, and reads each resource's changes (see
 [Changes outside the governed path](#changes-outside-the-governed-path)).
-Not yet here: verifying the store's 1.3.0 and later entry kinds in an export,
+Not yet here: verifying the store's 1.4.0 and later entry kinds in an export,
 store anchors, and none of the 1.4.0 remediation and review APIs (remediation
 records, the due queue, reviews, urgent actions).
 Those live in the [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript)
@@ -1080,7 +1080,7 @@ bool kept = OfflineVerifier.VerifyRetentionCheckpoint(checkpointJson, [naKey]);
   (remediation, reviews, key successions, archives, grants) fail as
   `unknown_entry_kind`; their envelopes still chain. Verify a store holding
   them with the TypeScript or Rust SDK, or `genesis-mesh audit verify`.
-  Anchors are not checked.
+  Anchors are not checked, nor where the store placed an executor key.
 - For an export that starts after a retention, pass `Checkpoint`, the
   NA-signed checkpoint as received: the run continues from its last removed
   entry, and each resource and observation chain from its head.

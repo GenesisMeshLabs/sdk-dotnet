@@ -7,8 +7,8 @@ namespace GenesisMesh;
 public sealed class EvidenceVerifyOptions
 {
     /// <summary>
-    /// The NA's keys (base64 Ed25519), valid at every time: they sign decisions, justification proofs and retention
-    /// checkpoints. Or give <see cref="KeyHistory"/>.
+    /// The NA's keys (base64 Ed25519), valid at every time: they sign decisions, justification proofs, retention
+    /// checkpoints, and judgement, quarantine and registry records. Or give <see cref="KeyHistory"/>.
     /// </summary>
     public IReadOnlyList<string> NAPublicKeys { get; init; } = [];
 
@@ -22,8 +22,8 @@ public sealed class EvidenceVerifyOptions
     public NAKeyHistory? KeyHistory { get; init; }
 
     /// <summary>
-    /// The executor keys records are signed with, retired ones included (<see cref="EvidenceStoreClient.ListExecutorKeys"/>):
-    /// a retired key still verifies the records it signed.
+    /// The executor and observer keys records are signed with, retired ones included
+    /// (<see cref="EvidenceStoreClient.ListExecutorKeys"/>): a retired key still verifies the records it signed.
     /// </summary>
     public IReadOnlyList<ExecutorKeyRecord> ExecutorKeys { get; init; } = [];
 
@@ -38,7 +38,7 @@ public sealed class EvidenceVerifyOptions
 
     /// <summary>
     /// The retention checkpoint JSON as received, for a run that starts after the entries it removed: the run's first
-    /// entry continues from its last removed entry, and each resource chain from its head. It must be a checkpoint signed
+    /// entry continues from its last removed entry, and each resource and observation chain from its head. It must be a checkpoint signed
     /// by the NA (with <see cref="KeyHistory"/>, by the key valid at its <c>created_at</c>; <c>invalid_signature</c>), with
     /// no field this SDK does not know (<c>unknown_field</c>); otherwise nothing of the run is checked.
     /// </summary>
@@ -49,7 +49,7 @@ public static partial class OfflineVerifier
 {
     /// <summary>
     /// The entry kinds this SDK verifies (1.9.0): those a governed store holds, and the records of changes outside the
-    /// governed path. The store's other kinds (remediation, key successions, archives and grants) fail as
+    /// governed path. The store's other kinds (remediation, reviews, key successions, archives and grants) fail as
     /// <c>unknown_entry_kind</c>, as a kind from a later release does; their envelopes still chain.
     /// </summary>
     internal static readonly string[] VerifiedEntryKinds =
@@ -60,6 +60,9 @@ public static partial class OfflineVerifier
 
     /// <summary>The kinds the NA signs among the records of changes outside the governed path; an observer or executor key signs the others.</summary>
     private static readonly HashSet<string> NASignedOutOfBandKinds = new(StringComparer.Ordinal) { "judgement", "quarantine", "registry" };
+
+    /// <summary>v1.3.0: a kind whose record the store holds exactly as signed: a record of a change outside the governed path.</summary>
+    private static bool IsOutOfBand(string kind) => EnvelopeFields.ContainsKey(kind);
 
     /// <summary>How far before an earlier entry of a run an entry may be recorded, in microseconds (v1.5.0, the reference's tolerance).</summary>
     private const long RecordTimeTolerance = 300_000_000;
@@ -139,6 +142,12 @@ public static partial class OfflineVerifier
     /// fails as <c>unknown_entry_kind</c>; verify such a store with the TypeScript or Rust SDK, or the core's
     /// <c>genesis-mesh audit verify</c>. Anchors are not checked here, nor where the store placed an executor key
     /// (an audit pack's registry records).
+    /// <para>
+    /// A judgement may match a grant use, and execution evidence may rest on a remediation record. With those kinds
+    /// unknown, this SDK reports what it can see, a match it does not hold or nothing, where the TypeScript SDK names the
+    /// later kind's failure; either way the run does not verify. A break-glass record sharing a grant use's ID is not
+    /// named as a duplicate.
+    /// </para>
     /// </remarks>
     /// <param name="events">The entries, in store order.</param>
     /// <param name="options">The keys, and what the run is.</param>
@@ -313,7 +322,10 @@ public static partial class OfflineVerifier
         /// <summary>v1.3.1: judgement subjects are keyed by kind and ID: a break-glass record may share an observation's ID.</summary>
         private static string SubjectKey(string kind, string id) => kind + "\0" + id;
 
-        /// <summary>The registered key that may sign an observation or break-glass record: of its sovereign, with the role its kind needs.</summary>
+        /// <summary>
+        /// The registered key that may sign an observation (an observer key), or execution evidence or a break-glass record
+        /// (an executor key): of the record's sovereign, with the role its kind needs.
+        /// </summary>
         private ExecutorKeyRecord? FittingKey(string kind, JsonElement record)
         {
             var observation = kind == "observation";
@@ -390,7 +402,7 @@ public static partial class OfflineVerifier
                 Warn(seq, "unsigned_field", string.Join(", ", unsignedUnknown));
                 // v1.3.0: the reference stores the records of changes outside the governed path exactly as signed, and
                 // (v1.5.0) a retention checkpoint: a field outside the signature is no part of one.
-                if (kind == "retention_checkpoint" || EnvelopeFields.ContainsKey(kind))
+                if (kind == "retention_checkpoint" || IsOutOfBand(kind))
                 {
                     Fail(seq, "payload_invalid", string.Join(", ", unsignedUnknown));
                     return;
@@ -451,10 +463,11 @@ public static partial class OfflineVerifier
             var signedAsReceived = kind switch
             {
                 "execution" => KeyNamed(payload) is { } key && SignedAsReceived(model, payload, [key.PublicKey]),
-                // The key the signature names, whatever its role: an authentic record with a field this SDK does not
-                // know is refused by name first, as the reference refuses it.
-                "observation" or "break_glass" => KeyNamed(payload) is { } named && OutOfBandSignedBy(payload, [named.PublicKey]),
-                "judgement" or "quarantine" or "registry" => OutOfBandSignedBy(payload, _allNaKeys),
+                // An observation or break-glass record: by the key the signature names, whatever its role, so that an
+                // authentic record with a field this SDK does not know is refused by name first, as the reference refuses it.
+                _ when IsOutOfBand(kind) => NASignedOutOfBandKinds.Contains(kind)
+                    ? OutOfBandSignedBy(payload, _allNaKeys)
+                    : KeyNamed(payload) is { } named && OutOfBandSignedBy(payload, [named.PublicKey]),
                 _ => SignedAsReceived(model, payload, _allNaKeys),
             };
             return signedAsReceived ? (fields, [], payload) : ([], fields, StrictFields.WithoutUnknownFields(model, payload));
@@ -559,6 +572,7 @@ public static partial class OfflineVerifier
                         Quarantine();
                         break;
                     default:
+                        // A registry record: the NA's, as its key history is.
                         NASignature(keys => OutOfBandSignedBy(record, keys), "RegistryRecord");
                         break;
                 }
@@ -647,11 +661,9 @@ public static partial class OfflineVerifier
 
             private void Execution()
             {
-                var key = run.KeyNamed(payload);
                 // v1.3.0: only an executor key signs execution evidence.
-                var fits = key is not null && key.ExecutorSovereignId == Str(payload, "executor_sovereign_id")
-                    && (key.Role ?? "executor") == "executor";
-                Signature(fits && SignedAsReceived("ExecutionEvidence", payload, [key!.PublicKey]), "ExecutionEvidence");
+                var key = run.FittingKey(kind, payload);
+                Signature(key is not null && SignedAsReceived("ExecutionEvidence", payload, [key.PublicKey]), "ExecutionEvidence");
                 Result.Executions++;
                 var decisionId = Str(payload, "decision_id")!;
                 var hasDecision = run._decisions.TryGetValue(decisionId, out var decision);
