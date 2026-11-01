@@ -78,6 +78,15 @@ public sealed class NetworkException : Exception
         ConnectFailed = connectFailed;
     }
 
+    private NetworkException(NetworkException other)
+        : base(other.Message, other.InnerException)
+    {
+        ConnectFailed = other.ConnectFailed;
+    }
+
+    /// <summary>The same failure, as an instance of its own for one more request that waited for it.</summary>
+    internal NetworkException Copy() => new(this);
+
     /// <summary>
     /// True when the request did not reach the NA: the connection could not be made, or the request was not sent.
     /// Such a request can be sent again without being applied twice.
