@@ -65,12 +65,15 @@ public class ReviewFixTests
     public async Task AFailedLookup_IsDropped_EvenWhenEveryWaiterCancelledFirst()
     {
         var lookups = 0;
+        var started = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
         var handler = new AsyncHandler(async (req, ct) =>
         {
             if (req.RequestUri!.AbsolutePath != "/sovereign.json") return Json(201, """{"status":"ok"}""");
             if (Interlocked.Increment(ref lookups) == 1)
             {
-                await Task.Delay(300, CancellationToken.None);
+                started.SetResult();
+                await release.Task.ConfigureAwait(false);
                 throw new HttpRequestException(HttpRequestError.ConnectionError, "connection refused");
             }
             return Json(200, """{"network_authority":{"public_key":"NA-KEY"}}""");
@@ -82,10 +85,16 @@ public class ReviewFixTests
             KeyId = "ops",
             HttpHandler = handler,
         });
-        using (var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50)))
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                gm.Attestation.Issue(new Dictionary<string, object?> { ["subject_id"] = "s" }, cts.Token));
-        await Task.Delay(500);
+        // The only waiter cancels while the lookup runs; the lookup fails after.
+        using (var cts = new CancellationTokenSource())
+        {
+            var cancelled = gm.Attestation.Issue(new Dictionary<string, object?> { ["subject_id"] = "s" }, cts.Token);
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await cts.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        // On a pool thread the lookup's continuations run inline, so it has failed and been dropped when this returns.
+        await Task.Run(release.SetResult);
         await gm.Attestation.Issue(new Dictionary<string, object?> { ["subject_id"] = "s" });
         Assert.Equal(2, lookups);
     }
