@@ -141,6 +141,17 @@ public class ContractTypesTests
         { "attestation_verification", typeof(AttestationVerification) },
         { "recognition_policy", typeof(RecognitionPolicy) },
         { "revocation_feed", typeof(SovereignRevocationFeed) },
+        { "evidence_status_out_of_band", typeof(EvidenceStoreStatus) },
+        { "observation_duplicate", typeof(RecordSubmission) },
+        { "observation_batch", typeof(ObservationBatchResult) },
+        { "observation_batch_refused", typeof(ObservationBatchResult) },
+        { "observation_judgement", typeof(JudgementSubmission) },
+        { "break_glass_submission", typeof(RecordSubmission) },
+        { "resource_changes", typeof(ResourceChanges) },
+        { "resource_changes_quarantine", typeof(ResourceChanges) },
+        { "operator_holders", typeof(OperatorKeyHolder) },
+        { "holder_proposal", typeof(HolderChange) },
+        { "judgement_record", typeof(JudgementRecord) },
     };
 
     // 1.9.0: the objects inside each response too, such as the verification and its anchors in a history.
@@ -203,6 +214,8 @@ public class ContractTypesTests
     // 1.9.0: an attestation as stored, and the revocation feed, read and verified.
     [InlineData("attestation_get", typeof(AttestationRecord))]
     [InlineData("revocation_feed", typeof(SovereignRevocationFeed))]
+    // 1.9.0: a judgement read from the store and verified offline.
+    [InlineData("judgement_record", typeof(JudgementRecord))]
     public void PassedBackRecordsKeepTheirSignedForm(string name, Type model)
     {
         var raw = Response(name);

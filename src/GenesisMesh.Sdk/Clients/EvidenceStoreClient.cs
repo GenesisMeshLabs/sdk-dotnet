@@ -20,6 +20,12 @@ public sealed class EvidenceStoreClient
     /// <summary>The most entries the NA returns in one page.</summary>
     private const int MaxPage = 1000;
 
+    /// <summary>The most observations the NA takes in one batch.</summary>
+    private const int MaxObservationBatch = 100;
+
+    /// <summary>The most changes the NA returns in one page.</summary>
+    private const int MaxChangesPage = 10_000;
+
     /// <summary>Refusals of a record whose predecessor is not stored: final once that predecessor is a dead letter.</summary>
     private static readonly HashSet<string> ChainGaps = new(StringComparer.Ordinal) { "evidence_chain_gap", "resource_chain_gap" };
 
@@ -513,6 +519,224 @@ public sealed class EvidenceStoreClient
         await foreach (var e in Iterate(new EvidenceSearchParams { EntryKind = "retention_checkpoint" }, ct).ConfigureAwait(false))
             latest = e.Payload;
         return latest?.Deserialize<RetentionCheckpoint>();
+    }
+
+    // ── Changes outside the governed path (1.9.0) ───────────────────────────
+    // With the NA's out-of-band records off, these calls are refused with 404 out_of_band_disabled.
+
+    /// <summary>
+    /// Submits one signed observation (<see cref="ObservationRecorder"/>). The observer key's signature authenticates
+    /// it, not operator headers. One source event is one observation: the same record again returns <c>duplicate</c>,
+    /// so it is safe to retry. The NA judges it at admission unless that is turned off
+    /// (<see cref="RecordSubmission.Judgement"/>).
+    /// POST /evidence/observations
+    /// </summary>
+    /// <exception cref="ValidationException">
+    /// The NA refused the record, with its code: for example <c>observation_invalid_signature</c>,
+    /// <c>observation_unknown_key</c>, or <c>observation_out_of_scope</c> for a key of another role or resource prefix.
+    /// An authentic record refused for good is kept as a quarantine entry (<c>details.quarantine_id</c>).
+    /// </exception>
+    /// <exception cref="ConflictException">
+    /// <c>observation_conflict</c>: another record from the same source event, or with the same ID, is stored.
+    /// </exception>
+    public async Task<RecordSubmission> SubmitObservation(ObservationRecord observation, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        return await _t.PublicPostAsync<RecordSubmission>("/evidence/observations",
+            new Dictionary<string, object?> { ["observation"] = observation }, idempotent: true, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Submits up to 100 signed observations, a backlog, in one request. The NA admits them in order of their change
+    /// times, and answers each, by its index in the request: a record it refuses is <c>refused</c> with
+    /// <see cref="ObservationBatchResult.Error"/>, and the others are still admitted. Safe to retry, as one
+    /// observation is.
+    /// POST /evidence/observations/batch
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="observations"/> is empty or holds more than 100: nothing is sent.</exception>
+    /// <exception cref="BadRequestException">The NA could not read the batch (<c>invalid_observation</c>).</exception>
+    public async Task<IReadOnlyList<ObservationBatchResult>> SubmitObservations(
+        IReadOnlyList<ObservationRecord> observations, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(observations);
+        if (observations.Count is 0 or > MaxObservationBatch)
+            throw new ArgumentException($"genesismesh: a batch holds 1 to {MaxObservationBatch} observations", nameof(observations));
+        return (await _t.PublicPostAsync<ObservationBatch>("/evidence/observations/batch",
+            new Dictionary<string, object?> { ["observations"] = observations }, idempotent: true, ct).ConfigureAwait(false)).Results;
+    }
+
+    /// <summary>
+    /// Submits one signed break-glass record (<see cref="ExecutionRecorder.SignBreakGlass"/>). The executor key's
+    /// signature authenticates it. The same record again returns <c>duplicate</c>, so it is safe to retry. The NA
+    /// judges it at admission unless that is turned off.
+    /// POST /evidence/break-glass
+    /// </summary>
+    /// <exception cref="ValidationException">
+    /// The NA refused the record, with its code: for example <c>break_glass_invalid_signature</c>,
+    /// <c>break_glass_unknown_key</c>, <c>break_glass_key_retired</c> or <c>break_glass_out_of_scope</c>. An authentic
+    /// record refused for good is kept as a quarantine entry (<c>details.quarantine_id</c>).
+    /// </exception>
+    /// <exception cref="ConflictException">
+    /// <c>break_glass_conflict</c>: another record with this ID, or an observation or grant use with it, is stored.
+    /// </exception>
+    public async Task<RecordSubmission> SubmitBreakGlass(BreakGlassRecord record, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return await _t.PublicPostAsync<RecordSubmission>("/evidence/break-glass",
+            new Dictionary<string, object?> { ["record"] = record }, idempotent: true, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Judges a stored observation (standard tier). A record is judged once: when it was judged before, the existing
+    /// judgement is returned (<c>existing</c>), so it is safe to retry.
+    /// POST /admin/evidence/observations/&lt;observation_id&gt;/judge
+    /// </summary>
+    /// <exception cref="NotFoundException">No such observation is stored (<c>judgement_subject_not_found</c>).</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="observationId"/> is not one path segment: it is empty, a dot segment, holds '/', '\', '?', '#',
+    /// '%' or a control character, or starts or ends with white space. Nothing is sent.
+    /// </exception>
+    public async Task<JudgementSubmission> JudgeObservation(string observationId, CancellationToken ct = default) =>
+        await _t.AdminPostAsync<JudgementSubmission>(
+            $"/admin/evidence/observations/{Transport.LastPathSegment(observationId, nameof(observationId))}/judge",
+            new Dictionary<string, object?>(), idempotent: true, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Judges a stored break-glass record (standard tier), once: as <see cref="JudgeObservation"/>.
+    /// POST /admin/evidence/break-glass/&lt;break_glass_id&gt;/judge
+    /// </summary>
+    /// <exception cref="NotFoundException">No such record is stored (<c>judgement_subject_not_found</c>).</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="breakGlassId"/> is not one path segment (see <see cref="JudgeObservation"/>): nothing is sent.
+    /// </exception>
+    public async Task<JudgementSubmission> JudgeBreakGlass(string breakGlassId, CancellationToken ct = default) =>
+        await _t.AdminPostAsync<JudgementSubmission>(
+            $"/admin/evidence/break-glass/{Transport.LastPathSegment(breakGlassId, nameof(breakGlassId))}/judge",
+            new Dictionary<string, object?>(), idempotent: true, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// One page of a resource's changes, oldest first, with how each was governed and how it stands (read tier):
+    /// execution evidence, observations, break-glass records and quarantine entries. Pass the page's
+    /// <see cref="GenesisMesh.ResourceChanges.NextAfterSequence"/> as the next <see cref="ResourceChangesParams.AfterSequence"/>,
+    /// or use <see cref="AllResourceChanges"/>.
+    /// GET /admin/evidence/changes/&lt;resource_id&gt;
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="ResourceChangesParams.Limit"/> is not 1 to 10,000, or <see cref="ResourceChangesParams.AfterSequence"/>
+    /// is negative: nothing is sent.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="resourceId"/> cannot be sent as a path (see <see cref="ResourceHead"/>): nothing is sent.
+    /// </exception>
+    public async Task<ResourceChanges> ResourceChanges(string resourceId, ResourceChangesParams? page = null, CancellationToken ct = default)
+    {
+        var path = "/admin/evidence/changes/" + Transport.ResourcePath(resourceId, nameof(resourceId));
+        return await _t.AdminGetAsync<ResourceChanges>(path, ChangesQuery(page?.Limit, page?.AfterSequence), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Every change to a resource, oldest first, following the pages (read tier).</summary>
+    /// <param name="resourceId">The resource.</param>
+    /// <param name="limit">Changes a page, 1 to 10,000; null for the NA's default (1000).</param>
+    /// <param name="ct">Cancels the reading.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="limit"/> is not 1 to 10,000: nothing is sent.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="resourceId"/> cannot be sent as a path (see <see cref="ResourceHead"/>): nothing is sent.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The NA's cursor did not advance, or a page was truncated without a cursor (an NA before 1.4.0, which does not
+    /// page: upgrade it).
+    /// </exception>
+    public IAsyncEnumerable<ResourceChange> AllResourceChanges(string resourceId, int? limit = null, CancellationToken ct = default)
+    {
+        var path = "/admin/evidence/changes/" + Transport.ResourcePath(resourceId, nameof(resourceId));
+        ChangesQuery(limit, null);
+        return ChangesFrom(path, limit, ct);
+    }
+
+    private async IAsyncEnumerable<ResourceChange> ChangesFrom(string path, int? limit, [EnumeratorCancellation] CancellationToken ct)
+    {
+        long? after = null;
+        while (true)
+        {
+            var page = await _t.AdminGetAsync<ResourceChanges>(path, ChangesQuery(limit, after), ct).ConfigureAwait(false);
+            foreach (var change in page.Changes) yield return change;
+            if (page.NextAfterSequence is not { } next)
+            {
+                if (page.Truncated)
+                    throw new InvalidOperationException(
+                        "genesismesh: the resource has more changes than the NA returns; upgrade the NA to page them");
+                yield break;
+            }
+            if (after is { } cursor && next <= cursor)
+                throw new InvalidOperationException("genesismesh: the resource changes cursor did not advance");
+            after = next;
+        }
+    }
+
+    /// <summary>
+    /// The operator keys' holders, as the store records them (read tier). The NA records a key as its own holder until
+    /// a holder change names one, which a second holder approves.
+    /// GET /admin/evidence/operator-holders
+    /// </summary>
+    public async Task<IReadOnlyList<OperatorKeyHolder>> OperatorHolders(CancellationToken ct = default) =>
+        (await _t.AdminGetAsync<OperatorHolderList>("/admin/evidence/operator-holders", null, ct).ConfigureAwait(false)).Holders;
+
+    /// <summary>
+    /// Proposes a new holder for an operator key (privileged): nothing changes until a privileged key of another named
+    /// holder approves it (<see cref="ApproveHolder"/>). Not retried: each call is a new proposal.
+    /// POST /admin/operator-keys/&lt;key_id&gt;/holder
+    /// </summary>
+    /// <param name="keyId">The operator key.</param>
+    /// <param name="holder">Who holds it: 1 to 128 characters.</param>
+    /// <param name="ct">Cancels the request.</param>
+    /// <exception cref="NotFoundException">No such operator key is configured (<c>unknown_operator_key</c>).</exception>
+    /// <exception cref="BadRequestException">The holder is not 1 to 128 characters (<c>invalid_holder</c>).</exception>
+    /// <exception cref="ForbiddenException">The client's key is not privileged (<c>insufficient_operator_tier</c>).</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="keyId"/> is not one path segment (see <see cref="JudgeObservation"/>): nothing is sent.
+    /// </exception>
+    public async Task<HolderChange> ProposeHolder(string keyId, string holder, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(holder);
+        return await _t.AdminPostAsync<HolderChange>(
+            $"/admin/operator-keys/{Transport.LastPathSegment(keyId, nameof(keyId))}/holder",
+            new Dictionary<string, object?> { ["holder"] = holder }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Approves a holder change with a privileged key of a different named holder than the proposer's (privileged).
+    /// The NA records the new holder in the store, in a registry record it signs. Not retried: sent again after a lost
+    /// answer, it would read as <c>holder_change_already_approved</c>.
+    /// POST /admin/operator-keys/holder-changes/&lt;proposal_id&gt;/approve
+    /// </summary>
+    /// <exception cref="NotFoundException">No such proposal (<c>holder_change_not_found</c>).</exception>
+    /// <exception cref="ForbiddenException">The client's key is not privileged (<c>insufficient_operator_tier</c>).</exception>
+    /// <exception cref="ConflictException">
+    /// <c>holder_change_already_approved</c>; <c>holder_change_needs_second_holder</c> for the proposer's own holder;
+    /// <c>holder_change_needs_named_holders</c> when the proposer's or this key's holder was never named; or
+    /// <c>holder_change_proposer_revoked</c> when the proposing key was revoked, removed or re-keyed since.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="proposalId"/> is not one path segment (see <see cref="JudgeObservation"/>): nothing is sent.
+    /// </exception>
+    public async Task<HolderChange> ApproveHolder(string proposalId, CancellationToken ct = default) =>
+        await _t.AdminPostAsync<HolderChange>(
+            $"/admin/operator-keys/holder-changes/{Transport.LastPathSegment(proposalId, nameof(proposalId))}/approve",
+            new Dictionary<string, object?>(), ct).ConfigureAwait(false);
+
+    /// <summary>The query of a page of changes; throws for a value out of range.</summary>
+    private static Dictionary<string, string>? ChangesQuery(int? limit, long? afterSequence)
+    {
+        if (limit is { } l)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(l, 1, nameof(limit));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(l, MaxChangesPage, nameof(limit));
+        }
+        if (afterSequence is { } a) ArgumentOutOfRangeException.ThrowIfNegative(a, nameof(afterSequence));
+        var query = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (limit is not null) query["limit"] = limit.Value.ToString(CultureInfo.InvariantCulture);
+        if (afterSequence is not null) query["after_sequence"] = afterSequence.Value.ToString(CultureInfo.InvariantCulture);
+        return query.Count == 0 ? null : query;
     }
 
     // ── The outbox ──────────────────────────────────────────────────────────

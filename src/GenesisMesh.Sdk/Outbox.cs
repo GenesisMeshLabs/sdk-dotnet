@@ -294,7 +294,7 @@ internal sealed partial class JsonFileOutbox<TEntry> where TEntry : class, IOutb
     /// What a file holds: an entry; one whose record has a field this SDK does not know (complete, but not read, so
     /// the field is not dropped); a file of another outbox format; or nothing readable.
     /// </summary>
-    private enum Kind { Entry, UnknownFields, OtherFormat, Unreadable }
+    private enum FileKind { Entry, UnknownFields, OtherFormat, Unreadable }
 
     [GeneratedRegex(@"^(\d{12})-([A-Za-z0-9-]{1,64})\.json$")]
     private static partial Regex EntryFile();
@@ -398,8 +398,8 @@ internal sealed partial class JsonFileOutbox<TEntry> where TEntry : class, IOutb
             var path = Path.Combine(_directory, name);
             var target = temp.Groups[1].Value;
             // An add synced but not renamed is recovered; an update not renamed, or a write cut short, is dropped.
-            var kind = names.Contains(target) ? Kind.Unreadable : Parse(await ReadText(path, ct).ConfigureAwait(false)).Kind;
-            if (kind is Kind.Entry or Kind.UnknownFields) File.Move(path, Path.Combine(_directory, target));
+            var kind = names.Contains(target) ? FileKind.Unreadable : Parse(await ReadText(path, ct).ConfigureAwait(false)).FileKind;
+            if (kind is FileKind.Entry or FileKind.UnknownFields) File.Move(path, Path.Combine(_directory, target));
             else File.Delete(path);
             recovered = true;
         }
@@ -413,9 +413,9 @@ internal sealed partial class JsonFileOutbox<TEntry> where TEntry : class, IOutb
             if (!match.Success) continue;
             var path = Path.Combine(_directory, file);
             var (kind, entry) = Parse(await File.ReadAllTextAsync(path, Encoding.UTF8, ct).ConfigureAwait(false));
-            if (kind == Kind.OtherFormat)
+            if (kind == FileKind.OtherFormat)
                 throw new OutboxException("outbox_file_other_format", $"outbox file {file} in {_directory} is not {_format}");
-            if (kind is Kind.Unreadable or Kind.UnknownFields)
+            if (kind is FileKind.Unreadable or FileKind.UnknownFields)
             {
                 // Moved aside, so one bad file does not stop every action.
                 File.Move(path, path + Unreadable, overwrite: true);
@@ -484,24 +484,24 @@ internal sealed partial class JsonFileOutbox<TEntry> where TEntry : class, IOutb
     }
 
     /// <summary>The entry in a file's text, or what keeps it from being one.</summary>
-    private (Kind Kind, TEntry? Entry) Parse(string text)
+    private (FileKind FileKind, TEntry? Entry) Parse(string text)
     {
         try
         {
             using var doc = StrictJsonReader.Parse(text);
             var body = doc.RootElement;
-            if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("format", out var format)) return (Kind.Unreadable, null);
+            if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("format", out var format)) return (FileKind.Unreadable, null);
             if (format.ValueKind != JsonValueKind.String || format.GetString() != _format)
-                return (format.ValueKind == JsonValueKind.String ? Kind.OtherFormat : Kind.Unreadable, null);
+                return (format.ValueKind == JsonValueKind.String ? FileKind.OtherFormat : FileKind.Unreadable, null);
             if (!body.TryGetProperty("entry", out var entry) || entry.ValueKind != JsonValueKind.Object
                 || !entry.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || !_isEntry(entry))
-                return (Kind.Unreadable, null);
-            if (!_knownFields(entry)) return (Kind.UnknownFields, null);
-            return entry.Deserialize<TEntry>(Auth.SerializerOptions) is { } read ? (Kind.Entry, read) : (Kind.Unreadable, null);
+                return (FileKind.Unreadable, null);
+            if (!_knownFields(entry)) return (FileKind.UnknownFields, null);
+            return entry.Deserialize<TEntry>(Auth.SerializerOptions) is { } read ? (FileKind.Entry, read) : (FileKind.Unreadable, null);
         }
         catch (JsonException)
         {
-            return (Kind.Unreadable, null);
+            return (FileKind.Unreadable, null);
         }
     }
 

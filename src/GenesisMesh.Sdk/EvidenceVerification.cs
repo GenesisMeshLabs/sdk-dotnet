@@ -549,7 +549,7 @@ public static partial class OfflineVerifier
     /// The record shapes the reference reads, as TypeScript checks them (<c>validation.ts</c>): a field is absent,
     /// null, or of its type; a decision's or record's unknown fields are the field registry's to judge.
     /// </summary>
-    private static class Shapes
+    private static partial class Shapes
     {
         private delegate bool Check(JsonElement? value);
 

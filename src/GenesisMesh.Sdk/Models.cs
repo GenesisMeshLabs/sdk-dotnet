@@ -2991,6 +2991,767 @@ internal sealed class ExecutorKeyList
     public IReadOnlyList<ExecutorKeyRecord> ExecutorKeys { get; set; } = [];
 }
 
+// ── Changes outside the governed path (1.9.0) ────────────────────────────────
+
+/// <summary>
+/// The values of <see cref="BreakGlassInput.EvaluationFailure"/>: why a controller acted without a decision. Each is
+/// an evaluation failure a later attempt can overcome; a refusal is not one.
+/// </summary>
+public static class EvaluationFailures
+{
+    /// <summary>The NA could not be reached.</summary>
+    public const string NetworkError = "network_error";
+    /// <summary>The evaluation timed out.</summary>
+    public const string Timeout = "timeout";
+    /// <summary>The NA failed (5xx).</summary>
+    public const string ServerError = "server_error";
+    /// <summary>The NA throttled the evaluation (429).</summary>
+    public const string RateLimited = "rate_limited";
+}
+
+/// <summary>
+/// A change seen at its source, signed by an observer key (Python <c>ObservationRecord</c>, v1.3.0): someone changed a
+/// secret in the cloud console, or a reconciliation scan found a resource changed. Built by
+/// <see cref="ObservationRecorder"/> and submitted with <see cref="EvidenceStoreClient.SubmitObservation"/>; the NA
+/// judges it after the fact. Absent optional fields are left out, never null, as the record is signed.
+/// </summary>
+public sealed class ObservationRecord
+{
+    /// <summary>The record's ID; by default derived from the source event (<see cref="ObservationRecorder.ObservationId"/>).</summary>
+    [JsonPropertyName("observation_id")]
+    public string ObservationId { get; set; } = "";
+
+    /// <summary>The sovereign the observer key is registered for.</summary>
+    [JsonPropertyName("observer_sovereign_id")]
+    public string ObserverSovereignId { get; set; } = "";
+
+    /// <summary>The resource changed: an identifier, never a value.</summary>
+    [JsonPropertyName("resource_id")]
+    public string ResourceId { get; set; } = "";
+
+    /// <summary>A value of <see cref="ResourceActions"/>.</summary>
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = "";
+
+    /// <summary>The capability the change exercises, as a governed action would request it.</summary>
+    [JsonPropertyName("capability")]
+    public string Capability { get; set; } = "";
+
+    /// <summary>When the source says the change happened; null when the record gives a window instead.</summary>
+    [JsonPropertyName("changed_at")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ChangedAt { get; set; }
+
+    /// <summary>The start of the window the change happened in, such as the scan before; set with <see cref="ChangedNotAfter"/>.</summary>
+    [JsonPropertyName("changed_not_before")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ChangedNotBefore { get; set; }
+
+    /// <summary>The end of the window the change happened in, such as the scan that found it.</summary>
+    [JsonPropertyName("changed_not_after")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ChangedNotAfter { get; set; }
+
+    /// <summary>When the observer saw it.</summary>
+    [JsonPropertyName("observed_at")]
+    public string ObservedAt { get; set; } = "";
+
+    /// <summary>Who made the change, as the source reported it; not authenticated. A pseudonymous identifier, never a credential.</summary>
+    [JsonPropertyName("actor")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Actor { get; set; }
+
+    /// <summary>Where it was seen, such as <c>cloud-activity-log</c> or <c>reconciliation</c>.</summary>
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = "";
+
+    /// <summary>The source's ID of the event; one source event is one observation.</summary>
+    [JsonPropertyName("source_event_id")]
+    public string SourceEventId { get; set; } = "";
+
+    /// <summary>
+    /// The source's version after the change; execution evidence naming the same <c>execution_parameters.version_id</c>
+    /// matches it.
+    /// </summary>
+    [JsonPropertyName("version_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? VersionId { get; set; }
+
+    /// <summary>Identifiers, versions and times (an object); never values.</summary>
+    [JsonPropertyName("metadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Metadata { get; set; }
+
+    /// <summary>The observer's signature, <c>{"key_id", "sig"}</c>, over the record without it; undefined until signed.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
+/// <summary>
+/// A change a controller made while it could not obtain a decision, signed by its executor key (Python
+/// <c>BreakGlassRecord</c>, v1.3.0), with the caller's justification. Built by
+/// <see cref="ExecutionRecorder.SignBreakGlass"/> and submitted with <see cref="EvidenceStoreClient.SubmitBreakGlass"/>;
+/// the NA judges it after the fact. Absent optional fields are left out, never null, as the record is signed.
+/// </summary>
+public sealed class BreakGlassRecord
+{
+    /// <summary>The record's ID (a UUID).</summary>
+    [JsonPropertyName("break_glass_id")]
+    public string BreakGlassId { get; set; } = "";
+
+    /// <summary>The sovereign that acted; its executor key signs the record.</summary>
+    [JsonPropertyName("executor_sovereign_id")]
+    public string ExecutorSovereignId { get; set; } = "";
+
+    /// <summary>The resource acted on: an identifier, never a value.</summary>
+    [JsonPropertyName("resource_id")]
+    public string ResourceId { get; set; } = "";
+
+    /// <summary>A value of <see cref="ResourceActions"/>.</summary>
+    [JsonPropertyName("resource_action")]
+    public string ResourceAction { get; set; } = "";
+
+    /// <summary>The capability the evaluation requested.</summary>
+    [JsonPropertyName("capability")]
+    public string Capability { get; set; } = "";
+
+    /// <summary>The attestation the evaluation named; null when it named none.</summary>
+    [JsonPropertyName("attestation_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AttestationId { get; set; }
+
+    /// <summary>The evaluation's request parameters (an object).</summary>
+    [JsonPropertyName("request_parameters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement RequestParameters { get; set; }
+
+    /// <summary>The evaluation's attributes (an object).</summary>
+    [JsonPropertyName("attributes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Attributes { get; set; }
+
+    /// <summary>Why the controller acted without a decision: 1 to 1024 characters.</summary>
+    [JsonPropertyName("justification")]
+    public string Justification { get; set; } = "";
+
+    /// <summary>SHA-256 hex of the canonical JSON of the evaluation request that failed: only its digest is kept.</summary>
+    [JsonPropertyName("evaluation_request_digest")]
+    public string EvaluationRequestDigest { get; set; } = "";
+
+    /// <summary>A value of <see cref="EvaluationFailures"/>.</summary>
+    [JsonPropertyName("evaluation_failure")]
+    public string EvaluationFailure { get; set; } = "";
+
+    /// <summary>When it was executed.</summary>
+    [JsonPropertyName("executed_at")]
+    public string ExecutedAt { get; set; } = "";
+
+    /// <summary>A value of <see cref="ExecutionOutcomes"/>.</summary>
+    [JsonPropertyName("outcome")]
+    public string Outcome { get; set; } = "";
+
+    /// <summary>A short description of the outcome, at most 1024 characters; null for none.</summary>
+    [JsonPropertyName("outcome_detail")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OutcomeDetail { get; set; }
+
+    /// <summary>What was used, as metadata (an object); never secret values.</summary>
+    [JsonPropertyName("execution_parameters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement ExecutionParameters { get; set; }
+
+    /// <summary>The executor's signature, <c>{"key_id", "sig"}</c>, over the record without it; undefined until signed.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
+/// <summary>
+/// The NA's one verdict on an observation or break-glass record (Python <c>JudgementRecord</c>, v1.3.0): how the change
+/// was governed and whether the policies then allowed it. Never an authorisation. Signed by the NA; absent optional
+/// fields are left out, as it signs them.
+/// </summary>
+public sealed class JudgementRecord
+{
+    /// <summary>The judgement's ID.</summary>
+    [JsonPropertyName("judgement_id")]
+    public string JudgementId { get; set; } = "";
+
+    /// <summary><c>observation</c> or <c>break_glass</c>.</summary>
+    [JsonPropertyName("subject_kind")]
+    public string SubjectKind { get; set; } = "";
+
+    /// <summary>The judged record's ID.</summary>
+    [JsonPropertyName("subject_id")]
+    public string SubjectId { get; set; } = "";
+
+    /// <summary>The judged record's payload digest.</summary>
+    [JsonPropertyName("subject_digest")]
+    public string SubjectDigest { get; set; } = "";
+
+    /// <summary>Where the judged record is stored.</summary>
+    [JsonPropertyName("subject_store_sequence")]
+    public long SubjectStoreSequence { get; set; }
+
+    /// <summary>The resource changed.</summary>
+    [JsonPropertyName("resource_id")]
+    public string ResourceId { get; set; } = "";
+
+    /// <summary>A value of <see cref="ResourceActions"/>.</summary>
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = "";
+
+    /// <summary>The capability the change exercised.</summary>
+    [JsonPropertyName("capability")]
+    public string Capability { get; set; } = "";
+
+    /// <summary>
+    /// <c>prior_decision</c> (a decision authorised it), <c>after_the_fact</c> (judged now), or (v1.6.0) <c>grant</c>
+    /// (a grant the NA signed in advance).
+    /// </summary>
+    [JsonPropertyName("governed_by")]
+    public string GovernedBy { get; set; } = "";
+
+    /// <summary><c>allow</c>, <c>deny</c>, or <c>indeterminate</c> when the NA cannot tell what applied then.</summary>
+    [JsonPropertyName("verdict")]
+    public string Verdict { get; set; } = "";
+
+    /// <summary>Why, when the NA says.</summary>
+    [JsonPropertyName("reason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Reason { get; set; }
+
+    /// <summary>The time the change was judged at: when it happened, or the end of its window.</summary>
+    [JsonPropertyName("evaluated_as_of")]
+    public string EvaluatedAsOf { get; set; } = "";
+
+    /// <summary>For a window: its start, judged too.</summary>
+    [JsonPropertyName("evaluated_from")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EvaluatedFrom { get; set; }
+
+    /// <summary>The policies the verdict rests on, as a decision binds them; undefined when there were none.</summary>
+    [JsonPropertyName("policy_binding")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement PolicyBinding { get; set; }
+
+    /// <summary>The gates evaluated, as a decision lists them (an array).</summary>
+    [JsonPropertyName("gate_results")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement GateResults { get; set; }
+
+    /// <summary>The verdict under the policies active when it was judged; <see cref="FlaggedForReview"/> when it differs.</summary>
+    [JsonPropertyName("current_verdict")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CurrentVerdict { get; set; }
+
+    /// <summary>The digest of the policies active when it was judged.</summary>
+    [JsonPropertyName("current_policy_set_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CurrentPolicySetDigest { get; set; }
+
+    /// <summary>True when the change needs a person's review.</summary>
+    [JsonPropertyName("flagged_for_review")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? FlaggedForReview { get; set; }
+
+    /// <summary>The execution evidence the observation matched.</summary>
+    [JsonPropertyName("matched_evidence_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MatchedEvidenceId { get; set; }
+
+    /// <summary>The decision the matched evidence rests on.</summary>
+    [JsonPropertyName("matched_decision_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MatchedDecisionId { get; set; }
+
+    /// <summary>Execution evidence that may be the same change, not matched for certain.</summary>
+    [JsonPropertyName("possible_match_evidence_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PossibleMatchEvidenceId { get; set; }
+
+    /// <summary>When the NA judged it.</summary>
+    [JsonPropertyName("judged_at")]
+    public string JudgedAt { get; set; } = "";
+
+    /// <summary>The NA's sovereign.</summary>
+    [JsonPropertyName("issuer_sovereign_id")]
+    public string IssuerSovereignId { get; set; } = "";
+
+    /// <summary>The NA key that signed it.</summary>
+    [JsonPropertyName("issued_by")]
+    public string IssuedBy { get; set; } = "";
+
+    /// <summary>The NA's signature, <c>{"key_id", "sig"}</c>, over the record without it.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
+/// <summary>
+/// An authentic record the NA refused after its action happened, kept with the refusal (Python
+/// <c>QuarantineRecord</c>, v1.3.0): the action it describes still happened. Signed by the NA; read from an export.
+/// </summary>
+public sealed class QuarantineRecord
+{
+    /// <summary>The quarantine entry's ID.</summary>
+    [JsonPropertyName("quarantine_id")]
+    public string QuarantineId { get; set; } = "";
+
+    /// <summary>
+    /// <c>execution</c>, <c>observation</c> or <c>break_glass</c>; v1.4.0 <c>remediation</c>; v1.6.0
+    /// <c>grant_execution</c>.
+    /// </summary>
+    [JsonPropertyName("record_kind")]
+    public string RecordKind { get; set; } = "";
+
+    /// <summary>The refused record, as submitted.</summary>
+    [JsonPropertyName("record")]
+    public JsonElement Record { get; set; }
+
+    /// <summary>SHA-256 hex of the refused record's canonical JSON.</summary>
+    [JsonPropertyName("record_digest")]
+    public string RecordDigest { get; set; } = "";
+
+    /// <summary>The refusal's code, such as <c>observation_outside_time_bounds</c>.</summary>
+    [JsonPropertyName("rejection_code")]
+    public string RejectionCode { get; set; } = "";
+
+    /// <summary>The refusal's detail.</summary>
+    [JsonPropertyName("detail")]
+    public string Detail { get; set; } = "";
+
+    /// <summary>The resource the record names, when it names one.</summary>
+    [JsonPropertyName("resource_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourceId { get; set; }
+
+    /// <summary>When the NA quarantined it.</summary>
+    [JsonPropertyName("quarantined_at")]
+    public string QuarantinedAt { get; set; } = "";
+
+    /// <summary>The NA's sovereign.</summary>
+    [JsonPropertyName("issuer_sovereign_id")]
+    public string IssuerSovereignId { get; set; } = "";
+
+    /// <summary>The NA key that signed it.</summary>
+    [JsonPropertyName("issued_by")]
+    public string IssuedBy { get; set; } = "";
+
+    /// <summary>The NA's signature, <c>{"key_id", "sig"}</c>, over the record without it.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
+/// <summary>
+/// The signed history of the NA state judgements rest on (Python <c>RegistryRecord</c>, v1.3.0): policy activations,
+/// executor and observer keys, and operator-key holders. Signed by the NA; read from an export. Only the fields of
+/// its <see cref="Event"/> are set; the others are left out.
+/// </summary>
+public sealed class RegistryRecord
+{
+    /// <summary>The record's ID.</summary>
+    [JsonPropertyName("registry_record_id")]
+    public string RegistryRecordId { get; set; } = "";
+
+    /// <summary>
+    /// <c>policy_history_started</c>, <c>policy_activated</c>, <c>policy_deactivated</c>, <c>executor_key_registered</c>,
+    /// <c>executor_key_retired</c> or <c>operator_key_holder</c>.
+    /// </summary>
+    [JsonPropertyName("event")]
+    public string Event { get; set; } = "";
+
+    /// <summary>When the change took effect.</summary>
+    [JsonPropertyName("effective_at")]
+    public string EffectiveAt { get; set; } = "";
+
+    /// <summary>True when the NA recorded it late, from its audit log or its tables.</summary>
+    [JsonPropertyName("reconstructed")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Reconstructed { get; set; }
+
+    /// <summary>The policy, for a policy event.</summary>
+    [JsonPropertyName("policy_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PolicyId { get; set; }
+
+    /// <summary>The policy's version, for a policy event.</summary>
+    [JsonPropertyName("policy_version")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? PolicyVersion { get; set; }
+
+    /// <summary>The policy's digest, for a policy event.</summary>
+    [JsonPropertyName("policy_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PolicyDigest { get; set; }
+
+    /// <summary>The key, for a key or holder event.</summary>
+    [JsonPropertyName("key_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? KeyId { get; set; }
+
+    /// <summary>The key's public key, for a key or holder event.</summary>
+    [JsonPropertyName("public_key")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PublicKey { get; set; }
+
+    /// <summary>The sovereign an executor or observer key is registered for.</summary>
+    [JsonPropertyName("executor_sovereign_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExecutorSovereignId { get; set; }
+
+    /// <summary><c>executor</c> or <c>observer</c>, for a key event.</summary>
+    [JsonPropertyName("key_role")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? KeyRole { get; set; }
+
+    /// <summary>The resource prefix an executor or observer key is limited to.</summary>
+    [JsonPropertyName("resource_prefix")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourcePrefix { get; set; }
+
+    /// <summary>The operator key's tier, for a holder event.</summary>
+    [JsonPropertyName("operator_tier")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OperatorTier { get; set; }
+
+    /// <summary>Who holds the operator key, for a holder event; the key's own ID until a holder is named.</summary>
+    [JsonPropertyName("holder")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Holder { get; set; }
+
+    /// <summary>The operator key that approved a holder change.</summary>
+    [JsonPropertyName("approved_by")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ApprovedBy { get; set; }
+
+    /// <summary>The operator key that made or proposed the change.</summary>
+    [JsonPropertyName("recorded_by")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RecordedBy { get; set; }
+
+    /// <summary>The NA's sovereign.</summary>
+    [JsonPropertyName("issuer_sovereign_id")]
+    public string IssuerSovereignId { get; set; } = "";
+
+    /// <summary>The NA key that signed it.</summary>
+    [JsonPropertyName("issued_by")]
+    public string IssuedBy { get; set; } = "";
+
+    /// <summary>The NA's signature, <c>{"key_id", "sig"}</c>, over the record without it.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
+/// <summary>
+/// The NA's answer to an observation or a break-glass record (<see cref="EvidenceStoreClient.SubmitObservation"/>,
+/// <see cref="EvidenceStoreClient.SubmitBreakGlass"/>).
+/// </summary>
+public sealed class RecordSubmission
+{
+    /// <summary>
+    /// <c>recorded</c>; <c>duplicate</c> for the same record again, so it is safe to retry; or <c>quarantined</c>: authentic
+    /// but outside its time bounds, kept and not judged.
+    /// </summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    /// <summary>The store's envelope of the record (for <c>quarantined</c>, of the quarantine entry).</summary>
+    [JsonPropertyName("entry")]
+    public EvidenceStoreEntry Entry { get; set; } = new();
+
+    /// <summary>SHA-256 hex of the envelope's canonical JSON.</summary>
+    [JsonPropertyName("entry_digest")]
+    public string EntryDigest { get; set; } = "";
+
+    /// <summary>The stored record: the observation or break-glass record, or the quarantine record.</summary>
+    [JsonPropertyName("payload")]
+    public JsonElement Payload { get; set; }
+
+    /// <summary>
+    /// The judgement made at admission (the NA's default); null when judging failed and waits for
+    /// <see cref="EvidenceStoreClient.JudgeObservation"/> or <see cref="EvidenceStoreClient.JudgeBreakGlass"/>, or when
+    /// the NA does not judge at admission (also for <c>duplicate</c> and <c>quarantined</c>).
+    /// </summary>
+    [JsonPropertyName("judgement")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JudgementSubmission? Judgement { get; set; }
+}
+
+/// <summary>One observation's answer in a batch (<see cref="EvidenceStoreClient.SubmitObservations"/>).</summary>
+public sealed class ObservationBatchResult
+{
+    /// <summary>The observation's index in the request.</summary>
+    [JsonPropertyName("index")]
+    public int Index { get; set; }
+
+    /// <summary><c>recorded</c>, <c>duplicate</c>, <c>quarantined</c>, or <c>refused</c> with <see cref="Error"/>.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    /// <summary>The store's envelope of the record; null when refused.</summary>
+    [JsonPropertyName("entry")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EvidenceStoreEntry? Entry { get; set; }
+
+    /// <summary>SHA-256 hex of the envelope's canonical JSON; null when refused.</summary>
+    [JsonPropertyName("entry_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EntryDigest { get; set; }
+
+    /// <summary>The stored record; undefined when refused.</summary>
+    [JsonPropertyName("payload")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Payload { get; set; }
+
+    /// <summary>The judgement made at admission, as in <see cref="RecordSubmission.Judgement"/>.</summary>
+    [JsonPropertyName("judgement")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JudgementSubmission? Judgement { get; set; }
+
+    /// <summary>Why the NA refused it; null otherwise.</summary>
+    [JsonPropertyName("error")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RecordRefusal? Error { get; set; }
+}
+
+/// <summary>Why the NA refused one record of a batch: the code and message it would answer the record alone with.</summary>
+public sealed class RecordRefusal
+{
+    /// <summary>The refusal's code, such as <c>observation_invalid_signature</c>.</summary>
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = "";
+
+    /// <summary>The refusal's message.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+
+    /// <summary>The refusal's details, such as the <c>quarantine_id</c> of a record kept; undefined when there are none.</summary>
+    [JsonPropertyName("details")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Details { get; set; }
+}
+
+/// <summary>A judgement (<see cref="EvidenceStoreClient.JudgeObservation"/>, <see cref="EvidenceStoreClient.JudgeBreakGlass"/>).</summary>
+public sealed class JudgementSubmission
+{
+    /// <summary><c>judged</c>, made now; or <c>existing</c>, the one made before: a record is judged once.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    /// <summary>The store's envelope of the judgement.</summary>
+    [JsonPropertyName("entry")]
+    public EvidenceStoreEntry Entry { get; set; } = new();
+
+    /// <summary>SHA-256 hex of the envelope's canonical JSON.</summary>
+    [JsonPropertyName("entry_digest")]
+    public string EntryDigest { get; set; } = "";
+
+    /// <summary>The judgement the NA signed.</summary>
+    [JsonPropertyName("payload")]
+    public JudgementRecord Payload { get; set; } = new();
+}
+
+/// <summary>A page of <see cref="EvidenceStoreClient.ResourceChanges"/>.</summary>
+public sealed class ResourceChangesParams
+{
+    /// <summary>1 to 10,000 changes a page; the NA's default is 1000.</summary>
+    public int? Limit { get; init; }
+
+    /// <summary>Changes after this store sequence: the previous page's <see cref="ResourceChanges.NextAfterSequence"/>.</summary>
+    public long? AfterSequence { get; init; }
+}
+
+/// <summary>One page of a resource's changes, oldest first (GET /admin/evidence/changes/&lt;resource_id&gt;).</summary>
+public sealed class ResourceChanges
+{
+    /// <summary>The resource.</summary>
+    [JsonPropertyName("resource_id")]
+    public string ResourceId { get; set; } = "";
+
+    /// <summary>True when the resource has more changes than this page holds.</summary>
+    [JsonPropertyName("truncated")]
+    public bool Truncated { get; set; }
+
+    /// <summary>The changes, oldest first.</summary>
+    [JsonPropertyName("changes")]
+    public List<ResourceChange> Changes { get; set; } = [];
+
+    /// <summary>v1.4.0: the next page's <see cref="ResourceChangesParams.AfterSequence"/>; null on the last page.</summary>
+    [JsonPropertyName("next_after_sequence")]
+    public long? NextAfterSequence { get; set; }
+}
+
+/// <summary>
+/// One change to a resource, with how it was governed and how it stands (see <em>Changes Outside the Controlled
+/// Path</em> in the NA runbooks).
+/// </summary>
+public sealed class ResourceChange
+{
+    /// <summary>Where the change is stored.</summary>
+    [JsonPropertyName("store_sequence")]
+    public long StoreSequence { get; set; }
+
+    /// <summary><c>execution</c>, <c>observation</c>, <c>break_glass</c> or <c>quarantine</c>; v1.6.0 <c>grant_execution</c>.</summary>
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = "";
+
+    /// <summary>When the NA stored it.</summary>
+    [JsonPropertyName("recorded_at")]
+    public string RecordedAt { get; set; } = "";
+
+    /// <summary>The record's ID: its evidence, observation, break-glass or quarantine ID.</summary>
+    [JsonPropertyName("record_id")]
+    public string? RecordId { get; set; }
+
+    /// <summary>A value of <see cref="ResourceActions"/>; null for a quarantine entry.</summary>
+    [JsonPropertyName("action")]
+    public string? Action { get; set; }
+
+    /// <summary>When the change happened (for a window, its end); for a quarantine entry, when it was quarantined.</summary>
+    [JsonPropertyName("at")]
+    public string? At { get; set; }
+
+    /// <summary>
+    /// <c>prior_decision</c>, <c>after_the_fact</c> or (v1.6.0) <c>grant</c>; null for a change not judged yet and a
+    /// quarantine entry.
+    /// </summary>
+    [JsonPropertyName("governed_by")]
+    public string? GovernedBy { get; set; }
+
+    /// <summary>
+    /// <c>recorded</c>, <c>matched</c>, <c>judged_allowed</c>, <c>judged_denied</c>, <c>indeterminate</c>,
+    /// <c>observed</c> (not judged yet) or <c>quarantined</c>; from v1.4.0, with remediation records on, the change's
+    /// remediation state.
+    /// </summary>
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "";
+
+    /// <summary>The judgement's verdict, for a judged change.</summary>
+    [JsonPropertyName("verdict")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Verdict { get; set; }
+
+    /// <summary>True when the judgement flagged the change for review.</summary>
+    [JsonPropertyName("flagged_for_review")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? FlaggedForReview { get; set; }
+
+    /// <summary>The decision execution evidence rests on.</summary>
+    [JsonPropertyName("decision_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DecisionId { get; set; }
+
+    /// <summary>The observation that matched this execution or break-glass record.</summary>
+    [JsonPropertyName("observed_by")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ObservedBy { get; set; }
+
+    /// <summary>Execution evidence that may be the same change as this observation.</summary>
+    [JsonPropertyName("possible_match_evidence_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PossibleMatchEvidenceId { get; set; }
+
+    /// <summary>A break-glass record's justification.</summary>
+    [JsonPropertyName("justification")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Justification { get; set; }
+
+    /// <summary>A quarantine entry's record kind.</summary>
+    [JsonPropertyName("record_kind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RecordKind { get; set; }
+
+    /// <summary>A quarantine entry's refusal code.</summary>
+    [JsonPropertyName("rejection_code")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RejectionCode { get; set; }
+}
+
+/// <summary>An operator key's holder, as the store records it (<see cref="EvidenceStoreClient.OperatorHolders"/>).</summary>
+public sealed class OperatorKeyHolder
+{
+    /// <summary>The operator key.</summary>
+    [JsonPropertyName("key_id")]
+    public string KeyId { get; set; } = "";
+
+    /// <summary>Who holds it; the key's own ID until a holder change names one.</summary>
+    [JsonPropertyName("holder")]
+    public string Holder { get; set; } = "";
+
+    /// <summary>The key's public key, as recorded.</summary>
+    [JsonPropertyName("public_key")]
+    public string? PublicKey { get; set; }
+
+    /// <summary>The key's tier, as recorded.</summary>
+    [JsonPropertyName("operator_tier")]
+    public string? OperatorTier { get; set; }
+
+    /// <summary>When the record took effect.</summary>
+    [JsonPropertyName("since")]
+    public string Since { get; set; } = "";
+
+    /// <summary>The operator key that approved the holder; null when none did (configured, or the key's own).</summary>
+    [JsonPropertyName("approved_by")]
+    public string? ApprovedBy { get; set; }
+
+    /// <summary>The registry record that records it.</summary>
+    [JsonPropertyName("registry_record_id")]
+    public string RegistryRecordId { get; set; } = "";
+}
+
+/// <summary>A holder change: proposed (<see cref="EvidenceStoreClient.ProposeHolder"/>) or approved (<see cref="EvidenceStoreClient.ApproveHolder"/>).</summary>
+public sealed class HolderChange
+{
+    /// <summary>The proposal's ID, which <see cref="EvidenceStoreClient.ApproveHolder"/> takes.</summary>
+    [JsonPropertyName("proposal_id")]
+    public string ProposalId { get; set; } = "";
+
+    /// <summary>The operator key.</summary>
+    [JsonPropertyName("key_id")]
+    public string KeyId { get; set; } = "";
+
+    /// <summary>The holder proposed.</summary>
+    [JsonPropertyName("holder")]
+    public string Holder { get; set; } = "";
+
+    /// <summary>The operator key that proposed it; sent with the proposal.</summary>
+    [JsonPropertyName("proposed_by")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProposedBy { get; set; }
+
+    /// <summary>True once approved and recorded.</summary>
+    [JsonPropertyName("approved")]
+    public bool Approved { get; set; }
+
+    /// <summary>The operator key that approved it; sent with the approval.</summary>
+    [JsonPropertyName("approved_by")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ApprovedBy { get; set; }
+
+    /// <summary>The registry record that records the new holder; sent with the approval.</summary>
+    [JsonPropertyName("registry_record_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RegistryRecordId { get; set; }
+}
+
+/// <summary>The body of GET /admin/evidence/operator-holders.</summary>
+internal sealed class OperatorHolderList
+{
+    [JsonPropertyName("holders")]
+    public IReadOnlyList<OperatorKeyHolder> Holders { get; set; } = [];
+}
+
+/// <summary>The body of POST /evidence/observations/batch.</summary>
+internal sealed class ObservationBatch
+{
+    [JsonPropertyName("results")]
+    public IReadOnlyList<ObservationBatchResult> Results { get; set; } = [];
+}
+
 // ── The evidence outbox (1.9.0) ───────────────────────────────────────────────
 
 /// <summary>The states of an outbox entry (<see cref="OutboxEntry.State"/>).</summary>
