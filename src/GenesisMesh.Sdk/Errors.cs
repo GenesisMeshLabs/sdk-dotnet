@@ -72,8 +72,9 @@ public sealed class NetworkException : Exception
     public const string NoAnswer = "network_error";
 
     /// <summary>
-    /// The code of an answer whose body was cut off or stalled past the request timeout: the NA answered, and may have
-    /// acted or decided.
+    /// The code of an answer whose body could not be read: cut off, stalled past the request timeout, or larger than
+    /// the client's <see cref="HttpClient.MaxResponseContentBufferSize"/>. The NA answered, and may have acted or
+    /// decided.
     /// </summary>
     public const string ResponseBodyUnreadable = "response_body_unreadable";
 
@@ -82,21 +83,27 @@ public sealed class NetworkException : Exception
     public NetworkException(Exception inner)
         : base($"genesismesh: network error: {inner.Message}", inner) { }
 
-    internal NetworkException(string message, Exception? inner, bool connectFailed, string code = NoAnswer)
+    internal NetworkException(string message, Exception? inner, bool connectFailed, string code = NoAnswer, int answerStatus = 0)
         : base($"genesismesh: network error: {message}", inner)
     {
         ConnectFailed = connectFailed;
         Code = code;
+        AnswerStatus = answerStatus;
     }
 
     private NetworkException(NetworkException other)
         : base(other.Message, other.InnerException)
     {
         ConnectFailed = other.ConnectFailed;
+        Code = other.Code;
+        AnswerStatus = other.AnswerStatus;
     }
 
     /// <summary>The same failure, as an instance of its own for one more request that waited for it.</summary>
     internal NetworkException Copy() => new(this);
+
+    /// <summary>The status of the answer whose body could not be read; 0 when there was no answer.</summary>
+    internal int AnswerStatus { get; }
 
     /// <summary>
     /// <see cref="NoAnswer"/> (<c>network_error</c>), or <see cref="ResponseBodyUnreadable"/> when the NA answered but

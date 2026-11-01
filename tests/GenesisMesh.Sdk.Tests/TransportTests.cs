@@ -365,16 +365,51 @@ public class TransportTests
     {
         using var cts = new CancellationTokenSource();
         using var handler = new FuncHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StalledStream(cts)) });
-        using var transport = SingleTransport(handler, new RetrySettings { Attempts = 0 });
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => transport.PublicGetAsync<JsonElement>("/test", cts.Token).WaitAsync(TimeSpan.FromSeconds(10)));
+        // A timeout far beyond the wait: only the caller's token can end the read in time.
+        using var transport = new Transport(new ClientOptions
+        {
+            BaseUrl = A,
+            Timeout = TimeSpan.FromMinutes(1),
+            Retry = new RetrySettings { Attempts = 0 },
+            HttpHandler = handler,
+        });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => transport.PublicGetAsync<JsonElement>("/test", cts.Token).WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
     [Fact]
     public async Task AClientWithoutATimeout_ReadsTheBody()
     {
-        using var http = new HttpClient(new FuncHandler(_ => Json(200, """{"ok":true}"""))) { Timeout = Timeout.InfiniteTimeSpan };
+        using var http = new HttpClient(new FuncHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new ChunkStream(Encoding.UTF8.GetBytes("""{"ok":true}"""), delay: true)),
+        }))
+        { Timeout = Timeout.InfiniteTimeSpan };
         using var transport = new Transport(new ClientOptions { BaseUrl = A, HttpClient = http });
         Assert.True((await transport.PublicGetAsync<JsonElement>("/test")).GetProperty("ok").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ABodyOverTheClientsBufferLimit_IsUnreadable(bool lengthKnown)
+    {
+        var body = Encoding.UTF8.GetBytes("{\"pad\":\"" + new string('x', 4990) + "\"}");
+        Task<JsonElement> Get(HttpClient http)
+        {
+            var transport = new Transport(new ClientOptions { BaseUrl = A, HttpClient = http, Retry = new RetrySettings { Attempts = 0 } });
+            return transport.PublicGetAsync<JsonElement>("/test");
+        }
+        HttpClient Limited(int max) => new(new FuncHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = lengthKnown ? new ByteArrayContent(body) : new StreamContent(new ChunkStream(body)),
+        }))
+        { MaxResponseContentBufferSize = max };
+        using var under = Limited(body.Length - 1);
+        var ex = await Assert.ThrowsAsync<NetworkException>(() => Get(under));
+        Assert.Equal(NetworkException.ResponseBodyUnreadable, ex.Code);
+        Assert.Contains("MaxResponseContentBufferSize", ex.Message, StringComparison.Ordinal);
+        using var exact = Limited(body.Length);
+        Assert.Equal(4990, (await Get(exact)).GetProperty("pad").GetString()!.Length);
     }
 
     [Fact]
@@ -387,25 +422,38 @@ public class TransportTests
         Assert.Equal(NetworkException.NoAnswer, new NetworkException(new TimeoutException()).Code);
     }
 
-    [Fact]
-    public async Task AKeyLookupWhoseBodyCannotBeRead_IsUnavailable_WithItsStatus()
+    [Theory]
+    [InlineData(200)]
+    [InlineData(503)]
+    public async Task AKeyLookupWhoseBodyCannotBeRead_IsMovedPast_WhenItSucceededOrTheInstanceIsDown(int status)
     {
         var calls = new List<string>();
         using var handler = new FuncHandler(req =>
         {
-            calls.Add(req.RequestUri!.AbsolutePath);
-            return req.RequestUri.AbsolutePath == "/sovereign.json"
-                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new BrokenStream()) }
-                : Json(201, "{}");
+            calls.Add($"{req.RequestUri!.Host}{req.RequestUri.AbsolutePath}");
+            return req.RequestUri.AbsolutePath != "/sovereign.json" ? Json(201, "{}")
+                : req.RequestUri.Host == "na-a" ? new HttpResponseMessage((HttpStatusCode)status) { Content = new StreamContent(new BrokenStream()) }
+                : Json(200, """{"network_authority":{"public_key":"NA-KEY"}}""");
         });
-        using var gm = Client(handler, o =>
+        using var gm = Client(handler);
+        await gm.Attestation.Issue(Attestation());
+        Assert.Equal(["na-a/sovereign.json", "na-b/sovereign.json", "na-b/admin/attestations"], calls);
+    }
+
+    [Fact]
+    public async Task AKeyLookupWhoseBodyCannotBeRead_KeepsAnyOtherStatus()
+    {
+        var calls = new List<string>();
+        using var handler = new FuncHandler(req =>
         {
-            o.BaseUrls = null;
-            o.BaseUrl = A;
+            calls.Add($"{req.RequestUri!.Host}{req.RequestUri.AbsolutePath}");
+            return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StreamContent(new BrokenStream()) };
         });
-        var ex = await Assert.ThrowsAnyAsync<GenesisMeshException>(() => gm.Attestation.Issue(Attestation()));
-        Assert.Equal(("na_public_key_unavailable", 200), (ex.Code, ex.Status));
-        Assert.Equal(["/sovereign.json"], calls);
+        using var gm = Client(handler);
+        var ex = await Assert.ThrowsAsync<NotFoundException>(() => gm.Attestation.Issue(Attestation()));
+        Assert.Equal(("na_public_key_unavailable", 404), (ex.Code, ex.Status));
+        Assert.Contains("its body could not be read", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(["na-a/sovereign.json"], calls);
     }
 
     [Fact]
@@ -711,7 +759,6 @@ public class TransportTests
     private static HttpResponseMessage Json(int status, string body) =>
         new((HttpStatusCode)status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
-    /// <summary>A response body whose connection drops while it is read.</summary>
     /// <summary>A body that never ends: it waits until its read is cancelled, after cancelling the caller's token if given.</summary>
     private sealed class StalledStream(CancellationTokenSource? cancel = null) : Stream
     {
@@ -738,7 +785,37 @@ public class TransportTests
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
-    private sealed class BrokenStream : Stream
+    /// <summary>A body of unknown length, read in chunks of 100 bytes, each after a short wait on the token when <paramref name="delay"/>.</summary>
+    private sealed class ChunkStream(byte[] bytes, bool delay = false) : Stream
+    {
+        private int _position;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => _position; set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (delay) await Task.Delay(20, cancellationToken);
+            var n = Math.Min(Math.Min(buffer.Length, 100), bytes.Length - _position);
+            bytes.AsMemory(_position, n).CopyTo(buffer);
+            _position += n;
+            return n;
+        }
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    /// <summary>A response body whose connection drops while it is read.</summary>
+    internal sealed class BrokenStream : Stream
     {
         public override bool CanRead => true;
         public override bool CanSeek => false;

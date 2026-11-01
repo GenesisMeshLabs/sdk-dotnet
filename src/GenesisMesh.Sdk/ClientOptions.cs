@@ -62,7 +62,9 @@ public sealed class ClientOptions
     /// <c>IHttpClientFactory</c>. Takes precedence over <see cref="HttpHandler"/> and <see cref="Timeout"/>: its own
     /// <c>Timeout</c> applies to each attempt. The client does not dispose it. A handler in its pipeline must not retry
     /// POSTs: a repeated admin request carries the same signature and nonce, and the NA refuses it as a replay after
-    /// the first may have been applied.
+    /// the first may have been applied. Nor should one read or buffer the response body: an answer whose body cannot be
+    /// read would then look like no answer (<see cref="NetworkException.Code"/>), and break the glass of a governed
+    /// action.
     /// </summary>
     public HttpClient? HttpClient { get; set; }
 

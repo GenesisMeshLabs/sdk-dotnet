@@ -113,6 +113,17 @@ public class HealthTests
     }
 
     [Fact]
+    public async Task Endpoints_ReportsAnEndpointWhoseAnswerCannotBeRead_AsUnreachable()
+    {
+        using var gm = Client(req => req.RequestUri!.Host == "na-a"
+            ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StreamContent(new TransportTests.BrokenStream()) }
+            : Json(200, Captured("health_readiness")), A, B);
+        var report = await gm.Health.Endpoints();
+        Assert.Equal([(A, false, false), (B, true, true)], report.Select(e => (e.BaseUrl, e.Reachable, e.Ready)));
+        Assert.Contains("its body could not be read", report[0].Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Endpoints_ReportsAReachableNotReadyEndpoint_WithItsChecks()
     {
         using var gm = Client(req => req.RequestUri!.Host == "na-a" ? Json(503, NotReady) : Json(502, "bad gateway"), A, B);

@@ -146,8 +146,8 @@ public class BreakGlassTests
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
-    private static HttpResponseMessage Cut(string body, bool stall = false) =>
-        new(HttpStatusCode.OK) { Content = new StreamContent(new CutStream(Encoding.UTF8.GetBytes(body), stall)) };
+    private static HttpResponseMessage Cut(string body, bool stall = false, HttpStatusCode status = HttpStatusCode.OK) =>
+        new(status) { Content = new StreamContent(new CutStream(Encoding.UTF8.GetBytes(body), stall)) };
 
     /// <summary>A signer that refuses a cancelled token, as a remote signer would.</summary>
     private sealed class TokenSigner(ISigner inner) : ISigner
@@ -311,7 +311,7 @@ public class BreakGlassTests
         var outcome = await x.Run();
         Assert.False(outcome.BrokeGlass);
         Assert.Null(outcome.BreakGlass);
-        Assert.True(outcome.Governed!.Authorized);
+        Assert.True(outcome.Governed.Authorized);
         Assert.Equal("rotated", outcome.Governed.Value);
         Assert.NotNull(Assert.Single(x.Decisions));
         Assert.Single(x.Na.Executions);
@@ -367,14 +367,37 @@ public class BreakGlassTests
     }
 
     [Fact]
-    public async Task AKeyLookupWhoseBodyCannotBeRead_NeverBreaksTheGlass()
+    public async Task AKeyLookupWhoseBodyCannotBeRead_CountsByItsStatus()
     {
-        var x = new Setup(lookup: true);
-        x.Na.Sovereign = () => Cut($$$"""{"network_authority":{"public_key":"{{{NaKey}}}"}}""");
-        var error = await Assert.ThrowsAnyAsync<GenesisMeshException>(() => x.Run());
-        Assert.Equal(("na_public_key_unavailable", 200), (error.Code, error.Status));
+        // No decision was made: a success whose body is cut off is no answer, and a 503 the NA being down.
+        var ok = new Setup(lookup: true);
+        ok.Na.Sovereign = () => Cut($$$"""{"network_authority":{"public_key":"{{{NaKey}}}"}}""");
+        Assert.Equal(EvaluationFailures.NetworkError, (await ok.Broken()).Failure);
+        var down = new Setup(lookup: true);
+        down.Na.Sovereign = () => Cut("""{"error":{"code":"down"}}""", status: HttpStatusCode.ServiceUnavailable);
+        Assert.Equal(EvaluationFailures.ServerError, (await down.Broken()).Failure);
+
+        var missing = new Setup(lookup: true);
+        missing.Na.Sovereign = () => Cut("""{"error":{"code":"not_found"}}""", status: HttpStatusCode.NotFound);
+        var error = await Assert.ThrowsAsync<NotFoundException>(() => missing.Run());
+        Assert.Equal(("na_public_key_unavailable", 404), (error.Code, error.Status));
         Assert.Null(Governance.EvaluationFailure(error));
-        await x.NothingRan();
+        await missing.NothingRan();
+        Assert.Empty(ok.Na.Evaluated.Concat(down.Na.Evaluated).Concat(missing.Na.Evaluated));
+    }
+
+    [Fact]
+    public async Task AnEvaluationAnswered5xxOr429WhoseBodyIsCutOff_NeverBreaksTheGlass()
+    {
+        // As in the TypeScript SDK: whatever the status, the body the NA sent is not known.
+        foreach (var status in new[] { HttpStatusCode.ServiceUnavailable, HttpStatusCode.TooManyRequests })
+        {
+            var x = new Setup();
+            x.Na.Evaluate = _ => Task.FromResult(Cut("""{"error":{"code":"busy","message":"try later"}}""", status: status));
+            var error = await Assert.ThrowsAsync<NetworkException>(() => x.Run());
+            Assert.Equal(NetworkException.ResponseBodyUnreadable, error.Code);
+            await x.NothingRan();
+        }
     }
 
     [Fact]
@@ -445,6 +468,8 @@ public class BreakGlassTests
         var x = new Setup();
         var options = new BreakGlassOptions { Justification = "outage" };
         Func<BoundaryDecision?, CancellationToken, Task<ActionReport<string>?>> action = (_, _) => Task.FromResult<ActionReport<string>?>(null);
+        // Every check faults the task rather than throwing as the method is called.
+        Assert.True(Governance.GovernedAction(null!, x.Recorder, Setup.Request(), options, action).IsFaulted);
         await Assert.ThrowsAsync<ArgumentNullException>(() => Governance.GovernedAction(null!, x.Recorder, Setup.Request(), options, action));
         await Assert.ThrowsAsync<ArgumentNullException>(() => Governance.GovernedAction(x.Gm, null!, Setup.Request(), options, action));
         await Assert.ThrowsAsync<ArgumentNullException>(() => Governance.GovernedAction(x.Gm, x.Recorder, null!, options, action));

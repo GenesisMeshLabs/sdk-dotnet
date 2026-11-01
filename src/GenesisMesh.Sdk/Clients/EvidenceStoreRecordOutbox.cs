@@ -364,7 +364,7 @@ public sealed partial class EvidenceStoreClient
         {
             var answer = await _t.PublicPostAsync<RecordBatchAnswer?>("/evidence/observations/batch",
                 new Dictionary<string, object?> { ["observations"] = batch.Select(e => e.Record).ToList() }, idempotent: true, ct)
-                .ConfigureAwait(false) ?? throw EvidenceOutbox.NoAnswer();
+                .ConfigureAwait(false) ?? throw EvidenceOutbox.EmptyAnswer();
             results = BatchAnswers(answer, batch.Count);
         }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -473,7 +473,7 @@ public sealed partial class EvidenceStoreClient
         try
         {
             submission = await _t.PublicPostAsync<RecordSubmission?>(route.Path,
-                new Dictionary<string, object?> { [route.Field] = entry.Record }, idempotent: true, ct).ConfigureAwait(false) ?? throw EvidenceOutbox.NoAnswer();
+                new Dictionary<string, object?> { [route.Field] = entry.Record }, idempotent: true, ct).ConfigureAwait(false) ?? throw EvidenceOutbox.EmptyAnswer();
             // A success that does not say the NA admitted the record is no answer of the NA's: it may or may not hold it.
             if (!Admits(submission.Status))
                 throw EvidenceOutbox.UnreadAnswer($"the NA's answer to the record has the status {Quoted(submission.Status)}");

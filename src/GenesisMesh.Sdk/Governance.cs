@@ -490,7 +490,15 @@ public static partial class Governance
     /// <c>break_glass_secret_material</c>: the context or the justification holds secret material.
     /// </exception>
     /// <exception cref="StrictJsonException">
-    /// The context or the justification holds a value the NA would not read alike, such as a lone surrogate.
+    /// The context or the justification holds a value the NA would not read alike, such as a lone surrogate, or the NA's
+    /// answer is not strict JSON.
+    /// </exception>
+    /// <exception cref="NetworkException">
+    /// The evaluation's answer could not be read (<c>response_body_unreadable</c>): the NA may have decided, so nothing
+    /// runs.
+    /// </exception>
+    /// <exception cref="GenesisMeshException">
+    /// The NA refused the evaluation, or failed in a way that is no outage, such as <c>admin_auth_throttled</c>.
     /// </exception>
     /// <exception cref="DecisionVerificationException">The decision failed verification, or cannot be verified as asked.</exception>
     /// <exception cref="GovernedActionException">
@@ -519,10 +527,12 @@ public static partial class Governance
     /// The transient failure an evaluation's error is, a value of <see cref="EvaluationFailures"/>, or null for any
     /// other error (a denial is not an error). A request that got no answer is a network error, or a timeout when the
     /// transport's own deadline ended it; an answer is a failure only when it is a 5xx or a 429. That holds for the
-    /// lookup of the NA's key before the request too: its 403 or 404, or a body that cannot be read
-    /// (<c>na_public_key_unavailable</c>), is no failure. Neither is an answer whose body was cut off or stalled
-    /// (<see cref="NetworkException.ResponseBodyUnreadable"/>) or is not strict JSON (<see cref="StrictJsonException"/>):
-    /// the NA answered, perhaps with a denial.
+    /// lookup of the NA's key before the request too, which counts by its status: a 403 or 404
+    /// (<c>na_public_key_unavailable</c>) is no failure, whether its body could be read or not, and a success whose body
+    /// cannot be read is no answer, since the request was not sent and no decision made (the TypeScript SDK reads it as
+    /// <c>na_public_key_unavailable</c>). An answer to the evaluation whose body could not be read
+    /// (<see cref="NetworkException.ResponseBodyUnreadable"/>), whatever its status, or that is not strict JSON
+    /// (<see cref="StrictJsonException"/>), is no failure either: the NA answered, perhaps with a denial.
     /// </summary>
     /// <param name="error">The evaluation's error.</param>
     public static string? EvaluationFailure(Exception error)

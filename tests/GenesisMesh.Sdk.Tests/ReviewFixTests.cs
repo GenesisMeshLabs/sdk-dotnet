@@ -156,6 +156,33 @@ public class ReviewFixTests
     }
 
     [Fact]
+    public async Task EveryWaiterOfALookupWhoseBodyWasCutOff_GetsACopyWithItsCodeAndStatus()
+    {
+        var gate = new TaskCompletionSource();
+        var handler = new AsyncHandler(async (_, _) =>
+        {
+            await gate.Task;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new TransportTests.BrokenStream()) };
+        });
+        using var gm = new GenesisMeshClient(new ClientOptions
+        {
+            BaseUrl = A,
+            SigningKey = TestHelpers.ZeroSeedB64,
+            KeyId = "ops",
+            HttpHandler = handler,
+        });
+        var first = gm.Attestation.Issue(new Dictionary<string, object?> { ["subject_id"] = "s" });
+        var second = gm.Attestation.Issue(new Dictionary<string, object?> { ["subject_id"] = "s" });
+        gate.SetResult();
+        var a = await Assert.ThrowsAsync<NetworkException>(() => first.WaitAsync(TimeSpan.FromSeconds(10)));
+        var b = await Assert.ThrowsAsync<NetworkException>(() => second.WaitAsync(TimeSpan.FromSeconds(10)));
+        // The NA answered /sovereign.json, but its body could not be read: each copy says so, with the status.
+        Assert.NotSame(a.InnerException, b.InnerException);
+        foreach (var inner in new[] { a.InnerException, b.InnerException }.Select(e => Assert.IsType<NetworkException>(e)))
+            Assert.Equal((NetworkException.ResponseBodyUnreadable, 200, false), (inner.Code, inner.AnswerStatus, inner.ConnectFailed));
+    }
+
+    [Fact]
     public async Task ALookupCancelledThroughTheCallersClient_IsNotJoinedLater()
     {
         // A handler that honours its token with ThrowIfCancellationRequested, and CancelPendingRequests on the

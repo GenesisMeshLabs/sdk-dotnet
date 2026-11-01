@@ -160,7 +160,7 @@ values.
 | `Signer` | An `ISigner` for admin requests, used instead of `SigningKey` and `KeyId`: implement it for an HSM, or use `SeedSigner` for a key read at start. |
 | `Headers` | Extra headers on every request, such as for an API gateway in front of the NA. |
 | `HttpHandler` | The handler requests go through, such as a `SocketsHttpHandler` with a `PooledConnectionLifetime`, so that a long-lived client follows DNS changes. The client does not dispose it. |
-| `HttpClient` | An `HttpClient` to send with, such as a typed client from `IHttpClientFactory`; its own `Timeout` applies. The client does not dispose it. A resilience handler in its pipeline must not retry POSTs: a repeated admin request carries the same signature and nonce, and the NA refuses it as a replay after the first may have been applied. |
+| `HttpClient` | An `HttpClient` to send with, such as a typed client from `IHttpClientFactory`; its own `Timeout` applies. The client does not dispose it. A resilience handler in its pipeline must not retry POSTs: a repeated admin request carries the same signature and nonce, and the NA refuses it as a replay after the first may have been applied. Nor should a handler read or buffer the response body: an answer whose body cannot be read would look like no answer, and break the glass of a governed action. |
 | `Timeout` | Each attempt's timeout (each request, and each read of the NA's key); 10 s by default. A call that fails over or retries can take longer. |
 | `Outbox` | Durable storage for signed execution records the NA has not admitted yet: a `FileOutbox`, or your own `IOutbox<OutboxEntry>` (see [Governed actions](#governed-actions)). Give each process its own. |
 | `RecordOutbox` | Durable storage for signed observations and break-glass records the NA has not admitted yet: a `FileRecordOutbox` in a directory of its own, or your own `IOutbox<RecordOutboxEntry>` (see [The record outbox](#the-record-outbox)). Give each process its own. |
@@ -699,12 +699,14 @@ else if (!outcome.Governed.Authorized)
 ```
 
 - **Only on an outage.** The glass breaks when the evaluation gets no answer,
-  times out, or is answered with a 5xx or a 429, for the lookup of the NA's
-  key too (`Governance.EvaluationFailure` names which). A denial, a decision
-  that fails verification, a refusal, an answer whose body is cut off, stalls
-  or is not strict JSON (the NA may have decided), and the NA's
+  times out, or is answered with a readable 5xx or 429
+  (`Governance.EvaluationFailure` names which). A denial, a decision that fails
+  verification, a refusal, an answer whose body is cut off, stalls or is not
+  strict JSON, whatever its status (the NA may have decided), and the NA's
   `admin_auth_throttled` and `evidence_store_unavailable` never break it;
-  cancelling never does either.
+  cancelling never does either. The lookup of the NA's key before the
+  evaluation counts by its status, and a success whose body cannot be read is
+  no answer: it carries no decision.
 - **Checked first.** It needs a record outbox (`record_outbox_required`), a
   resource, an attestation basis (the NA could not judge an agreement it does
   not see) and a requested capability. The context and justification are
