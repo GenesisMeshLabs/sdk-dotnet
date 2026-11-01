@@ -352,10 +352,11 @@ public class ExportVerificationTests
     public void AKindThisSdkDoesNotVerify_StillChains()
     {
         var events = Events();
-        events[2].Entry.EntryKind = "observation";
+        // 1.9.0: remediation records come with the remediation kinds (a later release of this SDK).
+        events[2].Entry.EntryKind = "remediation";
         var result = OfflineVerifier.VerifyEvidenceEvents(Relink(events), Options());
         var unknown = Assert.Single(result.Failures, f => f.Reason == "unknown_entry_kind");
-        Assert.Equal(((long?)3, "observation"), (unknown.StoreSequence, unknown.Detail));
+        Assert.Equal(((long?)3, "remediation"), (unknown.StoreSequence, unknown.Detail));
         Assert.DoesNotContain("store_chain_break", Reasons(result));
     }
 

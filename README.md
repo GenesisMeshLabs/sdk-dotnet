@@ -1053,24 +1053,40 @@ bool kept = OfflineVerifier.VerifyRetentionCheckpoint(checkpointJson, [naKey]);
 - It is a port of the reference's `verify_evidence_events`, with its reason
   codes:
   - each envelope and its digests, and the store chain;
-  - every signature: the NA's on decisions, justification proofs and
-    retention checkpoints, under its keys or the key valid at the time
-    (with a key history), and the executor's on execution evidence;
+  - every signature:
+    - the NA's on decisions, justification proofs, retention checkpoints,
+      judgements, quarantine and registry records, under its keys or the key
+      valid at the time (with a key history);
+    - the executor's on execution evidence and break-glass records, and the
+      observer's on observations, each a registered key of the record's
+      sovereign with the role its kind needs;
   - each execution record against its decision (`evidence_decision_denied`,
-    `evidence_outside_decision_window`, `evidence_capability_mismatch`);
-  - the decision and resource chains.
+    `evidence_outside_decision_window`, `evidence_capability_mismatch`), and
+    never on a judgement or a change record (`evidence_cites_judgement`);
+  - the decision, resource and observation chains (`observation_chain_break`);
+  - each judgement against its subject as stored, once per subject
+    (`judgement_subject_mismatch`, `judgement_subject_missing`,
+    `duplicate_judgement`), and each matched record used once and held before
+    it (`match_reused`, `judgement_match_missing`);
+  - a quarantine entry's record against its digest
+    (`quarantine_digest_mismatch`), and each envelope against its record
+    (`envelope_mismatch`).
 
   A bad entry is a failure, never an exception.
-- It verifies the kinds a governed store holds: decisions, justification
-  proofs, execution evidence and retention checkpoints. Entries of the 1.3.0
-  and later kinds fail as `unknown_entry_kind`; their envelopes still chain.
-  Verify a store holding them with the TypeScript or Rust SDK, or
-  `genesis-mesh audit verify`. Anchors are not checked.
+- It verifies the kinds a governed store holds (decisions, justification
+  proofs, execution evidence, retention checkpoints) and the records of changes
+  outside the governed path (observations, break-glass records, judgements,
+  quarantine and registry records). Entries of the 1.4.0 and later kinds
+  (remediation, reviews, key successions, archives, grants) fail as
+  `unknown_entry_kind`; their envelopes still chain. Verify a store holding
+  them with the TypeScript or Rust SDK, or `genesis-mesh audit verify`.
+  Anchors are not checked.
 - For an export that starts after a retention, pass `Checkpoint`, the
   NA-signed checkpoint as received: the run continues from its last removed
-  entry, and each resource chain from its head.
-- It runs the shared `field_registry` suite's `export` vectors, and gives the
-  reference's own verification of its export.
+  entry, and each resource and observation chain from its head.
+- It runs the shared `field_registry` suite's `export` vectors and the
+  `out_of_band` suite's `verify_export` vectors, and gives the reference's own
+  verification of its export.
 
 ### NA key history
 
