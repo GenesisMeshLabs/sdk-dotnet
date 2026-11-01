@@ -100,6 +100,95 @@ public class ReviewFixTests
     }
 
     [Fact]
+    public async Task ALookupThatFailedButIsNotYetDropped_IsNotJoined()
+    {
+        // The moment between a lookup failing and its drop, held open: a request that comes then looks up anew.
+        var calls = new List<string>();
+        using var handler = new FuncHandler(req =>
+        {
+            calls.Add(req.RequestUri!.AbsolutePath);
+            return req.RequestUri.AbsolutePath == "/sovereign.json"
+                ? Json(200, """{"network_authority":{"public_key":"NA-KEY"}}""")
+                : Json(201, """{"status":"ok"}""");
+        });
+        using var transport = new Transport(new ClientOptions
+        {
+            BaseUrl = A,
+            SigningKey = TestHelpers.ZeroSeedB64,
+            KeyId = "ops",
+            HttpHandler = handler,
+        });
+        typeof(Transport).GetField("_audienceLookup", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(transport, Task.FromException<string>(new NetworkException(new HttpRequestException("connection refused"))));
+        await transport.AdminPostAsync<JsonElement>("/admin/attestations", new { }, idempotent: false, CancellationToken.None);
+        Assert.Equal(["/sovereign.json", "/admin/attestations"], calls);
+    }
+
+    [Fact]
+    public async Task EveryWaiterOfALookupThatGotNoAnswer_GetsItsOwnException()
+    {
+        var gate = new TaskCompletionSource();
+        var handler = new AsyncHandler(async (_, _) =>
+        {
+            await gate.Task;
+            throw new HttpRequestException(HttpRequestError.ConnectionError, "connection refused");
+        });
+        using var gm = new GenesisMeshClient(new ClientOptions
+        {
+            BaseUrl = A,
+            SigningKey = TestHelpers.ZeroSeedB64,
+            KeyId = "ops",
+            HttpHandler = handler,
+        });
+        var first = gm.Attestation.Issue(new Dictionary<string, object?> { ["subject_id"] = "s" });
+        var second = gm.Attestation.Issue(new Dictionary<string, object?> { ["subject_id"] = "s" });
+        gate.SetResult();
+        var a = await Assert.ThrowsAsync<NetworkException>(() => first.WaitAsync(TimeSpan.FromSeconds(10)));
+        var b = await Assert.ThrowsAsync<NetworkException>(() => second.WaitAsync(TimeSpan.FromSeconds(10)));
+        // Each request's error wraps the lookup's own, a copy of its own too.
+        Assert.NotSame(a.InnerException, b.InnerException);
+        foreach (var inner in new[] { a.InnerException, b.InnerException }.Select(e => Assert.IsType<NetworkException>(e)))
+        {
+            Assert.Equal("genesismesh: network error: GET /sovereign.json failed: connection refused", inner.Message);
+            Assert.True(inner.ConnectFailed);
+            Assert.IsType<HttpRequestException>(inner.InnerException);
+        }
+    }
+
+    [Fact]
+    public async Task ALookupCancelledThroughTheCallersClient_IsNotJoinedLater()
+    {
+        // A handler that honours its token with ThrowIfCancellationRequested, and CancelPendingRequests on the
+        // caller's own client: the lookup ends in a cancellation the caller's token did not ask for.
+        var release = new TaskCompletionSource();
+        var lookups = 0;
+        var handler = new AsyncHandler(async (req, ct) =>
+        {
+            if (req.RequestUri!.AbsolutePath != "/sovereign.json") return Json(201, """{"status":"ok"}""");
+            if (Interlocked.Increment(ref lookups) == 1)
+            {
+                await release.Task;
+                ct.ThrowIfCancellationRequested();
+            }
+            return Json(200, """{"network_authority":{"public_key":"NA-KEY"}}""");
+        });
+        using var http = new HttpClient(handler);
+        using var gm = new GenesisMeshClient(new ClientOptions
+        {
+            BaseUrl = A,
+            SigningKey = TestHelpers.ZeroSeedB64,
+            KeyId = "ops",
+            HttpClient = http,
+        });
+        var first = gm.Attestation.Issue(new Dictionary<string, object?> { ["subject_id"] = "s" });
+        http.CancelPendingRequests();
+        release.SetResult();
+        await Assert.ThrowsAsync<NetworkException>(() => first.WaitAsync(TimeSpan.FromSeconds(10)));
+        await gm.Attestation.Issue(new Dictionary<string, object?> { ["subject_id"] = "s" }).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(2, lookups);
+    }
+
+    [Fact]
     public async Task EveryWaiterOfAFailedLookup_GetsItsOwnException()
     {
         var gate = new TaskCompletionSource();

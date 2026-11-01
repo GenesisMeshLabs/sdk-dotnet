@@ -146,24 +146,9 @@ internal sealed class Transport : IDisposable
         Task<string> lookup;
         lock (_audienceGate)
         {
-            if (_audienceLookup is { } running)
-            {
-                lookup = running;
-            }
-            else
-            {
-                lookup = _audienceLookup = LookupAsync();
-                // Dropped as it fails, so the next request starts a new lookup even when every request that waited
-                // for this one was cancelled first.
-                _ = lookup.ContinueWith(failed =>
-                {
-                    lock (_audienceGate)
-                    {
-                        if (ReferenceEquals(_audienceLookup, failed)) _audienceLookup = null;
-                    }
-                }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-                    TaskScheduler.Default);
-            }
+            // A lookup that has failed is never joined: the next request looks up anew, even when every request that
+            // waited for it was cancelled first, or one resumes on another thread as it fails.
+            lookup = _audienceLookup is { IsFaulted: false, IsCanceled: false } running ? running : _audienceLookup = LookupAsync();
         }
         try
         {
@@ -174,6 +159,10 @@ internal sealed class Transport : IDisposable
             // Each waiting request gets an exception of its own: one instance rethrown by several threads at once
             // would share, and garble, one stack trace.
             throw ErrorMapping.Copy(e);
+        }
+        catch (NetworkException e) when (lookup.IsFaulted)
+        {
+            throw e.Copy();
         }
     }
 
@@ -430,9 +419,11 @@ internal sealed class Transport : IDisposable
         {
             throw new NetworkException($"{req.Method} {req.RequestUri?.AbsolutePath} failed: {e.Message}", e, ConnectFailed(e));
         }
-        catch (TaskCanceledException e)
+        catch (OperationCanceledException e)
         {
-            throw new NetworkException(e); // the timeout: the request may have reached the NA
+            // The timeout, or a cancellation the caller did not ask for, such as CancelPendingRequests on their own
+            // client: the request may have reached the NA.
+            throw new NetworkException(e);
         }
     }
 
