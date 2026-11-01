@@ -135,6 +135,12 @@ public class ContractTypesTests
         { "evidence_executor_key_record", typeof(ExecutorKeyRecord) },
         { "evidence_retire_executor_key", typeof(ExecutorKeyState) },
         { "evidence_retention", typeof(RetentionResult) },
+        { "attestation_get", typeof(AttestationRecord) },
+        { "attestation_list", typeof(AttestationList) },
+        { "attestation_count", typeof(AttestationList) },
+        { "attestation_verification", typeof(AttestationVerification) },
+        { "recognition_policy", typeof(RecognitionPolicy) },
+        { "revocation_feed", typeof(SovereignRevocationFeed) },
     };
 
     // 1.9.0: the objects inside each response too, such as the verification and its anchors in a history.
@@ -194,6 +200,9 @@ public class ContractTypesTests
     [InlineData("attestation_issue", typeof(MembershipAttestation))]
     // 1.9.0: execution evidence read from the store and passed back, as the prior record of the next one.
     [InlineData("evidence_execution_record", typeof(ExecutionEvidence))]
+    // 1.9.0: an attestation as stored, and the revocation feed, read and verified.
+    [InlineData("attestation_get", typeof(AttestationRecord))]
+    [InlineData("revocation_feed", typeof(SovereignRevocationFeed))]
     public void PassedBackRecordsKeepTheirSignedForm(string name, Type model)
     {
         var raw = Response(name);

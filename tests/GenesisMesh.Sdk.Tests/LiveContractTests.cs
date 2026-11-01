@@ -505,6 +505,65 @@ public class LiveContractTests
             Assert.Null(await gm.EvidenceStore.LatestCheckpoint());
             Assert.Null((await gm.EvidenceStore.Status()).RetentionCheckpoint);
 
+            // 1.9.0: an attestation as stored and listed, the recognition policy, verification, and the revocation feed.
+            var member = await gm.Attestation.Issue(D(("subject_id", "vendor-feed"), ("roles", new[] { "role:client" })));
+            var memberRecord = await gm.Attestation.Get(member.AttestationId);
+            Modeled("attestation_get", memberRecord);
+            Assert.Equal(("active", member.AttestationId), (memberRecord.Status, memberRecord.Attestation.AttestationId));
+            var members = await gm.Attestation.List(new ListAttestationsParams { SubjectId = "vendor-feed" });
+            Modeled("attestation_list", members);
+            Assert.Equal(member.AttestationId, Assert.Single(members.Attestations!).Attestation.AttestationId);
+            var anonymousRecorder = new Recorder { InnerHandler = new HttpClientHandler() };
+            using (var anonymous = new GenesisMeshClient(new ClientOptions { BaseUrl = baseUrl, HttpHandler = anonymousRecorder }))
+            {
+                var counted = await anonymous.Attestation.List(new ListAttestationsParams { Status = "active" });
+                Modeled("attestation_count", counted, anonymousRecorder.Json);
+                Assert.Null(counted.Attestations);
+                Assert.True(counted.Count >= 3, $"{counted.Count} active attestations");
+                Assert.Equal("admin_auth_failed", (await Assert.ThrowsAsync<UnauthorizedException>(() =>
+                    anonymous.Attestation.List(new ListAttestationsParams { SubjectId = "vendor-feed" }))).Code);
+                Assert.Equal("recognition_policy_not_configured",
+                    (await Assert.ThrowsAsync<NotFoundException>(() => anonymous.Attestation.GetPolicy())).Code);
+            }
+            await gm.Attestation.SavePolicy(D(("policy_id", "contract-recognition"), ("recognition_policy", D(
+                ("local_sovereign_id", network),
+                ("recognized_issuers", new[] { D(("sovereign_id", network), ("public_keys", new[] { naKey }), ("allowed_roles", new[] { "role:client" })) })))));
+            var recognition = await gm.Attestation.GetPolicy();
+            Modeled("recognition_policy", recognition);
+            Assert.Equal((network, naKey), (recognition.LocalSovereignId, recognition.RecognizedIssuers.Single().PublicKeys.Single()));
+            var accepted = await gm.Attestation.Verify(new VerifyAttestationRequest { Attestation = member });
+            Modeled("attestation_verification", accepted);
+            Assert.True(accepted.Accepted, accepted.Reason);
+            // The record's typed attestation and the typed policy, passed back, are what the NA signed and stored.
+            Assert.True((await gm.Attestation.Verify(new VerifyAttestationRequest
+            {
+                Attestation = memberRecord.Attestation,
+                RecognitionPolicy = recognition,
+            })).Accepted);
+            // A policy built in code: its issuer accepts active attestations by default, as the NA reads one.
+            Assert.True((await gm.Attestation.Verify(new VerifyAttestationRequest
+            {
+                Attestation = memberRecord.Attestation,
+                RecognitionPolicy = new RecognitionPolicy
+                {
+                    LocalSovereignId = network,
+                    RecognizedIssuers = [new RecognizedIssuer { SovereignId = network, PublicKeys = [naKey], AllowedRoles = ["role:client"] }],
+                },
+            })).Accepted);
+
+            await gm.Attestation.Revoke(member.AttestationId, D(("reason", "offboarded")));
+            var revokedMember = await gm.Attestation.Get(member.AttestationId);
+            Assert.Equal(("revoked", "offboarded"), (revokedMember.Status, revokedMember.RevocationReason));
+            Assert.NotNull(revokedMember.RevokedAt);
+            var afterRevocation = await gm.Attestation.Verify(new VerifyAttestationRequest { Attestation = member });
+            Assert.Equal((false, "locally_revoked"), (afterRevocation.Accepted, afterRevocation.Reason));
+            var feed = await gm.Attestation.RevocationFeed();
+            Modeled("revocation_feed", feed);
+            Assert.Equal(("offboarded", network), (feed.RevocationReasons[member.AttestationId], feed.IssuerSovereignId));
+            Assert.Contains(member.AttestationId, (await gm.Attestation.RevocationFeed(network)).RevokedAttestationIds);
+            Assert.Equal("feed_issuer_mismatch",
+                (await Assert.ThrowsAsync<BadRequestException>(() => gm.Attestation.RevocationFeed("sovereign-other"))).Code);
+
             Check("policy_deactivate", await gm.Policy.Deactivate("contract-policy", boundaryPolicy.Version));
         }
         finally

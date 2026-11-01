@@ -538,6 +538,192 @@ public sealed class MembershipAttestation : IJsonOnDeserialized
     }
 }
 
+// ── Attestation reads (1.9.0) ─────────────────────────────────────────────────
+
+/// <summary>
+/// A stored attestation with its current status (GET /attestations/&lt;id&gt;, and each entry of an operator's list).
+/// The signed body keeps the status it was issued with: <see cref="Status"/> is what holds now.
+/// </summary>
+public sealed class AttestationRecord
+{
+    /// <summary>The attestation as the NA signed it.</summary>
+    [JsonPropertyName("attestation")]
+    public MembershipAttestation Attestation { get; set; } = new();
+
+    /// <summary><c>active</c>, <c>suspended</c> or <c>revoked</c>, now.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    /// <summary>When it was revoked; null while it is not.</summary>
+    [JsonPropertyName("revoked_at")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? RevokedAt { get; set; }
+
+    /// <summary>Why it was revoked; null while it is not.</summary>
+    [JsonPropertyName("revocation_reason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? RevocationReason { get; set; }
+
+    /// <summary>v1.8.0: the copy this one re-issues under the NA's current key; null for an original.</summary>
+    [JsonPropertyName("reissued_from")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? ReissuedFrom { get; set; }
+
+    /// <summary>v1.8.0: the copy that re-issued this one under the NA's current key; null while none has.</summary>
+    [JsonPropertyName("superseded_by")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? SupersededBy { get; set; }
+}
+
+/// <summary>Returned by GET /attestations (<see cref="AttestationClient.List"/>).</summary>
+public sealed class AttestationList
+{
+    /// <summary>How many attestations match.</summary>
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
+    /// <summary>The attestations, for an operator-signed request; null for an unsigned one, which gets the count only.</summary>
+    [JsonPropertyName("attestations")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<AttestationRecord>? Attestations { get; set; }
+}
+
+/// <summary>Filters for <see cref="AttestationClient.List"/>; every filter left null matches everything.</summary>
+public sealed class ListAttestationsParams
+{
+    /// <summary>The issuing sovereign. Needs a signing key.</summary>
+    public string? IssuerSovereignId { get; init; }
+    /// <summary>The member. Needs a signing key.</summary>
+    public string? SubjectId { get; init; }
+    /// <summary><c>active</c>, <c>suspended</c> or <c>revoked</c>.</summary>
+    public string? Status { get; init; }
+}
+
+/// <summary>A request to <see cref="AttestationClient.Verify"/>.</summary>
+public sealed class VerifyAttestationRequest
+{
+    /// <summary>The attestation, as its issuer signed it.</summary>
+    [JsonPropertyName("attestation")]
+    public MembershipAttestation Attestation { get; set; } = new();
+
+    /// <summary>The policy to verify it against; null for the NA's active one.</summary>
+    [JsonPropertyName("recognition_policy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RecognitionPolicy? RecognitionPolicy { get; set; }
+}
+
+/// <summary>Returned by POST /attestations/verify.</summary>
+public sealed class AttestationVerification
+{
+    /// <summary>True when the policy accepts the attestation.</summary>
+    [JsonPropertyName("accepted")]
+    public bool Accepted { get; set; }
+
+    /// <summary>
+    /// <c>accepted</c>, or why not: <c>missing_signature</c>, <c>invalid_signature</c>, <c>unknown_issuer</c>,
+    /// <c>bad_status</c>, <c>outside_validity_window</c>, <c>role_not_allowed</c>, <c>locally_revoked</c>, or (v1.8.0, for
+    /// the NA's own attestations) <c>not_held</c> and <c>outlives_key</c>.
+    /// </summary>
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    /// <summary>The attestation's issuer, when it could be read.</summary>
+    [JsonPropertyName("issuer_sovereign_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? IssuerSovereignId { get; set; }
+
+    /// <summary>The attestation's ID, when it could be read.</summary>
+    [JsonPropertyName("attestation_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? AttestationId { get; set; }
+}
+
+/// <summary>A sovereign's policy for accepting other sovereigns' membership attestations (GET /recognition-policy).</summary>
+public sealed class RecognitionPolicy
+{
+    /// <summary>The sovereign applying the policy.</summary>
+    [JsonPropertyName("local_sovereign_id")]
+    public string LocalSovereignId { get; set; } = "";
+
+    /// <summary>The issuers it accepts.</summary>
+    [JsonPropertyName("recognized_issuers")]
+    public List<RecognizedIssuer> RecognizedIssuers { get; set; } = [];
+
+    /// <summary>Attestations it refuses whatever their issuer's status, by ID.</summary>
+    [JsonPropertyName("revoked_attestation_ids")]
+    public List<string> RevokedAttestationIds { get; set; } = [];
+}
+
+/// <summary>One issuer a <see cref="RecognitionPolicy"/> accepts.</summary>
+public sealed class RecognizedIssuer
+{
+    /// <summary>The issuing sovereign.</summary>
+    [JsonPropertyName("sovereign_id")]
+    public string SovereignId { get; set; } = "";
+
+    /// <summary>Its accepted signing keys, base64 Ed25519.</summary>
+    [JsonPropertyName("public_keys")]
+    public List<string> PublicKeys { get; set; } = [];
+
+    /// <summary>The roles it may attest; empty grants none.</summary>
+    [JsonPropertyName("allowed_roles")]
+    public List<string> AllowedRoles { get; set; } = [];
+
+    /// <summary>
+    /// The attestation statuses accepted from it; by default <c>active</c>, as the NA reads an issuer that names none.
+    /// Empty accepts no attestation.
+    /// </summary>
+    [JsonPropertyName("accepted_statuses")]
+    public List<string> AcceptedStatuses { get; set; } = ["active"];
+}
+
+/// <summary>
+/// A sovereign's signed feed of the attestations it revoked (GET /sovereign-revocation-feed). Serialized as the NA
+/// sends it: <see cref="RevokedGrantIds"/> is left out when absent, as the NA signs it.
+/// </summary>
+public sealed class SovereignRevocationFeed
+{
+    /// <summary>The feed's ID (a UUID).</summary>
+    [JsonPropertyName("feed_id")]
+    public string FeedId { get; set; } = "";
+
+    /// <summary>The sovereign whose revocations it lists.</summary>
+    [JsonPropertyName("issuer_sovereign_id")]
+    public string IssuerSovereignId { get; set; } = "";
+
+    /// <summary>How many revocations it counts; it never goes back.</summary>
+    [JsonPropertyName("sequence")]
+    public long Sequence { get; set; }
+
+    /// <summary>When the NA signed it.</summary>
+    [JsonPropertyName("issued_at")]
+    public string IssuedAt { get; set; } = "";
+
+    /// <summary>v1.8.0: every revoked copy, superseded ones included.</summary>
+    [JsonPropertyName("revoked_attestation_ids")]
+    public List<string> RevokedAttestationIds { get; set; } = [];
+
+    /// <summary>Why each was revoked, by ID.</summary>
+    [JsonPropertyName("revocation_reasons")]
+    public Dictionary<string, string> RevocationReasons { get; set; } = [];
+
+    /// <summary>The NA key that signed it.</summary>
+    [JsonPropertyName("issued_by")]
+    public string IssuedBy { get; set; } = "";
+
+    /// <summary>The NA's signatures, a list of <c>{"key_id", "sig"}</c>, over the feed without them.</summary>
+    [JsonPropertyName("signatures")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signatures { get; set; }
+
+    /// <summary>
+    /// v1.6.0, left out when absent: with grants on, the grants the issuer revoked that are not yet past their end.
+    /// </summary>
+    [JsonPropertyName("revoked_grant_ids")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? RevokedGrantIds { get; set; }
+}
+
 // ── Disclosure ────────────────────────────────────────────────────────────────
 
 /// <summary>Returned by POST /admin/disclosure/commit.</summary>
