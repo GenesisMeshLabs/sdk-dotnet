@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
@@ -336,10 +337,75 @@ public class TransportTests
         });
         using var transport = SingleTransport(handler, new RetrySettings { Attempts = 1, BaseDelay = TimeSpan.Zero });
         var ex = await Assert.ThrowsAsync<NetworkException>(() => transport.PublicGetAsync<JsonElement>("/test"));
-        Assert.False(ex.ConnectFailed);
+        Assert.Equal((false, NetworkException.ResponseBodyUnreadable), (ex.ConnectFailed, ex.Code));
         Assert.Equal(2, calls);
         await Assert.ThrowsAsync<NetworkException>(() => transport.AdminPostAsync<JsonElement>("/admin/attestations", new { }));
         Assert.Equal(3, calls);
+    }
+
+    [Fact]
+    public async Task AStalledResponseBody_IsUnreadable_WithinTheRequestTimeout()
+    {
+        using var handler = new FuncHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StalledStream()) });
+        using var transport = new Transport(new ClientOptions
+        {
+            BaseUrl = A,
+            Timeout = TimeSpan.FromMilliseconds(200),
+            Retry = new RetrySettings { Attempts = 0 },
+            HttpHandler = handler,
+        });
+        var watch = Stopwatch.StartNew();
+        var ex = await Assert.ThrowsAsync<NetworkException>(() => transport.PublicGetAsync<JsonElement>("/test").WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal((false, NetworkException.ResponseBodyUnreadable), (ex.ConnectFailed, ex.Code));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), watch.Elapsed.ToString());
+    }
+
+    [Fact]
+    public async Task CancellingWhileTheBodyIsRead_IsACancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        using var handler = new FuncHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StalledStream(cts)) });
+        using var transport = SingleTransport(handler, new RetrySettings { Attempts = 0 });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => transport.PublicGetAsync<JsonElement>("/test", cts.Token).WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task AClientWithoutATimeout_ReadsTheBody()
+    {
+        using var http = new HttpClient(new FuncHandler(_ => Json(200, """{"ok":true}"""))) { Timeout = Timeout.InfiniteTimeSpan };
+        using var transport = new Transport(new ClientOptions { BaseUrl = A, HttpClient = http });
+        Assert.True((await transport.PublicGetAsync<JsonElement>("/test")).GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
+    public async Task NoAnswer_IsANetworkErrorOfItsOwnCode()
+    {
+        using var handler = new FuncHandler(_ => throw new HttpRequestException(HttpRequestError.ConnectionError, "connection refused"));
+        using var transport = SingleTransport(handler, new RetrySettings { Attempts = 0 });
+        var ex = await Assert.ThrowsAsync<NetworkException>(() => transport.PublicGetAsync<JsonElement>("/test"));
+        Assert.Equal((true, NetworkException.NoAnswer), (ex.ConnectFailed, ex.Code));
+        Assert.Equal(NetworkException.NoAnswer, new NetworkException(new TimeoutException()).Code);
+    }
+
+    [Fact]
+    public async Task AKeyLookupWhoseBodyCannotBeRead_IsUnavailable_WithItsStatus()
+    {
+        var calls = new List<string>();
+        using var handler = new FuncHandler(req =>
+        {
+            calls.Add(req.RequestUri!.AbsolutePath);
+            return req.RequestUri.AbsolutePath == "/sovereign.json"
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new BrokenStream()) }
+                : Json(201, "{}");
+        });
+        using var gm = Client(handler, o =>
+        {
+            o.BaseUrls = null;
+            o.BaseUrl = A;
+        });
+        var ex = await Assert.ThrowsAnyAsync<GenesisMeshException>(() => gm.Attestation.Issue(Attestation()));
+        Assert.Equal(("na_public_key_unavailable", 200), (ex.Code, ex.Status));
+        Assert.Equal(["/sovereign.json"], calls);
     }
 
     [Fact]
@@ -646,6 +712,32 @@ public class TransportTests
         new((HttpStatusCode)status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
     /// <summary>A response body whose connection drops while it is read.</summary>
+    /// <summary>A body that never ends: it waits until its read is cancelled, after cancelling the caller's token if given.</summary>
+    private sealed class StalledStream(CancellationTokenSource? cancel = null) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (cancel is not null) await cancel.CancelAsync();
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private sealed class BrokenStream : Stream
     {
         public override bool CanRead => true;

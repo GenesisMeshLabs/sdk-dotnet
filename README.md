@@ -694,15 +694,16 @@ var outcome = await Governance.GovernedAction(client, executor, request,
     });
 if (outcome.BrokeGlass)
     Alert(outcome.BreakGlass.Failure, outcome.BreakGlass.Queued);   // network_error, timeout, server_error or rate_limited
-else if (!outcome.Governed!.Authorized)
+else if (!outcome.Governed.Authorized)
     Log(outcome.Governed.Summary.EnforcedFailures);
 ```
 
 - **Only on an outage.** The glass breaks when the evaluation gets no answer,
   times out, or is answered with a 5xx or a 429, for the lookup of the NA's
   key too (`Governance.EvaluationFailure` names which). A denial, a decision
-  that fails verification, a refusal, an answer this SDK cannot read, and the
-  NA's `admin_auth_throttled` and `evidence_store_unavailable` never break it;
+  that fails verification, a refusal, an answer whose body is cut off, stalls
+  or is not strict JSON (the NA may have decided), and the NA's
+  `admin_auth_throttled` and `evidence_store_unavailable` never break it;
   cancelling never does either.
 - **Checked first.** It needs a record outbox (`record_outbox_required`), a
   resource, an attestation basis (the NA could not judge an agreement it does
@@ -715,7 +716,9 @@ else if (!outcome.Governed!.Authorized)
   outcome alone when the rest is still refused; an outcome detail is cut to
   1024 characters. When the action throws, a `failure` record is kept and the
   error rethrown. A record the outbox cannot keep throws
-  `EvidenceNotKeptException` with the action's value: do not run it again.
+  `EvidenceNotKeptException` with the action's value and the signed record
+  (`BreakGlassRecord`): keep or submit it once you can, and do not run the
+  action again.
 - `BreakGlass.Submission` is set when the NA was back in time to admit the
   record; otherwise `BreakGlass.Queued` is the entry `FlushRecords` submits,
   break-glass records first.
@@ -1271,7 +1274,10 @@ break-glass record is signed when the NA would refuse it, with the NA's code
 
 A connection failure or timeout is a `NetworkException`. Its `ConnectFailed`
 is true when the request did not reach the NA, so sending it again cannot
-apply it twice. A 2xx response that
+apply it twice. From 1.9 its `Code` is `network_error`, or
+`response_body_unreadable` when the NA answered but the body was cut off or
+stalled past the request timeout, which covers the whole answer: the request
+reached the NA and may have been applied. A 2xx response that
 is not strict JSON (duplicate keys, `-0`, lone surrogates, ...) throws
 `StrictJsonException`, a `JsonException`, not a `GenesisMeshException`. Cancelling through
 your own `CancellationToken` throws `OperationCanceledException`.

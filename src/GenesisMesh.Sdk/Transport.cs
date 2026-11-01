@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Runtime.ExceptionServices;
@@ -137,8 +138,8 @@ internal sealed class Transport : IDisposable
     /// <summary>
     /// The NA's public key for admin signatures, read once from /sovereign.json. Requests that need it at the same
     /// time share one lookup. A lookup that gets no answer throws <see cref="NetworkException"/>; an answer without
-    /// the key throws <c>na_public_key_unavailable</c> with the answer's status. A failed lookup is tried again by the
-    /// next request.
+    /// the key, or whose body cannot be read, throws <c>na_public_key_unavailable</c> with the answer's status. A failed
+    /// lookup is tried again by the next request.
     /// </summary>
     private async Task<string> AudienceAsync(CancellationToken ct)
     {
@@ -178,7 +179,9 @@ internal sealed class Transport : IDisposable
         byte[] body;
         try
         {
-            (status, body) = await GetAtAsync(Endpoint(used), "/sovereign.json", CancellationToken.None).ConfigureAwait(false);
+            // An answer whose body cannot be read is one without the key, and keeps its status, as the TypeScript SDK
+            // reads it.
+            (status, body) = await GetAtAsync(Endpoint(used), "/sovereign.json", CancellationToken.None, unreadable: []).ConfigureAwait(false);
         }
         catch (NetworkException)
         {
@@ -399,27 +402,67 @@ internal sealed class Transport : IDisposable
             req.Content = new StringContent(json, Encoding.UTF8, new MediaTypeHeaderValue("application/json"));
         }
 
-        // The body is read in full before SendAsync returns, so a dropped body is a NetworkException there.
+        var started = Stopwatch.GetTimestamp();
         using var resp = await SendOnceAsync(req, ct).ConfigureAwait(false);
         // The bytes, so a body that is not UTF-8 is refused rather than repaired.
-        var bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        var bytes = await BodyAsync(req, resp, started, ct).ConfigureAwait(false);
         return new Answer((int)resp.StatusCode, bytes, RetryAfter(resp.Headers.RetryAfter));
     }
 
-    /// <summary>An unauthenticated GET to one endpoint: its status and body bytes.</summary>
-    private async Task<(int Status, byte[] Body)> GetAtAsync(string baseUrl, string path, CancellationToken ct)
+    /// <summary>
+    /// An unauthenticated GET to one endpoint: its status and body bytes. With <paramref name="unreadable"/>, a body
+    /// that cannot be read is returned as it, with the answer's status, rather than thrown.
+    /// </summary>
+    private async Task<(int Status, byte[] Body)> GetAtAsync(string baseUrl, string path, CancellationToken ct, byte[]? unreadable = null)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, baseUrl + path);
         foreach (var (name, value) in _headers) req.Headers.TryAddWithoutValidation(name, value);
+        var started = Stopwatch.GetTimestamp();
         using var resp = await SendOnceAsync(req, ct).ConfigureAwait(false);
-        return ((int)resp.StatusCode, await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false));
+        try
+        {
+            return ((int)resp.StatusCode, await BodyAsync(req, resp, started, ct).ConfigureAwait(false));
+        }
+        catch (NetworkException) when (unreadable is not null)
+        {
+            return ((int)resp.StatusCode, unreadable);
+        }
     }
 
+    /// <summary>
+    /// The body of an answer, read within what is left of the request timeout (1.9.0). A body cut off or stalled is a
+    /// <see cref="NetworkException"/> of code <see cref="NetworkException.ResponseBodyUnreadable"/>: the NA answered,
+    /// and may have acted or decided, so it is told from a request that got no answer.
+    /// </summary>
+    private async Task<byte[]> BodyAsync(HttpRequestMessage req, HttpResponseMessage resp, long started, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (_http.Timeout != Timeout.InfiniteTimeSpan)
+            deadline.CancelAfter(TimeSpan.FromTicks(Math.Max(0, (_http.Timeout - Stopwatch.GetElapsedTime(started)).Ticks)));
+        try
+        {
+            return await resp.Content.ReadAsByteArrayAsync(deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // the caller cancelled; not a network error
+        }
+        catch (Exception e)
+        {
+            throw new NetworkException($"{req.Method} {req.RequestUri?.AbsolutePath} answered {(int)resp.StatusCode}, but its body could not be read: {e.Message}",
+                e, connectFailed: false, NetworkException.ResponseBodyUnreadable);
+        }
+    }
+
+    /// <summary>
+    /// Sends <paramref name="req"/> and returns once the answer's headers are in (1.9.0): its body is read apart
+    /// (<see cref="BodyAsync"/>), so an answer whose body cannot be read is told from no answer.
+    /// </summary>
     private async Task<HttpResponseMessage> SendOnceAsync(HttpRequestMessage req, CancellationToken ct)
     {
         try
         {
-            return await _http.SendAsync(req, ct).ConfigureAwait(false);
+            return await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

@@ -90,6 +90,8 @@ public class BreakGlassTests
                     Tamper?.Invoke(decision);
                     return Json(200, evaluation.ToJsonString());
                 case "/evidence/break-glass":
+                    // As a connection would: a record sent with a cancelled token is not sent.
+                    ct.ThrowIfCancellationRequested();
                     Glasses.Add(JsonNode.Parse(text!)!["record"]!.AsObject());
                     return Glass();
                 case "/evidence/execution":
@@ -108,6 +110,55 @@ public class BreakGlassTests
         }
 
         public BreakGlassRecord Sent(int i) => JsonSerializer.Deserialize<BreakGlassRecord>(Glasses[i].ToJsonString(), Auth.SerializerOptions)!;
+    }
+
+    /// <summary>A body that yields its first half, then fails, or waits until its read is cancelled.</summary>
+    private sealed class CutStream(byte[] bytes, bool stall) : Stream
+    {
+        private int _position;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => _position; set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var cut = bytes.Length / 2;
+            if (_position >= cut)
+            {
+                if (stall) await Task.Delay(Timeout.Infinite, cancellationToken);
+                throw new IOException("The response ended prematurely.");
+            }
+            var n = Math.Min(buffer.Length, cut - _position);
+            bytes.AsMemory(_position, n).CopyTo(buffer);
+            _position += n;
+            return n;
+        }
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private static HttpResponseMessage Cut(string body, bool stall = false) =>
+        new(HttpStatusCode.OK) { Content = new StreamContent(new CutStream(Encoding.UTF8.GetBytes(body), stall)) };
+
+    /// <summary>A signer that refuses a cancelled token, as a remote signer would.</summary>
+    private sealed class TokenSigner(ISigner inner) : ISigner
+    {
+        public string KeyId => inner.KeyId;
+
+        public ValueTask<byte[]> SignAsync(ReadOnlyMemory<byte> message, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return inner.SignAsync(message, cancellationToken);
+        }
     }
 
     /// <summary>A memory record outbox whose reads and additions can fail.</summary>
@@ -142,8 +193,9 @@ public class BreakGlassTests
             ExecutionParameters = new Dictionary<string, object?> { ["version_id"] = "v9" },
         };
 
-        public Setup(bool recordOutbox = true, bool lookup = false)
+        public Setup(bool recordOutbox = true, bool lookup = false, TimeSpan? timeout = null, ExecutionRecorder? recorder = null)
         {
+            Recorder = recorder ?? Recorder;
             Gm = new GenesisMeshClient(new ClientOptions
             {
                 BaseUrl = "http://localhost",
@@ -151,6 +203,7 @@ public class BreakGlassTests
                 KeyId = "ops",
                 Audience = lookup ? null : "TEST",
                 Retry = new RetrySettings { Attempts = 0 },
+                Timeout = timeout ?? TimeSpan.Zero,
                 HttpHandler = new AsyncHandler(Na.Answer),
                 RecordOutbox = recordOutbox ? Records : null,
             });
@@ -175,13 +228,21 @@ public class BreakGlassTests
             },
         };
 
+        /// <summary>Cancelled by the action, after it records its decision, when set.</summary>
+        public CancellationTokenSource? CancelInAction { get; set; }
+
+        /// <summary>The token the action was given.</summary>
+        public CancellationToken ActionToken { get; private set; }
+
         public Task<GovernedOutcome<string>> Run(GovernedActionRequest? request = null, string justification = "incident 42: rotate the leaked key now",
             CancellationToken ct = default) =>
             Governance.GovernedAction(Gm, Recorder, request ?? Request(), new BreakGlassOptions { Justification = justification },
-                (decision, _) =>
+                async (decision, token) =>
                 {
                     Decisions.Add(decision);
-                    return Task.FromResult(Report());
+                    ActionToken = token;
+                    if (CancelInAction is { } cancel) await cancel.CancelAsync();
+                    return Report();
                 }, ct);
 
         public async Task<BreakGlassResult<string>> Broken(GovernedActionRequest? request = null, string justification = "incident 42: rotate the leaked key now")
@@ -292,6 +353,30 @@ public class BreakGlassTests
         await x.NothingRan();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ADenialWhoseBodyIsCutOffOrStalls_NeverBreaksTheGlass(bool stall)
+    {
+        var x = new Setup(timeout: TimeSpan.FromMilliseconds(300));
+        x.Na.Evaluate = _ => Task.FromResult(Cut(Vector("denied").ToJsonString(), stall));
+        var error = await Assert.ThrowsAsync<NetworkException>(() => x.Run().WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal((NetworkException.ResponseBodyUnreadable, false), (error.Code, error.ConnectFailed));
+        Assert.Null(Governance.EvaluationFailure(error));
+        await x.NothingRan();
+    }
+
+    [Fact]
+    public async Task AKeyLookupWhoseBodyCannotBeRead_NeverBreaksTheGlass()
+    {
+        var x = new Setup(lookup: true);
+        x.Na.Sovereign = () => Cut($$$"""{"network_authority":{"public_key":"{{{NaKey}}}"}}""");
+        var error = await Assert.ThrowsAnyAsync<GenesisMeshException>(() => x.Run());
+        Assert.Equal(("na_public_key_unavailable", 200), (error.Code, error.Status));
+        Assert.Null(Governance.EvaluationFailure(error));
+        await x.NothingRan();
+    }
+
     [Fact]
     public async Task AnAnswerThatCannotBeRead_NeverBreaksTheGlass()
     {
@@ -355,8 +440,30 @@ public class BreakGlassTests
     }
 
     [Fact]
+    public async Task ArgumentsAreChecked_AsTheOtherOverloadChecksThem()
+    {
+        var x = new Setup();
+        var options = new BreakGlassOptions { Justification = "outage" };
+        Func<BoundaryDecision?, CancellationToken, Task<ActionReport<string>?>> action = (_, _) => Task.FromResult<ActionReport<string>?>(null);
+        await Assert.ThrowsAsync<ArgumentNullException>(() => Governance.GovernedAction(null!, x.Recorder, Setup.Request(), options, action));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => Governance.GovernedAction(x.Gm, null!, Setup.Request(), options, action));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => Governance.GovernedAction(x.Gm, x.Recorder, null!, options, action));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => Governance.GovernedAction(x.Gm, x.Recorder, Setup.Request(), null!, action));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => Governance.GovernedAction<string>(x.Gm, x.Recorder, Setup.Request(), options, null!));
+        Assert.Empty(x.Na.Evaluated);
+    }
+
+    [Fact]
+    public void AnOutcome_HoldsOneResult()
+    {
+        Assert.False(new GovernedOutcome<string> { Governed = new GovernedActionResult<string>() }.BrokeGlass);
+        Assert.Throws<InvalidOperationException>(() => new GovernedOutcome<string>().BrokeGlass);
+    }
+
+    [Fact]
     public void EvaluationFailure_NamesOnlyTheFailuresALaterAttemptCanOvercome()
     {
+        Assert.Null(Governance.EvaluationFailure(new NetworkException("cut off", new IOException(), connectFailed: false, NetworkException.ResponseBodyUnreadable)));
         Assert.Equal(EvaluationFailures.NetworkError, Governance.EvaluationFailure(new NetworkException(new HttpRequestException("refused"))));
         Assert.Equal(EvaluationFailures.Timeout, Governance.EvaluationFailure(new NetworkException(new TaskCanceledException())));
         Assert.Equal(EvaluationFailures.Timeout,
@@ -462,23 +569,26 @@ public class BreakGlassTests
         await x.NothingRan();
     }
 
-    [Fact]
-    public async Task AContextThatLeavesRoomForTheReport_IsTakenToTheByte()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AContextThatLeavesRoomForTheReport_IsTakenToTheByte(bool inRequestParameters)
     {
         // The carried metadata is {"attributes":{"note":"..."},"execution_parameters":{},"justification":"j",
         // "outcome_detail":"","request_parameters":{}}: 116 bytes besides the note, so a note of 14220 leaves 2048.
-        GovernedActionRequest Note(int length) => new()
+        GovernedActionRequest Note(int length)
         {
-            AttestationId = AttestationId,
-            RequestedCapability = "sp-secret.rotate",
-            ResourceId = "kv:v/s",
-            ResourceAction = ResourceActions.Rotate,
-            Context = new EvaluationContext
+            var note = new Dictionary<string, object?> { ["note"] = string.Concat(Enumerable.Repeat("a short note, ", 1100))[..length] };
+            return new()
             {
-                Attributes = new Dictionary<string, object?> { ["note"] = string.Concat(Enumerable.Repeat("a short note, ", 1100))[..length] },
-            },
-            Verify = Setup.Request().Verify,
-        };
+                AttestationId = AttestationId,
+                RequestedCapability = "sp-secret.rotate",
+                ResourceId = "kv:v/s",
+                ResourceAction = ResourceActions.Rotate,
+                Context = inRequestParameters ? new EvaluationContext { RequestParameters = note } : new EvaluationContext { Attributes = note },
+                Verify = Setup.Request().Verify,
+            };
+        }
         var x = new Setup();
         x.Na.Evaluate = _ => Task.FromResult(Offline());
         x.Report = () => null;
@@ -512,6 +622,8 @@ public class BreakGlassTests
         Assert.Equal(("governed_action_unrecorded", "cloud refused", "disk full"),
             (error.Code, error.InnerException!.Message, error.EvidenceError.Message));
         Assert.Null(error.Evidence);
+        Assert.Equal((ExecutionOutcomes.Failure, "action failed"), (error.BreakGlassRecord!.Outcome, error.BreakGlassRecord.OutcomeDetail));
+        Assert.True(OfflineVerifier.VerifyOutOfBandRecord(Text(error.BreakGlassRecord), [NaKey]));
     }
 
     [Fact]
@@ -523,6 +635,8 @@ public class BreakGlassTests
         var error = await Assert.ThrowsAsync<EvidenceNotKeptException>(() => x.Run());
         Assert.Equal(("governed_action_evidence_unkept", "rotated", "disk full"), (error.Code, error.Value, error.InnerException!.Message));
         Assert.Null(error.Evidence);
+        Assert.Equal("""{"version_id":"v9"}""", error.BreakGlassRecord!.ExecutionParameters.GetRawText());
+        Assert.True(OfflineVerifier.VerifyOutOfBandRecord(Text(error.BreakGlassRecord), [NaKey]));
         Assert.Single(x.Decisions);
     }
 
@@ -598,7 +712,7 @@ public class BreakGlassTests
         var x = new Setup();
         x.Na.Evaluate = _ => Task.FromResult(Offline());
         x.Na.Glass = Offline;
-        var big = Enumerable.Range(0, 300).ToDictionary(i => $"k{i:D3}", i => (object?)$"item {i} of the report");
+        var big = Enumerable.Range(0, 300).Reverse().ToDictionary(i => $"k{i:D3}", i => (object?)$"item {i} of the report");
         x.Report = () => new ActionReport<string> { ExecutionParameters = big, OutcomeDetail = string.Concat(Enumerable.Repeat("a long detail, ", 100)) };
         var request = new GovernedActionRequest
         {
@@ -630,6 +744,7 @@ public class BreakGlassTests
             (string.Concat(Enumerable.Repeat("one more detail, ", 90)), string.Concat(Enumerable.Repeat("one more detail, ", 90))[..1023] + "\u2026"),
             (string.Concat(Enumerable.Repeat("\ud83d\udea8", 1100)), string.Concat(Enumerable.Repeat("\ud83d\udea8", 1023)) + "\u2026"),
             (Words(1024), Words(1024)),
+            (string.Concat(Enumerable.Repeat("\ud83d\udea8", 600)), string.Concat(Enumerable.Repeat("\ud83d\udea8", 600))),
             (Words(1025), Words(1023) + "\u2026"),
         })
         {
@@ -653,16 +768,21 @@ public class BreakGlassTests
     }
 
     [Fact]
-    public async Task ACancellationAfterTheEvaluationFailed_RunsNoAction()
+    public async Task TheActionGetsTheCallersToken_AndACancellationDuringIt_StillKeepsItsRecord()
     {
-        var x = new Setup();
+        var x = new Setup(recorder: new ExecutionRecorder("executor", new TokenSigner(new SeedSigner(TestHelpers.ZeroSeedB64, "test"))));
+        x.Na.Evaluate = _ => Task.FromResult(Offline());
+        var glass = x.Na.Glass;
         using var cts = new CancellationTokenSource();
-        x.Na.Evaluate = async _ =>
-        {
-            await cts.CancelAsync();
-            return Offline();
-        };
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => x.Run(ct: cts.Token));
-        await x.NothingRan();
+        x.CancelInAction = cts;
+        var result = (await x.Run(ct: cts.Token)).BreakGlass!;
+        Assert.Equal(cts.Token, x.ActionToken);
+        Assert.Equal("recorded", result.Submission!.Status);
+
+        using var again = new CancellationTokenSource();
+        x.CancelInAction = again;
+        x.Report = () => throw new InvalidOperationException("cloud refused");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => x.Run(ct: again.Token));
+        Assert.Equal(ExecutionOutcomes.Failure, x.Na.Sent(1).Outcome);
     }
 }

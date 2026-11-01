@@ -62,20 +62,31 @@ public class GenesisMeshException : Exception
 }
 
 /// <summary>
-/// Wraps connection-level failures (timeout, DNS, etc.). Cancellation through the caller's own
+/// Wraps connection-level failures (timeout, DNS, etc.), and from 1.9.0 an answer whose body could not be read
+/// (<see cref="Code"/> <c>response_body_unreadable</c>). Cancellation through the caller's own
 /// <see cref="CancellationToken"/> is not one (1.8.0): it surfaces as <see cref="OperationCanceledException"/>.
 /// </summary>
 public sealed class NetworkException : Exception
 {
+    /// <summary>The code of a request that got no answer.</summary>
+    public const string NoAnswer = "network_error";
+
+    /// <summary>
+    /// The code of an answer whose body was cut off or stalled past the request timeout: the NA answered, and may have
+    /// acted or decided.
+    /// </summary>
+    public const string ResponseBodyUnreadable = "response_body_unreadable";
+
     /// <summary>A failure to reach the NA, caused by <paramref name="inner"/>.</summary>
     /// <param name="inner">The timeout or connection error.</param>
     public NetworkException(Exception inner)
         : base($"genesismesh: network error: {inner.Message}", inner) { }
 
-    internal NetworkException(string message, Exception? inner, bool connectFailed)
+    internal NetworkException(string message, Exception? inner, bool connectFailed, string code = NoAnswer)
         : base($"genesismesh: network error: {message}", inner)
     {
         ConnectFailed = connectFailed;
+        Code = code;
     }
 
     private NetworkException(NetworkException other)
@@ -86,6 +97,12 @@ public sealed class NetworkException : Exception
 
     /// <summary>The same failure, as an instance of its own for one more request that waited for it.</summary>
     internal NetworkException Copy() => new(this);
+
+    /// <summary>
+    /// <see cref="NoAnswer"/> (<c>network_error</c>), or <see cref="ResponseBodyUnreadable"/> when the NA answered but
+    /// the body of its answer could not be read (1.9.0), as the TypeScript SDK names them.
+    /// </summary>
+    public string Code { get; } = NoAnswer;
 
     /// <summary>
     /// True when the request did not reach the NA: the connection could not be made, or the request was not sent.

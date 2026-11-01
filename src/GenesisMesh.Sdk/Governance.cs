@@ -160,7 +160,7 @@ public sealed class BreakGlassResult<T>
     public string Failure { get; init; } = "";
 
     /// <summary>The evaluation's error.</summary>
-    public Exception? EvaluationError { get; init; }
+    public required Exception EvaluationError { get; init; }
 
     /// <summary>The action's value.</summary>
     public T? Value { get; init; }
@@ -185,9 +185,22 @@ public sealed class BreakGlassResult<T>
 /// <typeparam name="T">The action's value.</typeparam>
 public sealed class GovernedOutcome<T>
 {
-    /// <summary>True when the evaluation failed transiently and the action ran under break-glass (<see cref="BreakGlass"/>).</summary>
+    /// <summary>
+    /// True when the evaluation failed transiently and the action ran under break-glass (<see cref="BreakGlass"/>); false
+    /// when the NA answered (<see cref="Governed"/>).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The outcome holds neither.</exception>
     [MemberNotNullWhen(true, nameof(BreakGlass))]
-    public bool BrokeGlass => BreakGlass is not null;
+    [MemberNotNullWhen(false, nameof(Governed))]
+    public bool BrokeGlass
+    {
+        get
+        {
+            if (BreakGlass is not null) return true;
+            if (Governed is null) throw new InvalidOperationException("genesismesh: the outcome holds neither a governed result nor a break-glass result");
+            return false;
+        }
+    }
 
     /// <summary>What the governed action did when the NA answered, authorized or not; null under break-glass.</summary>
     public GovernedActionResult<T>? Governed { get; init; }
@@ -223,12 +236,13 @@ public sealed class DecisionVerificationException : GenesisMeshException
 /// </summary>
 public sealed class GovernedActionException : GenesisMeshException
 {
-    internal GovernedActionException(Exception actionError, Exception evidenceError, ExecutionEvidence? evidence)
+    internal GovernedActionException(Exception actionError, Exception evidenceError, ExecutionEvidence? evidence, BreakGlassRecord? breakGlassRecord = null)
         : base(0, "governed_action_unrecorded", "action failed and its failure could not be recorded: " + evidenceError.Message,
             "genesismesh: action failed and its failure could not be recorded: " + evidenceError.Message, actionError)
     {
         EvidenceError = evidenceError;
         Evidence = evidence;
+        BreakGlassRecord = breakGlassRecord;
     }
 
     /// <summary>Why the failure could not be recorded.</summary>
@@ -239,6 +253,12 @@ public sealed class GovernedActionException : GenesisMeshException
     /// whose record is not execution evidence.
     /// </summary>
     public ExecutionEvidence? Evidence { get; }
+
+    /// <summary>
+    /// Under break-glass: the signed break-glass record of the failure, when it was signed. Keep it in the record
+    /// outbox, or submit it, once either works.
+    /// </summary>
+    public BreakGlassRecord? BreakGlassRecord { get; }
 }
 
 /// <summary>
@@ -282,17 +302,19 @@ public sealed class MetadataRefusedException : GenesisMeshException
 /// <summary>
 /// With an outbox, or under break-glass: the action ran, but its record could not be signed or kept in the outbox
 /// (<c>governed_action_evidence_unkept</c>). <see cref="Evidence"/> is the signed execution record when signing
-/// succeeded: submit it once the outbox works (a resubmission is idempotent); under break-glass it is null.
-/// <see cref="Exception.InnerException"/> is the error. Do not run the action again.
+/// succeeded: submit it once the outbox works (a resubmission is idempotent). Under break-glass it is null, and
+/// <see cref="BreakGlassRecord"/> is the signed break-glass record. <see cref="Exception.InnerException"/> is the
+/// error. Do not run the action again.
 /// </summary>
 public sealed class EvidenceNotKeptException : GenesisMeshException
 {
-    internal EvidenceNotKeptException(Exception cause, object? value, ExecutionEvidence? evidence)
+    internal EvidenceNotKeptException(Exception cause, object? value, ExecutionEvidence? evidence, BreakGlassRecord? breakGlassRecord = null)
         : base(0, "governed_action_evidence_unkept", "the action ran; its evidence was not kept: " + cause.Message,
             "genesismesh: the action ran; its evidence was not kept: " + cause.Message, cause)
     {
         Value = value;
         Evidence = evidence;
+        BreakGlassRecord = breakGlassRecord;
     }
 
     /// <summary>The action's value.</summary>
@@ -300,6 +322,12 @@ public sealed class EvidenceNotKeptException : GenesisMeshException
 
     /// <summary>The signed execution record, when signing succeeded; null under break-glass.</summary>
     public ExecutionEvidence? Evidence { get; }
+
+    /// <summary>
+    /// Under break-glass: the signed break-glass record, when signing succeeded. Keep it in the record outbox, or submit
+    /// it, once either works; a resubmission is a duplicate.
+    /// </summary>
+    public BreakGlassRecord? BreakGlassRecord { get; }
 }
 
 /// <summary>
@@ -320,10 +348,12 @@ public static partial class Governance
     private const int MaxOutcomeDetail = 1024;
 
     /// <summary>
-    /// Refusals that look transient but are not: the NA throttling a caller whose operator signatures keep failing, and
-    /// an evaluation the NA computed (perhaps a denial) but could not store. Neither breaks the glass.
+    /// Failures that look transient but are not: the NA throttling a caller whose operator signatures keep failing, an
+    /// evaluation the NA computed (perhaps a denial) but could not store, and an answer whose body could not be read
+    /// (the NA may have decided). None breaks the glass.
     /// </summary>
-    private static readonly HashSet<string> NotBreakable = new(["admin_auth_throttled", "evidence_store_unavailable"], StringComparer.Ordinal);
+    private static readonly HashSet<string> NotBreakable =
+        new(["admin_auth_throttled", "evidence_store_unavailable", NetworkException.ResponseBodyUnreadable], StringComparer.Ordinal);
     private static readonly string[] TerminalActions = [ResourceActions.Revoke, ResourceActions.Delete];
 
     [GeneratedRegex("^[A-Za-z0-9_.-]{1,64}$")]
@@ -448,7 +478,10 @@ public static partial class Governance
     /// <param name="request">What to evaluate, verify and record.</param>
     /// <param name="breakGlass">The justification of a change made without a decision.</param>
     /// <param name="action">The change, given the verified decision, or null under break-glass.</param>
-    /// <param name="ct">Cancels the steps before and including the action.</param>
+    /// <param name="ct">
+    /// Cancels the steps before and including the action. Once the action has run, its record is kept whatever the
+    /// token says.
+    /// </param>
     /// <exception cref="ArgumentException">The request is incomplete, such as no resource.</exception>
     /// <exception cref="OutboxException">No record outbox is configured (<c>record_outbox_required</c>).</exception>
     /// <exception cref="OutOfBandRecordException">
@@ -456,8 +489,19 @@ public static partial class Governance
     /// characters, or a context and justification that leave no room for the report.
     /// <c>break_glass_secret_material</c>: the context or the justification holds secret material.
     /// </exception>
+    /// <exception cref="StrictJsonException">
+    /// The context or the justification holds a value the NA would not read alike, such as a lone surrogate.
+    /// </exception>
     /// <exception cref="DecisionVerificationException">The decision failed verification, or cannot be verified as asked.</exception>
-    public static Task<GovernedOutcome<T>> GovernedAction<T>(
+    /// <exception cref="GovernedActionException">
+    /// The action failed, and its failure could not be recorded (<see cref="GovernedActionException.BreakGlassRecord"/>
+    /// under break-glass).
+    /// </exception>
+    /// <exception cref="EvidenceNotKeptException">
+    /// The action ran, and its record could not be kept (<see cref="EvidenceNotKeptException.BreakGlassRecord"/> under
+    /// break-glass). Do not run it again.
+    /// </exception>
+    public static async Task<GovernedOutcome<T>> GovernedAction<T>(
         GenesisMeshClient client,
         ExecutionRecorder recorder,
         GovernedActionRequest request,
@@ -468,20 +512,17 @@ public static partial class Governance
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(breakGlass);
         ArgumentNullException.ThrowIfNull(action);
-        return Run(client.Boundary.EvaluateAsReceived, client.EvidenceStore, recorder, request, breakGlass, action, ct);
+        return await Run(client.Boundary.EvaluateAsReceived, client.EvidenceStore, recorder, request, breakGlass, action, ct).ConfigureAwait(false);
     }
 
     /// <summary>
     /// The transient failure an evaluation's error is, a value of <see cref="EvaluationFailures"/>, or null for any
     /// other error (a denial is not an error). A request that got no answer is a network error, or a timeout when the
     /// transport's own deadline ended it; an answer is a failure only when it is a 5xx or a 429. That holds for the
-    /// lookup of the NA's key before the request too: its 403 or 404 (<c>na_public_key_unavailable</c>) is no failure.
-    /// Neither is an answer this SDK cannot read (<see cref="StrictJsonException"/>): the NA answered, perhaps with a
-    /// denial.
-    /// <para>
-    /// This transport reads an answer's body before it hands over the answer, so a body cut off in transit is a
-    /// network error here, where the TypeScript SDK names it <c>response_body_unreadable</c> and does not break the glass.
-    /// </para>
+    /// lookup of the NA's key before the request too: its 403 or 404, or a body that cannot be read
+    /// (<c>na_public_key_unavailable</c>), is no failure. Neither is an answer whose body was cut off or stalled
+    /// (<see cref="NetworkException.ResponseBodyUnreadable"/>) or is not strict JSON (<see cref="StrictJsonException"/>):
+    /// the NA answered, perhaps with a denial.
     /// </summary>
     /// <param name="error">The evaluation's error.</param>
     public static string? EvaluationFailure(Exception error)
@@ -489,6 +530,7 @@ public static partial class Governance
         ArgumentNullException.ThrowIfNull(error);
         return error switch
         {
+            NetworkException network when NotBreakable.Contains(network.Code) => null,
             NetworkException network => TimedOut(network) ? EvaluationFailures.Timeout : EvaluationFailures.NetworkError,
             GenesisMeshException refused when NotBreakable.Contains(refused.Code) => null,
             GenesisMeshException { Status: 429 } => EvaluationFailures.RateLimited,
@@ -765,20 +807,21 @@ public static partial class Governance
         }
         catch (Exception actionError)
         {
+            BreakGlassRecord? failed = null;
             try
             {
-                var failed = await Sign(ExecutionOutcomes.Failure, null, "action failed").ConfigureAwait(false);
+                failed = await Sign(ExecutionOutcomes.Failure, null, "action failed").ConfigureAwait(false);
                 await store.EnqueueRecord(failed, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception recordError)
             {
-                throw new GovernedActionException(actionError, recordError, null);
+                throw new GovernedActionException(actionError, recordError, null, failed);
             }
             throw;
         }
 
         // The action ran: from here on its outcome is always recorded.
-        BreakGlassRecord record;
+        BreakGlassRecord? record = null;
         IReadOnlyList<string> dropped = [];
         RecordDelivery delivery;
         try
@@ -807,7 +850,7 @@ public static partial class Governance
         }
         catch (Exception e)
         {
-            throw new EvidenceNotKeptException(e, report.Value, null);
+            throw new EvidenceNotKeptException(e, report.Value, null, record);
         }
         return new BreakGlassResult<T>
         {
