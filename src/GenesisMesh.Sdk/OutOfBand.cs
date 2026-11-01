@@ -328,6 +328,27 @@ internal static class OutOfBandRecords
     }
 
     /// <summary>
+    /// Throws <c>break_glass_malformed</c> when what <paramref name="record"/> carries besides the action's report (its
+    /// request parameters, attributes and justification) leaves less than <paramref name="reserve"/> bytes of
+    /// <see cref="EvidenceMetadata.MaxMetadataBytes"/> for the report, sized as the reference sizes metadata: escaped
+    /// as ASCII.
+    /// </summary>
+    public static void CheckRoom(BreakGlassRecord record, int reserve)
+    {
+        var carried = ExecutionRecorder.Element(new Dictionary<string, object?>
+        {
+            ["execution_parameters"] = new Dictionary<string, object?>(),
+            ["request_parameters"] = record.RequestParameters,
+            ["attributes"] = record.Attributes,
+            ["outcome_detail"] = "",
+            ["justification"] = record.Justification,
+        });
+        if (Canonical.Of(carried).Length > EvidenceMetadata.MaxMetadataBytes - reserve)
+            throw new OutOfBandRecordException("break_glass_malformed",
+                $"the context and justification leave no room for the record within {EvidenceMetadata.MaxMetadataBytes} bytes");
+    }
+
+    /// <summary>
     /// The record as JSON, checked as the NA's strict reader reads it two levels deep (in a batch, or an export's
     /// quarantine record).
     /// </summary>

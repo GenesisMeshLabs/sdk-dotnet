@@ -19,16 +19,16 @@ submits execution evidence, reads where each resource's chain ends, and reads
 and administers the store: its status, the NA's verification of it, resource
 and vendor histories, the export, executor keys and retention (see
 [EvidenceStore](#evidencestore)). It runs governed actions with the evidence
-outbox and reconciliation (see [Governed actions](#governed-actions)), and
-verifies an export offline (see [Verifying an export](#verifying-an-export)).
+outbox, break-glass when the NA cannot be reached, and reconciliation (see
+[Governed actions](#governed-actions)), and verifies an export offline (see
+[Verifying an export](#verifying-an-export)).
 It signs observations and break-glass records, the changes made outside the
 governed path, submits and judges them, keeps them in a record outbox until the
 NA admits them, and reads each resource's changes (see
 [Changes outside the governed path](#changes-outside-the-governed-path)).
 Not yet here: verifying the store's 1.3.0 and later entry kinds in an export,
-store anchors, break-glass in governed actions, and none of the 1.4.0
-remediation and review APIs (remediation records, the due queue, reviews,
-urgent actions).
+store anchors, and none of the 1.4.0 remediation and review APIs (remediation
+records, the due queue, reviews, urgent actions).
 Those live in the [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript)
 and the [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust). The embedded
 field registry lists their records.
@@ -662,6 +662,63 @@ var findings = Governance.ReconcileResources(
 ```
 
 Correct each finding through a governed action.
+
+#### Break-glass when the NA cannot be reached
+
+With `BreakGlassOptions`, a governed action still runs when the NA cannot be
+reached, as the TypeScript SDK's `governedAction` with `breakGlass` does. The
+action gets a null decision, and a break-glass record of it, signed by the
+executor key with your justification, goes to the record outbox. The NA judges
+it once it is back, as the evaluation would have gone:
+
+```csharp
+using var client = new GenesisMeshClient(new ClientOptions
+{
+    BaseUrl = naUrl,
+    Signer = new SeedSigner(operatorSeed, "portal-controller"),
+    Outbox = new FileOutbox("/var/lib/portal/outbox"),
+    RecordOutbox = new FileRecordOutbox("/var/lib/portal/records"),   // required for break-glass
+});
+
+var outcome = await Governance.GovernedAction(client, executor, request,
+    new BreakGlassOptions { Justification = "INC-4711: the leaked key must be rotated now" },
+    async (decision, ct) =>
+    {
+        // decision is null under break-glass: the NA could not be asked
+        var credential = await RotateInGraph(appId, ct);
+        return new ActionReport<string>
+        {
+            Value = credential.SecretText,
+            ExecutionParameters = new Dictionary<string, object?> { ["key_id"] = credential.KeyId },
+        };
+    });
+if (outcome.BrokeGlass)
+    Alert(outcome.BreakGlass.Failure, outcome.BreakGlass.Queued);   // network_error, timeout, server_error or rate_limited
+else if (!outcome.Governed!.Authorized)
+    Log(outcome.Governed.Summary.EnforcedFailures);
+```
+
+- **Only on an outage.** The glass breaks when the evaluation gets no answer,
+  times out, or is answered with a 5xx or a 429, for the lookup of the NA's
+  key too (`Governance.EvaluationFailure` names which). A denial, a decision
+  that fails verification, a refusal, an answer this SDK cannot read, and the
+  NA's `admin_auth_throttled` and `evidence_store_unavailable` never break it;
+  cancelling never does either.
+- **Checked first.** It needs a record outbox (`record_outbox_required`), a
+  resource, an attestation basis (the NA could not judge an agreement it does
+  not see) and a requested capability. The context and justification are
+  checked before anything is evaluated: no secret material, a justification of
+  1 to 1024 characters, and 2048 bytes of the metadata limit left for the
+  action's report (`break_glass_malformed`, `break_glass_secret_material`).
+- **Always recorded once it ran.** A report the secret guard refuses is
+  recorded without the refused fields (`BreakGlass.Dropped`), or with the
+  outcome alone when the rest is still refused; an outcome detail is cut to
+  1024 characters. When the action throws, a `failure` record is kept and the
+  error rethrown. A record the outbox cannot keep throws
+  `EvidenceNotKeptException` with the action's value: do not run it again.
+- `BreakGlass.Submission` is set when the NA was back in time to admit the
+  record; otherwise `BreakGlass.Queued` is the entry `FlushRecords` submits,
+  break-glass records first.
 
 #### A partner controller on a standard key
 

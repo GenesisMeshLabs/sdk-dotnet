@@ -160,7 +160,7 @@ public sealed partial class EvidenceStoreClient
         }
     }
 
-    private IOutbox<RecordOutboxEntry> RequireRecordOutbox() =>
+    internal IOutbox<RecordOutboxEntry> RequireRecordOutbox() =>
         RecordOutbox ?? throw new OutboxException("record_outbox_required", "no record outbox is configured (ClientOptions.RecordOutbox)");
 
     private async Task<RecordDelivery> Enqueued(IOutbox<RecordOutboxEntry> outbox, RecordOutboxEntry fresh, CancellationToken ct)

@@ -1,0 +1,6 @@
+### Added
+
+- **Break-glass in governed actions.** `Governance.GovernedAction` with `BreakGlassOptions` still runs the action when the NA cannot be reached, as the TypeScript SDK's `governedAction` with `breakGlass` does. The action gets a null decision, and its break-glass record, signed by the executor key with the justification, is kept in the record outbox; the NA judges it after the fact. The result is a `GovernedOutcome<T>`: `Governed` when the NA answered, `BreakGlass` (`BreakGlassResult<T>`) when it did not.
+  - Only an outage breaks the glass: no answer, a timeout, a 5xx or a 429, for the NA key lookup too (`Governance.EvaluationFailure`). A denial, a decision that fails verification, a refusal, an unreadable answer, `admin_auth_throttled`, `evidence_store_unavailable` and a cancellation never do.
+  - Everything break-glass needs is checked before anything is evaluated: a record outbox, a resource, an attestation basis, a requested capability, and a context and justification without secret material that leave 2048 bytes of the metadata limit for the report.
+  - Once the action ran, its record is always kept: refused metadata is dropped (`BreakGlassResult.Dropped`), an outcome detail is cut to 1024 characters, and a failed action is recorded as a failure before its error is rethrown.

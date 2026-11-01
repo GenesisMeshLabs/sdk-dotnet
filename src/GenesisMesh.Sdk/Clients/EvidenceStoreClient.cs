@@ -200,7 +200,7 @@ public sealed partial class EvidenceStoreClient
 
     /// <summary>
     /// The newest pending record in the outbox for <paramref name="resourceId"/> that can still be admitted, or null.
-    /// <see cref="Governance.GovernedAction"/> chains from it, not from the NA's head, while it waits.
+    /// A governed action (<see cref="Governance"/>) chains from it, not from the NA's head, while it waits.
     /// </summary>
     /// <exception cref="OutboxException">No outbox is configured (<c>outbox_required</c>), or it cannot be read.</exception>
     public async Task<ExecutionEvidence?> PendingHead(string resourceId, CancellationToken ct = default)

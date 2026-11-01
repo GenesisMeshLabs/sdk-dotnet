@@ -27,7 +27,7 @@ When you add a source file, add it to the module table there and here.
 | transport | `Transport.cs`, `ClientOptions.cs` | The only code that sends HTTP: the `HttpClient`, the NA's audience key from `/sovereign.json`, admin and public calls, failover across `BaseUrls`, retries, strict response reading, error mapping and cancellation; and the options it is built from (`ClientOptions`, `RetrySettings`). |
 | clients | `Clients/*.cs` | One sub-client per NA area (`Agreement`, `Attestation`, `Boundary`, `Consensus`, `DataUsage`, `Disclosure`, `Evidence`, `EvidenceStore`, `Health`, `NA`, `Policy`). A method names its route and calls the transport; one that verifies what the NA served calls the offline verifier. `EvidenceStoreClient` is one `partial class` in two files: the record outbox's calls and flush are in `EvidenceStoreRecordOutbox.cs`. |
 | client | `GenesisMeshClient.cs` | The entry point: builds the transport and the sub-clients. |
-| governance | `Governance.cs` | A controller's governed changes (1.9.0), on top of the client: `GovernedAction` (evaluate, verify the decision as received, act, record, keep in the outbox), `SummarizeDecision`, `WithoutRefusedMetadata` and `ReconcileResources`. |
+| governance | `Governance.cs` | A controller's governed changes (1.9.0), on top of the client: `GovernedAction` (evaluate, verify the decision as received, act, record, keep in the outbox; with break-glass, act when the NA cannot be reached and keep the break-glass record in the record outbox), `EvaluationFailure`, `SummarizeDecision`, `WithoutRefusedMetadata` and `ReconcileResources`. |
 
 ## Layers
 

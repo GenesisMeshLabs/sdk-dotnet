@@ -68,8 +68,8 @@ public sealed class ClientOptions
 
     /// <summary>
     /// 1.9.0: durable storage for signed execution records the NA has not admitted yet, such as a
-    /// <see cref="FileOutbox"/> or a store of your own. With one, <see cref="Governance.GovernedAction"/> keeps every
-    /// record until the NA admits it, and <see cref="EvidenceStoreClient.FlushPending"/> submits what is left. Give
+    /// <see cref="FileOutbox"/> or a store of your own. With one, a governed action (<see cref="Governance"/>) keeps
+    /// every record until the NA admits it, and <see cref="EvidenceStoreClient.FlushPending"/> submits what is left. Give
     /// each process its own.
     /// </summary>
     public IOutbox<OutboxEntry>? Outbox { get; set; }
@@ -78,7 +78,8 @@ public sealed class ClientOptions
     /// 1.9.0: durable storage for signed observations and break-glass records the NA has not admitted yet, such as a
     /// <see cref="FileRecordOutbox"/> in a directory of its own, or a store of your own.
     /// <see cref="EvidenceStoreClient.EnqueueRecord(ObservationRecord, CancellationToken)"/> keeps a record there until
-    /// the NA admits it, and <see cref="EvidenceStoreClient.FlushRecords"/> submits what is left. Give each process its own.
+    /// the NA admits it, as a governed action with break-glass keeps its record, and
+    /// <see cref="EvidenceStoreClient.FlushRecords"/> submits what is left. Give each process its own.
     /// </summary>
     public IOutbox<RecordOutboxEntry>? RecordOutbox { get; set; }
 }

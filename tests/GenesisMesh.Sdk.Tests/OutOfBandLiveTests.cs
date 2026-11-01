@@ -10,8 +10,9 @@ namespace GenesisMesh.Tests;
 /// <summary>
 /// Changes outside the governed path against a running NA with its out-of-band records on (1.9.0): observations and a
 /// break-glass record signed here, submitted, judged at admission and read back as the resource's changes; a refusal
-/// kept as a quarantine entry; a holder change proposed by one holder and approved by another. Each typed result is
-/// compared with the JSON the NA sent, at every depth, and the records verify offline.
+/// kept as a quarantine entry; a holder change proposed by one holder and approved by another; records kept in a
+/// record outbox while the NA cannot be reached, among them a governed action's break-glass record. Each typed result
+/// is compared with the JSON the NA sent, at every depth, and the records verify offline.
 /// </summary>
 [Trait("Category", "Live")]
 public class OutOfBandLiveTests
@@ -30,13 +31,13 @@ public class OutOfBandLiveTests
         }
     }
 
-    /// <summary>The NA's record routes cannot be reached while <see cref="Offline"/> is set.</summary>
+    /// <summary>The NA's record routes and its evaluation cannot be reached while <see cref="Offline"/> is set.</summary>
     private sealed class Outage : DelegatingHandler
     {
         public bool Offline { get; set; } = true;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
-            Offline && request.RequestUri!.AbsolutePath is "/evidence/observations" or "/evidence/break-glass"
+            Offline && request.RequestUri!.AbsolutePath is "/evidence/observations" or "/evidence/break-glass" or "/admin/boundary/evaluate"
                 ? throw new HttpRequestException("connection refused")
                 : base.SendAsync(request, ct);
     }
@@ -222,9 +223,10 @@ public class OutOfBandLiveTests
         Assert.Equal("insufficient_operator_tier",
             (await Assert.ThrowsAsync<ForbiddenException>(() => controller.EvidenceStore.ProposeHolder("controller", "x"))).Code);
 
-        // The record outbox: an observation and a break-glass record kept in files while the NA cannot be reached, and
-        // submitted by a restarted controller once it is back, the break-glass record first. A record refused for good
-        // is a dead letter that names its quarantine entry.
+        // The record outbox: an observation and break-glass records kept in files while the NA cannot be reached, one of
+        // them a governed action's that ran when its evaluation failed, and submitted by a restarted controller once it
+        // is back, the break-glass records first. A record refused for good is a dead letter that names its quarantine
+        // entry.
         var directory = Path.Combine(Path.GetTempPath(), "gm-live-records-" + Guid.NewGuid().ToString("N"));
         try
         {
@@ -232,6 +234,8 @@ public class OutOfBandLiveTests
             using (var down = new GenesisMeshClient(new ClientOptions
             {
                 BaseUrl = na.BaseUrl,
+                SigningKey = (string)inputs["controllerSeed"]!,
+                KeyId = "controller",
                 HttpHandler = outage,
                 Retry = new RetrySettings { Attempts = 0 },
                 RecordOutbox = new FileRecordOutbox(directory),
@@ -261,12 +265,37 @@ public class OutOfBandLiveTests
                 Assert.Equal((OutboxStates.Pending, EvidenceOutbox.NetworkError), (queued.State, queued.LastError!.Code));
                 Assert.Equal(OutboxStates.Pending, (await down.EvidenceStore.EnqueueRecord(keptGlass)).Queued!.State);
 
+                var outcome = await Governance.GovernedAction(down, executor, new GovernedActionRequest
+                {
+                    RequestedCapability = "partner-secret.rotate",
+                    AttestationId = "att-incident-drill",
+                    Context = new EvaluationContext { RequestParameters = new Dictionary<string, object?> { ["app_id"] = "app-4" } },
+                    ResourceId = "partner:app-4/secret",
+                    ResourceAction = ResourceActions.Rotate,
+                    Verify = new GovernedVerification { OperatorPublicKeys = [naKey], ExpectedPolicies = [] },
+                }, new BreakGlassOptions { Justification = "NA unreachable during an incident drill; rotating app-4 now" }, (decision, _) =>
+                {
+                    Assert.Null(decision);
+                    return Task.FromResult<ActionReport<string>?>(new ActionReport<string>
+                    {
+                        Value = "rotated",
+                        ExecutionParameters = new Dictionary<string, object?> { ["secret_version"] = "v5" },
+                    });
+                });
+                var brokeGlass = outcome.BreakGlass!;
+                Assert.Equal((EvaluationFailures.NetworkError, "rotated", OutboxStates.Pending),
+                    (brokeGlass.Failure, brokeGlass.Value, brokeGlass.Queued!.State));
+                Assert.True(OfflineVerifier.VerifyOutOfBandRecord(Json(brokeGlass.Record), [executorKey]));
+
                 using var restarted = new GenesisMeshClient(new ClientOptions { BaseUrl = na.BaseUrl, RecordOutbox = new FileRecordOutbox(directory) });
                 var flushed = await restarted.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true });
-                Assert.Equal([keptGlass.BreakGlassId, kept.ObservationId], flushed.Admitted.Select(e => e.Id));
+                Assert.Equal([keptGlass.BreakGlassId, brokeGlass.Record.BreakGlassId, kept.ObservationId], flushed.Admitted.Select(e => e.Id));
                 Assert.Empty(flushed.Pending);
                 Assert.Empty(await restarted.EvidenceStore.RecordOutbox!.List());
                 Assert.Equal(["break_glass", "observation"], (await ops.EvidenceStore.ResourceChanges("partner:app-3/secret")).Changes.Select(c => c.Kind));
+                var governedGlass = Assert.Single((await ops.EvidenceStore.ResourceChanges("partner:app-4/secret")).Changes);
+                Assert.Equal(("break_glass", brokeGlass.Record.Justification, brokeGlass.Record.BreakGlassId),
+                    (governedGlass.Kind, governedGlass.Justification, governedGlass.RecordId));
 
                 var elsewhere = await observer.Record(new ObservationInput
                 {
