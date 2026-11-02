@@ -30,6 +30,17 @@ public class OutOfBandLiveTests
         }
     }
 
+    /// <summary>The NA's record routes cannot be reached while <see cref="Offline"/> is set.</summary>
+    private sealed class Outage : DelegatingHandler
+    {
+        public bool Offline { get; set; } = true;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            Offline && request.RequestUri!.AbsolutePath is "/evidence/observations" or "/evidence/break-glass"
+                ? throw new HttpRequestException("connection refused")
+                : base.SendAsync(request, ct);
+    }
+
     private static (string Seed, string PublicKey) NewKey()
     {
         using var key = Key.Create(SignatureAlgorithm.Ed25519, new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
@@ -210,6 +221,72 @@ public class OutOfBandLiveTests
             (await Assert.ThrowsAsync<NotFoundException>(() => ops.EvidenceStore.ProposeHolder("no-such-key", "x"))).Code);
         Assert.Equal("insufficient_operator_tier",
             (await Assert.ThrowsAsync<ForbiddenException>(() => controller.EvidenceStore.ProposeHolder("controller", "x"))).Code);
+
+        // The record outbox: an observation and a break-glass record kept in files while the NA cannot be reached, and
+        // submitted by a restarted controller once it is back, the break-glass record first. A record refused for good
+        // is a dead letter that names its quarantine entry.
+        var directory = Path.Combine(Path.GetTempPath(), "gm-live-records-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var outage = new Outage { InnerHandler = new HttpClientHandler() };
+            using (var down = new GenesisMeshClient(new ClientOptions
+            {
+                BaseUrl = na.BaseUrl,
+                HttpHandler = outage,
+                Retry = new RetrySettings { Attempts = 0 },
+                RecordOutbox = new FileRecordOutbox(directory),
+            }))
+            {
+                var kept = await observer.Record(new ObservationInput
+                {
+                    ResourceId = "partner:app-3/secret",
+                    Action = ResourceActions.Rotate,
+                    Capability = "partner-secret.rotate",
+                    ChangedAt = now.AddSeconds(-20),
+                    Source = "cloud-activity-log",
+                    SourceEventId = "event-3",
+                });
+                var keptGlass = await executor.SignBreakGlass(new BreakGlassInput
+                {
+                    ResourceId = "partner:app-3/secret",
+                    ResourceAction = ResourceActions.Rotate,
+                    Capability = "partner-secret.rotate",
+                    Justification = "NA unreachable during an incident drill",
+                    EvaluationRequest = new Dictionary<string, object?> { ["requested_capability"] = "partner-secret.rotate" },
+                    EvaluationFailure = EvaluationFailures.NetworkError,
+                    ExecutedAt = now.AddSeconds(-25),
+                    Outcome = ExecutionOutcomes.Success,
+                });
+                var queued = (await down.EvidenceStore.EnqueueRecord(kept)).Queued!;
+                Assert.Equal((OutboxStates.Pending, EvidenceOutbox.NetworkError), (queued.State, queued.LastError!.Code));
+                Assert.Equal(OutboxStates.Pending, (await down.EvidenceStore.EnqueueRecord(keptGlass)).Queued!.State);
+
+                using var restarted = new GenesisMeshClient(new ClientOptions { BaseUrl = na.BaseUrl, RecordOutbox = new FileRecordOutbox(directory) });
+                var flushed = await restarted.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true });
+                Assert.Equal([keptGlass.BreakGlassId, kept.ObservationId], flushed.Admitted.Select(e => e.Id));
+                Assert.Empty(flushed.Pending);
+                Assert.Empty(await restarted.EvidenceStore.RecordOutbox!.List());
+                Assert.Equal(["break_glass", "observation"], (await ops.EvidenceStore.ResourceChanges("partner:app-3/secret")).Changes.Select(c => c.Kind));
+
+                var elsewhere = await observer.Record(new ObservationInput
+                {
+                    ResourceId = "other:app-8/secret",
+                    Action = ResourceActions.Delete,
+                    Capability = "other.delete",
+                    ChangedAt = now.AddSeconds(-10),
+                    Source = "cloud-activity-log",
+                    SourceEventId = "event-8",
+                });
+                var dead = (await restarted.EvidenceStore.EnqueueRecord(elsewhere)).Queued!;
+                Assert.Equal((OutboxStates.DeadLetter, "observation_out_of_scope"), (dead.State, dead.LastError!.Code));
+                Assert.False(string.IsNullOrEmpty(dead.LastError.QuarantineId));
+                Assert.Equal(dead.Id, Assert.Single(await new FileRecordOutbox(directory).List()).Id);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
 
         // Offline: every out-of-band record of the export verifies under its signer's key.
         var signers = new Dictionary<string, string[]>

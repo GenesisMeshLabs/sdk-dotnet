@@ -22,12 +22,13 @@ and vendor histories, the export, executor keys and retention (see
 outbox and reconciliation (see [Governed actions](#governed-actions)), and
 verifies an export offline (see [Verifying an export](#verifying-an-export)).
 It signs observations and break-glass records, the changes made outside the
-governed path, submits and judges them, and reads each resource's changes (see
+governed path, submits and judges them, keeps them in a record outbox until the
+NA admits them, and reads each resource's changes (see
 [Changes outside the governed path](#changes-outside-the-governed-path)).
 Not yet here: verifying the store's 1.3.0 and later entry kinds in an export,
-store anchors, the record outbox, break-glass in governed actions, and none of
-the 1.4.0 remediation and review APIs (remediation records, the due queue,
-reviews, urgent actions).
+store anchors, break-glass in governed actions, and none of the 1.4.0
+remediation and review APIs (remediation records, the due queue, reviews,
+urgent actions).
 Those live in the [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript)
 and the [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust). The embedded
 field registry lists their records.
@@ -162,6 +163,7 @@ values.
 | `HttpClient` | An `HttpClient` to send with, such as a typed client from `IHttpClientFactory`; its own `Timeout` applies. The client does not dispose it. A resilience handler in its pipeline must not retry POSTs: a repeated admin request carries the same signature and nonce, and the NA refuses it as a replay after the first may have been applied. |
 | `Timeout` | Each attempt's timeout (each request, and each read of the NA's key); 10 s by default. A call that fails over or retries can take longer. |
 | `Outbox` | Durable storage for signed execution records the NA has not admitted yet: a `FileOutbox`, or your own `IOutbox<OutboxEntry>` (see [Governed actions](#governed-actions)). Give each process its own. |
+| `RecordOutbox` | Durable storage for signed observations and break-glass records the NA has not admitted yet: a `FileRecordOutbox` in a directory of its own, or your own `IOutbox<RecordOutboxEntry>` (see [The record outbox](#the-record-outbox)). Give each process its own. |
 
 ```csharp
 using Azure.Identity;
@@ -502,6 +504,58 @@ await foreach (var change in client.EvidenceStore.AllResourceChanges("partner:ap
   and `ApproveHolder`, with a privileged key of another named holder, records
   it (both privileged; the same holder gets 409
   `holder_change_needs_second_holder`).
+
+#### The record outbox
+
+A record outbox keeps signed observations and break-glass records until the
+NA admits them, as the outbox keeps execution records:
+
+```csharp
+using var client = new GenesisMeshClient(new ClientOptions
+{
+    BaseUrl = "https://na.example",
+    RecordOutbox = new FileRecordOutbox("/var/lib/portal/records"),  // not the outbox's directory
+});
+
+var delivery = await client.EvidenceStore.EnqueueRecord(observation);  // or a break-glass record
+// delivery.Submission when the NA admitted it; otherwise delivery.Queued, pending or a dead letter
+
+var flushed = await client.EvidenceStore.FlushRecords();  // at startup and on a timer
+// flushed.Admitted (of which flushed.Quarantined), flushed.Pending, flushed.DeadLettered
+```
+
+- `EnqueueRecord` stores the record, then submits it. A failed submission does
+  not throw: a transient failure leaves the record pending, with a backoff,
+  and a refusal no retry overcomes (`EvidenceOutbox.RecordPermanentRefusals`)
+  keeps it as a dead letter with the NA's code and, for a record the NA kept,
+  its quarantine entry (`LastError.QuarantineId`). An observer key the NA does
+  not know yet is retried. While another call is submitting the same record,
+  `EnqueueRecord` returns it as `Queued` without sending it, or, until that
+  call has stored it, waits for that call.
+- `FlushRecords` sends break-glass records first, so an observation of the same
+  change finds its break-glass record, then observations in batches of up to
+  100, each in the order added. A batch the NA refuses whole, such as one
+  holding a record it cannot read, is split until the record it refuses is
+  tried alone. A batch it throttles (429) halves the client's batches from
+  then on. A transient answer that names a wait (`Retry-After`, such as a 429
+  or a 503) holds every record back that long, at least 5 seconds and at most
+  15 minutes; `EnqueueRecord` still submits its own record. A transient
+  failure ends the run; the next one goes on from there. A record another call
+  is submitting is left to it, and so is one another call stored a new state
+  for since the run read the outbox.
+- A record is removed only once the NA says it holds it: `recorded`,
+  `duplicate` or `quarantined`. An empty answer, such as a proxy's 204, or a
+  success with another status, leaves the record pending
+  (`response_body_unreadable`), and so does a batch answer that does not give
+  each observation of the batch one result, by its index. The NA answers a
+  resubmission of a record it holds with a `duplicate`.
+- `FileRecordOutbox` writes the format of the TypeScript and Rust SDKs
+  (`gm.evidence.record-outbox.v1`), and keeps each record as it was read, so a
+  controller can move between them. A grant use or remediation record one of
+  those SDKs kept there is submitted too: grant uses before the observations,
+  remediation records after them. `EvidenceOutbox.RecordEntry` makes an entry
+  for your own `IOutbox<RecordOutboxEntry>`, and
+  `MemoryOutbox<RecordOutboxEntry>` is for tests.
 
 ### Governed actions
 

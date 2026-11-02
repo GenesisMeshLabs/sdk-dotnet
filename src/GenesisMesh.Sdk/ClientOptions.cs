@@ -73,6 +73,14 @@ public sealed class ClientOptions
     /// each process its own.
     /// </summary>
     public IOutbox<OutboxEntry>? Outbox { get; set; }
+
+    /// <summary>
+    /// 1.9.0: durable storage for signed observations and break-glass records the NA has not admitted yet, such as a
+    /// <see cref="FileRecordOutbox"/> in a directory of its own, or a store of your own.
+    /// <see cref="EvidenceStoreClient.EnqueueRecord(ObservationRecord, CancellationToken)"/> keeps a record there until
+    /// the NA admits it, and <see cref="EvidenceStoreClient.FlushRecords"/> submits what is left. Give each process its own.
+    /// </summary>
+    public IOutbox<RecordOutboxEntry>? RecordOutbox { get; set; }
 }
 
 /// <summary>

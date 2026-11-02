@@ -12,7 +12,7 @@ namespace GenesisMesh;
 /// store off, every call but <see cref="Status"/> is refused with 404 <c>evidence_store_disabled</c>
 /// (<see cref="NotFoundException"/>).
 /// </summary>
-public sealed class EvidenceStoreClient
+public sealed partial class EvidenceStoreClient
 {
     /// <summary>Most pending records an enqueued record submits before its own; older ones wait for a flush.</summary>
     private const int MaxInlineDrain = 100;
@@ -51,10 +51,11 @@ public sealed class EvidenceStoreClient
         public TaskCompletionSource<FlushResult> Result { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
-    internal EvidenceStoreClient(Transport t, IOutbox<OutboxEntry>? outbox = null)
+    internal EvidenceStoreClient(Transport t, IOutbox<OutboxEntry>? outbox = null, IOutbox<RecordOutboxEntry>? recordOutbox = null)
     {
         _t = t;
         Outbox = outbox;
+        RecordOutbox = recordOutbox;
     }
 
     /// <summary>
@@ -62,6 +63,12 @@ public sealed class EvidenceStoreClient
     /// is configured.
     /// </summary>
     public IOutbox<OutboxEntry>? Outbox { get; }
+
+    /// <summary>
+    /// The record outbox observations and break-glass records wait in until the NA admits them
+    /// (<see cref="ClientOptions.RecordOutbox"/>); null when none is configured.
+    /// </summary>
+    public IOutbox<RecordOutboxEntry>? RecordOutbox { get; }
 
     /// <summary>
     /// Submits one signed record (<see cref="ExecutionRecorder"/>). The executor's signature authenticates it, not
