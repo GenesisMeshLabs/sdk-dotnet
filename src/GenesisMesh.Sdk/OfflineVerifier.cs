@@ -408,6 +408,172 @@ public static partial class OfflineVerifier
     }
 
     /// <summary>
+    /// True when one of <paramref name="naPublicKeys"/> signed the boundary decision, and the decision has no field
+    /// this SDK does not know and is in canonical form (1.9.0). Only the signature: <see cref="VerifyBoundaryDecision"/>
+    /// also checks its expiry and what it binds.
+    /// </summary>
+    /// <param name="decisionJson">The BoundaryDecision JSON, as the NA returned it.</param>
+    /// <param name="naPublicKeys">The NA's base64 Ed25519 public keys, any of which may have signed it.</param>
+    /// <exception cref="StrictJsonException"><paramref name="decisionJson"/> is not strict JSON.</exception>
+    public static bool VerifyDecisionSignature(string decisionJson, IReadOnlyList<string> naPublicKeys) =>
+        SignedRecord("BoundaryDecision", decisionJson, _ => naPublicKeys);
+
+    /// <summary>
+    /// As <see cref="VerifyDecisionSignature(string, IReadOnlyList{string})"/>, but signed by the key of the NA's
+    /// verified history that was valid at the decision's <c>decision_made_at</c>.
+    /// </summary>
+    /// <param name="decisionJson">The BoundaryDecision JSON, as the NA returned it.</param>
+    /// <param name="keyHistory">The NA's verified key history (<see cref="VerifyKeyHistory(string, string?, string)"/>).</param>
+    /// <exception cref="StrictJsonException"><paramref name="decisionJson"/> is not strict JSON.</exception>
+    public static bool VerifyDecisionSignature(string decisionJson, NAKeyHistory keyHistory)
+    {
+        ArgumentNullException.ThrowIfNull(keyHistory);
+        return SignedRecord("BoundaryDecision", decisionJson, d => NAKeysFor(keyHistory, d, "decision_made_at", null));
+    }
+
+    /// <summary>
+    /// True when one of <paramref name="naPublicKeys"/> made one of the membership attestation's signatures, and the
+    /// attestation has no field this SDK does not know and is in canonical form (1.9.0).
+    /// </summary>
+    /// <param name="attestationJson">The MembershipAttestation JSON, as the NA returned it.</param>
+    /// <param name="naPublicKeys">The issuing NA's base64 Ed25519 public keys, any of which may have signed it.</param>
+    /// <exception cref="StrictJsonException"><paramref name="attestationJson"/> is not strict JSON.</exception>
+    public static bool VerifyAttestationSignature(string attestationJson, IReadOnlyList<string> naPublicKeys) =>
+        SignedRecord("MembershipAttestation", attestationJson, _ => naPublicKeys);
+
+    /// <summary>
+    /// As <see cref="VerifyAttestationSignature(string, IReadOnlyList{string})"/>, but signed by the key of the NA's
+    /// verified history that was valid at the attestation's <c>issued_at</c>. With <paramref name="now"/>, that key must
+    /// still vouch then (<see cref="NAKeyHistory.KeysVouchingAt"/>): the attestation is judged for the present, not only
+    /// at its own time. <see cref="NARecordRefusal"/> gives the reference's reason, and also applies its time rules.
+    /// </summary>
+    /// <param name="attestationJson">The MembershipAttestation JSON, as the NA returned it.</param>
+    /// <param name="keyHistory">The issuing NA's verified key history (<see cref="VerifyKeyHistory(string, string?, string)"/>).</param>
+    /// <param name="now">The time the attestation is judged at; null judges it at its own time only.</param>
+    /// <exception cref="StrictJsonException"><paramref name="attestationJson"/> is not strict JSON.</exception>
+    public static bool VerifyAttestationSignature(string attestationJson, NAKeyHistory keyHistory, DateTimeOffset? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(keyHistory);
+        return SignedRecord("MembershipAttestation", attestationJson, a => NAKeysFor(keyHistory, a, "issued_at", now));
+    }
+
+    /// <summary>
+    /// True when one of <paramref name="naPublicKeys"/> signed the boundary policy, and the policy has no field this SDK
+    /// does not know and is in canonical form (1.9.0).
+    /// </summary>
+    /// <param name="policyJson">The BoundaryPolicy JSON, as the NA returned it.</param>
+    /// <param name="naPublicKeys">The NA's base64 Ed25519 public keys, any of which may have signed it.</param>
+    /// <exception cref="StrictJsonException"><paramref name="policyJson"/> is not strict JSON.</exception>
+    public static bool VerifyPolicySignature(string policyJson, IReadOnlyList<string> naPublicKeys) =>
+        SignedRecord("BoundaryPolicy", policyJson, _ => naPublicKeys);
+
+    /// <summary>
+    /// As <see cref="VerifyPolicySignature(string, IReadOnlyList{string})"/>, but signed by the key of the NA's verified
+    /// history that was valid at the policy's <c>issued_at</c>.
+    /// </summary>
+    /// <param name="policyJson">The BoundaryPolicy JSON, as the NA returned it.</param>
+    /// <param name="keyHistory">The NA's verified key history (<see cref="VerifyKeyHistory(string, string?, string)"/>).</param>
+    /// <exception cref="StrictJsonException"><paramref name="policyJson"/> is not strict JSON.</exception>
+    public static bool VerifyPolicySignature(string policyJson, NAKeyHistory keyHistory)
+    {
+        ArgumentNullException.ThrowIfNull(keyHistory);
+        return SignedRecord("BoundaryPolicy", policyJson, p => NAKeysFor(keyHistory, p, "issued_at", null));
+    }
+
+    /// <summary>
+    /// True when one of <paramref name="naPublicKeys"/> made one of the sovereign revocation feed's signatures, and the
+    /// feed has no field this SDK does not know and is in canonical form (1.9.0).
+    /// </summary>
+    /// <param name="feedJson">The SovereignRevocationFeed JSON, as the NA served it.</param>
+    /// <param name="naPublicKeys">The publishing NA's base64 Ed25519 public keys, any of which may have signed it.</param>
+    /// <exception cref="StrictJsonException"><paramref name="feedJson"/> is not strict JSON.</exception>
+    public static bool VerifyRevocationFeedSignature(string feedJson, IReadOnlyList<string> naPublicKeys) =>
+        SignedRecord("SovereignRevocationFeed", feedJson, _ => naPublicKeys);
+
+    /// <summary>
+    /// As <see cref="VerifyRevocationFeedSignature(string, IReadOnlyList{string})"/>, but signed by the key of the NA's
+    /// verified history that was valid at the feed's <c>issued_at</c>. With <paramref name="now"/>, that key must still
+    /// vouch then (<see cref="NAKeyHistory.KeysVouchingAt"/>).
+    /// </summary>
+    /// <param name="feedJson">The SovereignRevocationFeed JSON, as the NA served it.</param>
+    /// <param name="keyHistory">The publishing NA's verified key history (<see cref="VerifyKeyHistory(string, string?, string)"/>).</param>
+    /// <param name="now">The time the feed is judged at; null judges it at its own time only.</param>
+    /// <exception cref="StrictJsonException"><paramref name="feedJson"/> is not strict JSON.</exception>
+    public static bool VerifyRevocationFeedSignature(string feedJson, NAKeyHistory keyHistory, DateTimeOffset? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(keyHistory);
+        return SignedRecord("SovereignRevocationFeed", feedJson, f => NAKeysFor(keyHistory, f, "issued_at", now));
+    }
+
+    /// <summary>
+    /// The key of the NA's verified history, valid at the sovereign revocation feed's <c>issued_at</c>, that made one of
+    /// its signatures, or null (1.9.0). It names the signer only: the feed's fields are not checked, as
+    /// <see cref="VerifyRevocationFeedSignature(string, NAKeyHistory, DateTimeOffset?)"/> checks them.
+    /// </summary>
+    /// <param name="feedJson">The SovereignRevocationFeed JSON, as the NA served it.</param>
+    /// <param name="keyHistory">The publishing NA's verified key history (<see cref="VerifyKeyHistory(string, string?, string)"/>).</param>
+    /// <exception cref="StrictJsonException"><paramref name="feedJson"/> is not strict JSON.</exception>
+    public static string? RevocationFeedSigner(string feedJson, NAKeyHistory keyHistory)
+    {
+        ArgumentNullException.ThrowIfNull(keyHistory);
+        return FeedSigner(feedJson, f => NAKeysFor(keyHistory, f, "issued_at", null));
+    }
+
+    /// <summary>
+    /// As <see cref="RevocationFeedSigner(string, NAKeyHistory)"/>, but the one of <paramref name="naPublicKeys"/> that
+    /// made one of the feed's signatures.
+    /// </summary>
+    /// <param name="feedJson">The SovereignRevocationFeed JSON, as the NA served it.</param>
+    /// <param name="naPublicKeys">The publishing NA's base64 Ed25519 public keys.</param>
+    /// <exception cref="StrictJsonException"><paramref name="feedJson"/> is not strict JSON.</exception>
+    public static string? RevocationFeedSigner(string feedJson, IReadOnlyList<string> naPublicKeys) =>
+        FeedSigner(feedJson, _ => naPublicKeys);
+
+    private static string? FeedSigner(string feedJson, Func<JsonElement, IReadOnlyList<string>> keys)
+    {
+        using var doc = StrictJsonReader.Parse(feedJson);
+        var feed = doc.RootElement;
+        return feed.ValueKind != JsonValueKind.Object ? null
+            : keys(feed).FirstOrDefault(k => SignedAsReceived("SovereignRevocationFeed", feed, [k]));
+    }
+
+    /// <summary>
+    /// True when one of <paramref name="naPublicKeys"/> made one of the recognition treaty's signatures, and the treaty
+    /// has no field this SDK does not know and is in canonical form (1.9.0).
+    /// </summary>
+    /// <param name="treatyJson">The RecognitionTreaty JSON, as the NA served it.</param>
+    /// <param name="naPublicKeys">The issuing NA's base64 Ed25519 public keys, any of which may have signed it.</param>
+    /// <exception cref="StrictJsonException"><paramref name="treatyJson"/> is not strict JSON.</exception>
+    public static bool VerifyTreatySignature(string treatyJson, IReadOnlyList<string> naPublicKeys) =>
+        SignedRecord("RecognitionTreaty", treatyJson, _ => naPublicKeys);
+
+    /// <summary>
+    /// As <see cref="VerifyTreatySignature(string, IReadOnlyList{string})"/>, but signed by the key of the NA's verified
+    /// history that was valid at the treaty's <c>issued_at</c>, so a key succession leaves every treaty signed before it
+    /// vouching at its own time. With <paramref name="now"/>, that key must still vouch then
+    /// (<see cref="NAKeyHistory.KeysVouchingAt"/>).
+    /// </summary>
+    /// <param name="treatyJson">The RecognitionTreaty JSON, as the NA served it.</param>
+    /// <param name="keyHistory">The issuing NA's verified key history (<see cref="VerifyKeyHistory(string, string?, string)"/>).</param>
+    /// <param name="now">The time the treaty is judged at; null judges it at its own time only.</param>
+    /// <exception cref="StrictJsonException"><paramref name="treatyJson"/> is not strict JSON.</exception>
+    public static bool VerifyTreatySignature(string treatyJson, NAKeyHistory keyHistory, DateTimeOffset? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(keyHistory);
+        return SignedRecord("RecognitionTreaty", treatyJson, t => NAKeysFor(keyHistory, t, "issued_at", now));
+    }
+
+    /// <summary>
+    /// The keys of <paramref name="keyHistory"/> that may have signed <paramref name="record"/>: those valid at its
+    /// <paramref name="timeField"/> and, with <paramref name="now"/>, still vouching then. None when the field is
+    /// missing or not a timestamp.
+    /// </summary>
+    private static IReadOnlyList<string> NAKeysFor(NAKeyHistory keyHistory, JsonElement record, string timeField, DateTimeOffset? now) =>
+        Str(record, timeField) is { } time && TryParseTimestamp(time, out var at)
+            ? now is { } judged ? keyHistory.KeysVouchingAt(at, judged) : keyHistory.KeysAt(at)
+            : [];
+
+    /// <summary>
     /// The record's <c>digest()</c>: SHA-256 hex of its canonical form without the signature and without the resource
     /// fields that are null. The next record under the same decision, or on the same resource, links to it.
     /// </summary>

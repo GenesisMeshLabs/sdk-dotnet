@@ -225,6 +225,13 @@ public class LiveContractTests
             // 1.9.0: the justification proof verifies offline under the NA's key, and under its key history.
             Assert.True(OfflineVerifier.VerifyJustificationSignature(allowed.JustificationProof.GetRawText(), [naKey]));
             Assert.True(OfflineVerifier.VerifyJustificationSignature(allowed.JustificationProof.GetRawText(), history));
+            // 1.9.0: the NA's decisions, policy and attestation, as this SDK reads and writes them, verify by their
+            // signature alone, under its key and under its key history.
+            static string Written(object record) => JsonSerializer.Serialize(record, Auth.SerializerOptions);
+            Assert.True(OfflineVerifier.VerifyDecisionSignature(Written(allowed.Decision), [naKey]));
+            Assert.True(OfflineVerifier.VerifyDecisionSignature(Written(denied.Decision), history));
+            Assert.True(OfflineVerifier.VerifyPolicySignature(Written(boundaryPolicy), history));
+            Assert.True(OfflineVerifier.VerifyAttestationSignature(Written(vendor), history, DateTimeOffset.UtcNow));
 
             // 1.9.0: execution evidence a controller submits, with an executor key limited to "contract:".
             using var executorKey = Key.Create(SignatureAlgorithm.Ed25519,
@@ -560,6 +567,8 @@ public class LiveContractTests
             var feed = await gm.Attestation.RevocationFeed();
             Modeled("revocation_feed", feed);
             Assert.Equal(("offboarded", network), (feed.RevocationReasons[member.AttestationId], feed.IssuerSovereignId));
+            Assert.True(OfflineVerifier.VerifyRevocationFeedSignature(Written(feed), history, DateTimeOffset.UtcNow));
+            Assert.Equal(naKey, OfflineVerifier.RevocationFeedSigner(Written(feed), [naKey]));
             Assert.Contains(member.AttestationId, (await gm.Attestation.RevocationFeed(network)).RevokedAttestationIds);
             Assert.Equal("feed_issuer_mismatch",
                 (await Assert.ThrowsAsync<BadRequestException>(() => gm.Attestation.RevocationFeed("sovereign-other"))).Code);
