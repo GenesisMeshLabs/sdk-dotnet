@@ -327,8 +327,10 @@ public class OutOfBandLiveTests
             ["registry"] = [naKey],
         };
         var kinds = new HashSet<string>();
+        var events = new List<EvidenceEvent>();
         await foreach (var e in ops.EvidenceStore.ExportAll())
         {
+            events.Add(e);
             if (!signers.TryGetValue(e.Entry.EntryKind, out var keys)) continue;
             kinds.Add(e.Entry.EntryKind);
             Assert.True(OfflineVerifier.VerifyOutOfBandRecord(e.Payload.GetRawText(), keys), $"{e.Entry.EntryKind} {e.Entry.StoreSequence}");
@@ -345,6 +347,16 @@ public class OutOfBandLiveTests
             Assert.True(ContractTypesTests.Unmodeled(JsonNode.Parse(e.Payload.GetRawText()), typed.GetType(), e.Entry.EntryKind).Count == 0);
         }
         Assert.Equal(signers.Keys.Order(), kinds.Order());
-        Assert.True((await ops.EvidenceStore.Verify()).Verified);
+        var server = await ops.EvidenceStore.Verify();
+        Assert.True(server.Verified);
+        // The whole export verifies offline too, as the NA verifies it: every entry, and as many of each kind.
+        var offline = OfflineVerifier.VerifyEvidenceEvents(events, new EvidenceVerifyOptions
+        {
+            NAPublicKeys = [naKey],
+            ExecutorKeys = await ops.EvidenceStore.ListExecutorKeys(),
+        });
+        Assert.True(offline.Verified, string.Join("; ", offline.Failures.Select(f => $"{f.StoreSequence} {f.Reason} {f.Detail}")));
+        Assert.Equal((server.CheckedEntries, server.Observations, server.BreakGlass, server.Judgements, server.Quarantined),
+            (offline.CheckedEntries, offline.Observations, offline.BreakGlass, offline.Judgements, offline.Quarantined));
     }
 }

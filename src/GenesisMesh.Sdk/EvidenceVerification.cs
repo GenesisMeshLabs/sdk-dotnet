@@ -7,8 +7,8 @@ namespace GenesisMesh;
 public sealed class EvidenceVerifyOptions
 {
     /// <summary>
-    /// The NA's keys (base64 Ed25519), valid at every time: they sign decisions, justification proofs and retention
-    /// checkpoints. Or give <see cref="KeyHistory"/>.
+    /// The NA's keys (base64 Ed25519), valid at every time: they sign decisions, justification proofs, retention
+    /// checkpoints, and judgement, quarantine and registry records. Or give <see cref="KeyHistory"/>.
     /// </summary>
     public IReadOnlyList<string> NAPublicKeys { get; init; } = [];
 
@@ -22,8 +22,8 @@ public sealed class EvidenceVerifyOptions
     public NAKeyHistory? KeyHistory { get; init; }
 
     /// <summary>
-    /// The executor keys records are signed with, retired ones included (<see cref="EvidenceStoreClient.ListExecutorKeys"/>):
-    /// a retired key still verifies the records it signed.
+    /// The executor and observer keys records are signed with, retired ones included
+    /// (<see cref="EvidenceStoreClient.ListExecutorKeys"/>): a retired key still verifies the records it signed.
     /// </summary>
     public IReadOnlyList<ExecutorKeyRecord> ExecutorKeys { get; init; } = [];
 
@@ -38,7 +38,7 @@ public sealed class EvidenceVerifyOptions
 
     /// <summary>
     /// The retention checkpoint JSON as received, for a run that starts after the entries it removed: the run's first
-    /// entry continues from its last removed entry, and each resource chain from its head. It must be a checkpoint signed
+    /// entry continues from its last removed entry, and each resource and observation chain from its head. It must be a checkpoint signed
     /// by the NA (with <see cref="KeyHistory"/>, by the key valid at its <c>created_at</c>; <c>invalid_signature</c>), with
     /// no field this SDK does not know (<c>unknown_field</c>); otherwise nothing of the run is checked.
     /// </summary>
@@ -48,11 +48,21 @@ public sealed class EvidenceVerifyOptions
 public static partial class OfflineVerifier
 {
     /// <summary>
-    /// The entry kinds this SDK verifies (1.9.0): those a governed store holds. The store's other kinds (changes outside
-    /// the governed path, remediation, key successions, archives and grants) fail as <c>unknown_entry_kind</c>, as a kind
-    /// from a later release does; their envelopes still chain.
+    /// The entry kinds this SDK verifies (1.9.0): those a governed store holds, and the records of changes outside the
+    /// governed path. The store's other kinds (remediation, reviews, key successions, archives and grants) fail as
+    /// <c>unknown_entry_kind</c>, as a kind from a later release does; their envelopes still chain.
     /// </summary>
-    internal static readonly string[] VerifiedEntryKinds = ["decision", "justification", "execution", "retention_checkpoint"];
+    internal static readonly string[] VerifiedEntryKinds =
+    [
+        "decision", "justification", "execution", "retention_checkpoint",
+        "observation", "break_glass", "judgement", "quarantine", "registry",
+    ];
+
+    /// <summary>The kinds the NA signs among the records of changes outside the governed path; an observer or executor key signs the others.</summary>
+    private static readonly HashSet<string> NASignedOutOfBandKinds = new(StringComparer.Ordinal) { "judgement", "quarantine", "registry" };
+
+    /// <summary>v1.3.0: a kind whose record the store holds exactly as signed: a record of a change outside the governed path.</summary>
+    private static bool IsOutOfBand(string kind) => EnvelopeFields.ContainsKey(kind);
 
     /// <summary>How far before an earlier entry of a run an entry may be recorded, in microseconds (v1.5.0, the reference's tolerance).</summary>
     private const long RecordTimeTolerance = 300_000_000;
@@ -67,6 +77,11 @@ public static partial class OfflineVerifier
         ["justification"] = "proof_id",
         ["execution"] = "evidence_id",
         ["retention_checkpoint"] = "checkpoint_id",
+        ["observation"] = "observation_id",
+        ["break_glass"] = "break_glass_id",
+        ["judgement"] = "judgement_id",
+        ["quarantine"] = "quarantine_id",
+        ["registry"] = "registry_record_id",
     };
 
     /// <summary>The model each kind's payload holds; a decision payload wraps two, its decision and its context.</summary>
@@ -75,20 +90,64 @@ public static partial class OfflineVerifier
         ["justification"] = "JustificationProof",
         ["execution"] = "ExecutionEvidence",
         ["retention_checkpoint"] = "RetentionCheckpoint",
+        ["observation"] = "ObservationRecord",
+        ["break_glass"] = "BreakGlassRecord",
+        ["judgement"] = "JudgementRecord",
+        ["quarantine"] = "QuarantineRecord",
+        ["registry"] = "RegistryRecord",
+    };
+
+    /// <summary>
+    /// v1.3.1: envelope field and record field, for the envelope fields the NA derives from a record of a change outside
+    /// the governed path. The NA searches and matches on them, so each must name what the signed record says
+    /// (<c>envelope_mismatch</c>); an absent field is null. The NA derives none from the kinds that came before.
+    /// </summary>
+    private static readonly Dictionary<string, (string Envelope, string Record)[]> EnvelopeFields = new(StringComparer.Ordinal)
+    {
+        ["observation"] =
+        [
+            ("record_id", "observation_id"), ("resource_id", "resource_id"), ("resource_action", "action"),
+            ("capability", "capability"), ("executor_sovereign_id", "observer_sovereign_id"),
+        ],
+        ["break_glass"] =
+        [
+            ("record_id", "break_glass_id"), ("resource_id", "resource_id"), ("resource_action", "resource_action"),
+            ("capability", "capability"), ("executor_sovereign_id", "executor_sovereign_id"), ("attestation_id", "attestation_id"),
+            ("outcome", "outcome"),
+        ],
+        ["judgement"] =
+        [
+            ("record_id", "judgement_id"), ("subject_id", "subject_id"), ("resource_id", "resource_id"), ("resource_action", "action"),
+            ("capability", "capability"), ("outcome", "verdict"), ("matched_evidence_id", "matched_evidence_id"),
+        ],
+        ["quarantine"] = [("record_id", "quarantine_id"), ("resource_id", "resource_id"), ("outcome", "rejection_code")],
+        ["registry"] = [("record_id", "registry_record_id"), ("outcome", "event")],
     };
 
     /// <summary>
     /// Verifies stored entries offline, as the reference's <c>verify_evidence_events</c> does: each envelope, its digest
-    /// and its payload's, the store chain, every signature (the NA's on decisions, justification proofs and retention
-    /// checkpoints, the executor's on execution evidence), each execution record against its decision, and the decision
-    /// and resource chains. Pass an export (<see cref="ParseExportLines(string)"/>, <see cref="EvidenceStoreClient.ExportAll"/>)
-    /// or, with <see cref="EvidenceVerifyOptions.Contiguous"/> false, a history. Nothing is thrown for a bad entry, or an
-    /// event built by hand that is not one: each finding is a failure, with the reason codes every implementation uses.
+    /// and its payload's, the store chain, every signature (the NA's on decisions, justification proofs, retention
+    /// checkpoints, judgements, quarantine and registry records; the executor's on execution evidence and break-glass
+    /// records; the observer's on observations), each execution record against its decision, and the decision, resource
+    /// and observation chains. A judgement names its subject as stored, once, and a record it matches at most once; a
+    /// quarantine entry holds the record it names. Pass an export (<see cref="ParseExportLines(string)"/>,
+    /// <see cref="EvidenceStoreClient.ExportAll"/>) or, with <see cref="EvidenceVerifyOptions.Contiguous"/> false, a
+    /// history. Nothing is thrown for a bad entry, or an event built by hand that is not one: each finding is a failure,
+    /// with the reason codes every implementation uses.
     /// </summary>
     /// <remarks>
-    /// This SDK verifies the kinds a governed store holds: <c>decision</c>, <c>justification</c>, <c>execution</c> and
-    /// <c>retention_checkpoint</c>. Any other kind fails as <c>unknown_entry_kind</c>; verify such a store with the
-    /// TypeScript or Rust SDK, or the core's <c>genesis-mesh audit verify</c>. Anchors are not checked here.
+    /// This SDK verifies the kinds a governed store holds (<c>decision</c>, <c>justification</c>, <c>execution</c>,
+    /// <c>retention_checkpoint</c>) and, from 1.9.0, the records of changes outside the governed path
+    /// (<c>observation</c>, <c>break_glass</c>, <c>judgement</c>, <c>quarantine</c>, <c>registry</c>). Any other kind
+    /// fails as <c>unknown_entry_kind</c>; verify such a store with the TypeScript or Rust SDK, or the core's
+    /// <c>genesis-mesh audit verify</c>. Anchors are not checked here, nor where the store placed an executor key
+    /// (an audit pack's registry records).
+    /// <para>
+    /// A judgement may match a grant use, and execution evidence may rest on a remediation record. With those kinds
+    /// unknown, this SDK reports what it can see, a match it does not hold or nothing, where the TypeScript SDK names the
+    /// later kind's failure; either way the run does not verify. A break-glass record sharing a grant use's ID is not
+    /// named as a duplicate.
+    /// </para>
     /// </remarks>
     /// <param name="events">The entries, in store order.</param>
     /// <param name="options">The keys, and what the run is.</param>
@@ -166,6 +225,17 @@ public static partial class OfflineVerifier
         private readonly Dictionary<string, JsonElement> _checkpoints = new(StringComparer.Ordinal);
         private readonly Dictionary<string, (long Sequence, string Digest)> _resourceHeads = new(StringComparer.Ordinal);
         private readonly Dictionary<string, HashSet<string>> _recordIds = new(StringComparer.Ordinal);
+        /// <summary>v1.3.0: the last observation position held per resource.</summary>
+        private readonly Dictionary<string, long> _observationHeads = new(StringComparer.Ordinal);
+        /// <summary>v1.3.1: the judgement subjects held, by kind and ID (<see cref="SubjectKey"/>): payload digest and position.</summary>
+        private readonly Dictionary<string, (string Digest, long Sequence)> _subjects = new(StringComparer.Ordinal);
+        /// <summary>The subjects judged, and the records a judgement matched.</summary>
+        private readonly HashSet<string> _judged = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _matched = new(StringComparer.Ordinal);
+        /// <summary>v1.3.0: the IDs of judgements and of changes outside the governed path, which no execution record rests on.</summary>
+        private readonly HashSet<string> _notDecisions = new(StringComparer.Ordinal);
+        /// <summary>v1.3.1: the records a judgement can match: execution evidence and break-glass records held so far.</summary>
+        private readonly HashSet<string> _matchable = new(StringComparer.Ordinal);
         private long? _firstSequence;
         private bool _fromStart;
         private JsonElement? _previous;
@@ -215,10 +285,55 @@ public static partial class OfflineVerifier
                 Fail(null, "unknown_field", string.Join(", ", unknown));
                 return false;
             }
-            // The chains it removed records from continue from its heads.
+            // The chains it removed records from continue from its heads, a position of 0 included.
             foreach (var head in cp.GetProperty("resource_heads").EnumerateObject())
                 _resourceHeads[head.Name] = (PayloadInteger(head.Value, "resource_sequence")!.Value, Str(head.Value, "record_digest")!);
+            if (IsObject(cp, "observation_heads", out var positions))
+                foreach (var head in positions.EnumerateObject())
+                    _observationHeads[head.Name] = PayloadInteger(head.Value) ?? 0;
             return true;
+        }
+
+        /// <summary>
+        /// v1.5.0: the resource and observation chains a checkpoint of the run removed records from continue from its
+        /// heads, where they are ahead of the heads held.
+        /// </summary>
+        private void SeedHeads(JsonElement cp)
+        {
+            if (IsObject(cp, "resource_heads", out var heads))
+            {
+                foreach (var head in heads.EnumerateObject())
+                {
+                    var sequence = PayloadInteger(head.Value, "resource_sequence") ?? 0;
+                    if (!_resourceHeads.TryGetValue(head.Name, out var held) || held.Sequence < sequence)
+                        _resourceHeads[head.Name] = (sequence, Str(head.Value, "record_digest")!);
+                }
+            }
+            if (IsObject(cp, "observation_heads", out var positions))
+            {
+                foreach (var head in positions.EnumerateObject())
+                {
+                    var position = PayloadInteger(head.Value) ?? 0;
+                    if (_observationHeads.GetValueOrDefault(head.Name) < position) _observationHeads[head.Name] = position;
+                }
+            }
+        }
+
+        /// <summary>v1.3.1: judgement subjects are keyed by kind and ID: a break-glass record may share an observation's ID.</summary>
+        private static string SubjectKey(string kind, string id) => kind + "\0" + id;
+
+        /// <summary>
+        /// The registered key that may sign an observation (an observer key), or execution evidence or a break-glass record
+        /// (an executor key): of the record's sovereign, with the role its kind needs.
+        /// </summary>
+        private ExecutorKeyRecord? FittingKey(string kind, JsonElement record)
+        {
+            var observation = kind == "observation";
+            return KeyNamed(record) is { } key
+                   && key.ExecutorSovereignId == Str(record, observation ? "observer_sovereign_id" : "executor_sovereign_id")
+                   && (key.Role ?? "executor") == (observation ? "observer" : "executor")
+                ? key
+                : null;
         }
 
         public void Visit(EvidenceEvent e)
@@ -285,8 +400,9 @@ public static partial class OfflineVerifier
             if (unsignedUnknown.Count > 0)
             {
                 Warn(seq, "unsigned_field", string.Join(", ", unsignedUnknown));
-                // v1.5.0: a retention checkpoint is stored exactly as signed; a field outside its signature is no part of one.
-                if (kind == "retention_checkpoint")
+                // v1.3.0: the reference stores the records of changes outside the governed path exactly as signed, and
+                // (v1.5.0) a retention checkpoint: a field outside the signature is no part of one.
+                if (kind == "retention_checkpoint" || IsOutOfBand(kind))
                 {
                     Fail(seq, "payload_invalid", string.Join(", ", unsignedUnknown));
                     return;
@@ -298,7 +414,7 @@ public static partial class OfflineVerifier
                 return;
             }
             var record = kind == "decision" ? payload.GetProperty("decision") : payload;
-            new RecordCheck(this, seq, kind, recordedAt, notBefore, payload, record).Check();
+            new RecordCheck(this, seq, kind, recordedAt, notBefore, entry, payload, record).Check();
         }
 
         /// <summary>The event's envelope as received, or null when it is not one (TypeScript <c>validEvent</c>).</summary>
@@ -347,6 +463,11 @@ public static partial class OfflineVerifier
             var signedAsReceived = kind switch
             {
                 "execution" => KeyNamed(payload) is { } key && SignedAsReceived(model, payload, [key.PublicKey]),
+                // An observation or break-glass record: by the key the signature names, whatever its role, so that an
+                // authentic record with a field this SDK does not know is refused by name first, as the reference refuses it.
+                _ when IsOutOfBand(kind) => NASignedOutOfBandKinds.Contains(kind)
+                    ? OutOfBandSignedBy(payload, _allNaKeys)
+                    : KeyNamed(payload) is { } named && OutOfBandSignedBy(payload, [named.PublicKey]),
                 _ => SignedAsReceived(model, payload, _allNaKeys),
             };
             return signedAsReceived ? (fields, [], payload) : ([], fields, StrictFields.WithoutUnknownFields(model, payload));
@@ -363,12 +484,17 @@ public static partial class OfflineVerifier
             "decision" => payload.TryGetProperty("decision", out var d) && Shapes.Decision(d),
             "justification" => Shapes.Justification(payload),
             "execution" => Shapes.Execution(payload),
-            _ => Shapes.Checkpoint(payload),
+            "retention_checkpoint" => Shapes.Checkpoint(payload),
+            "observation" => Shapes.Observation(payload),
+            "break_glass" => Shapes.BreakGlass(payload),
+            "judgement" => Shapes.Judgement(payload),
+            "quarantine" => Shapes.Quarantine(payload),
+            _ => Shapes.Registry(payload),
         };
 
         /// <summary>One entry's record, checked once its envelope and payload are.</summary>
         private sealed class RecordCheck(EventRun run, long seq, string kind, long recordedAt, long? notBefore,
-            JsonElement payload, JsonElement record)
+            JsonElement entry, JsonElement payload, JsonElement record)
         {
             private EvidenceStoreVerification Result => run.Result;
 
@@ -415,6 +541,12 @@ public static partial class OfflineVerifier
                 var recordId = Str(record, RecordIdFields[kind])!;
                 if (!run._recordIds.TryGetValue(kind, out var seen)) run._recordIds[kind] = seen = new(StringComparer.Ordinal);
                 if (!seen.Add(recordId)) Fail("duplicate_record", $"{kind} {recordId}");
+                // v1.3.1: the envelope of a record outside the governed path names what its record says.
+                if (EnvelopeFields.TryGetValue(kind, out var fields))
+                {
+                    var wrong = fields.Where(f => TextOrNull(entry, f.Envelope) != TextOrNull(payload, f.Record)).Select(f => f.Envelope).ToList();
+                    if (wrong.Count > 0) Fail("envelope_mismatch", $"{kind}: {string.Join(", ", wrong)}");
+                }
                 switch (kind)
                 {
                     case "decision":
@@ -426,10 +558,88 @@ public static partial class OfflineVerifier
                     case "execution":
                         Execution();
                         break;
-                    default:
+                    case "retention_checkpoint":
                         RetentionCheckpoint();
                         break;
+                    case "observation":
+                    case "break_glass":
+                        Change(recordId);
+                        break;
+                    case "judgement":
+                        Judgement(recordId);
+                        break;
+                    case "quarantine":
+                        Quarantine();
+                        break;
+                    default:
+                        // A registry record: the NA's, as its key history is.
+                        NASignature(keys => OutOfBandSignedBy(record, keys), "RegistryRecord");
+                        break;
                 }
+            }
+
+            /// <summary>
+            /// An observation or break-glass record (v1.3.0): signed by a registered key of its sovereign with the role its
+            /// kind needs, a subject a judgement may name; an observation continues its resource's observation positions,
+            /// and a break-glass record is a record a judgement may match.
+            /// </summary>
+            private void Change(string recordId)
+            {
+                var model = PayloadModels[kind];
+                var key = run.FittingKey(kind, payload);
+                Signature(key is not null && OutOfBandSignedBy(payload, [key.PublicKey]), model);
+                run._subjects[SubjectKey(kind, recordId)] = (Str(entry, "payload_digest")!, seq);
+                run._notDecisions.Add(recordId);
+                if (kind == "break_glass")
+                {
+                    Result.BreakGlass++;
+                    run._matchable.Add(recordId);
+                    return;
+                }
+                Result.Observations++;
+                var resource = Str(payload, "resource_id")!;
+                var position = PayloadInteger(entry, "observation_sequence");
+                var hasHead = run._observationHeads.TryGetValue(resource, out var head);
+                if ((hasHead || run._fromStart) && position != (hasHead ? head : 0) + 1) Fail("observation_chain_break", resource);
+                run._observationHeads[resource] = position is { } p && p != 0 ? p : head;
+            }
+
+            /// <summary>
+            /// A judgement (v1.3.0): signed by the NA, one per subject, of a subject as stored (or, in a run that holds its
+            /// position, held), and matching a record at most once, one the store held before (a run from entry 1 holds it).
+            /// </summary>
+            private void Judgement(string judgementId)
+            {
+                NASignature(keys => OutOfBandSignedBy(record, keys), "JudgementRecord");
+                Result.Judgements++;
+                run._notDecisions.Add(judgementId);
+                var subjectId = Str(payload, "subject_id")!;
+                var key = SubjectKey(Str(payload, "subject_kind")!, subjectId);
+                if (!run._judged.Add(key)) Fail("duplicate_judgement", subjectId);
+                var subjectSequence = PayloadInteger(payload, "subject_store_sequence");
+                if (run._subjects.TryGetValue(key, out var subject))
+                {
+                    if (subject.Digest != Str(payload, "subject_digest") || subject.Sequence != subjectSequence)
+                        Fail("judgement_subject_mismatch", subjectId);
+                }
+                else if (run._contiguous && run._firstSequence is { } first && subjectSequence >= first)
+                {
+                    Fail("judgement_subject_missing", subjectId);
+                }
+                if (Str(payload, "matched_evidence_id") is { } match)
+                {
+                    if (!run._matched.Add(match)) Fail("match_reused", match);
+                    // v1.3.1: the NA matches a record it already holds, so a run from entry 1 holds it.
+                    if (run._contiguous && run._firstSequence == 1 && !run._matchable.Contains(match)) Fail("judgement_match_missing", match);
+                }
+            }
+
+            /// <summary>A quarantine entry (v1.3.0): signed by the NA, holding the record whose digest it names.</summary>
+            private void Quarantine()
+            {
+                NASignature(keys => OutOfBandSignedBy(record, keys), "QuarantineRecord");
+                Result.Quarantined++;
+                if (PayloadDigest(payload.GetProperty("record")) != Str(payload, "record_digest")) Fail("quarantine_digest_mismatch");
             }
 
             private void Decision(string decisionId)
@@ -451,11 +661,9 @@ public static partial class OfflineVerifier
 
             private void Execution()
             {
-                var key = run.KeyNamed(payload);
                 // v1.3.0: only an executor key signs execution evidence.
-                var fits = key is not null && key.ExecutorSovereignId == Str(payload, "executor_sovereign_id")
-                    && (key.Role ?? "executor") == "executor";
-                Signature(fits && SignedAsReceived("ExecutionEvidence", payload, [key!.PublicKey]), "ExecutionEvidence");
+                var key = run.FittingKey(kind, payload);
+                Signature(key is not null && SignedAsReceived("ExecutionEvidence", payload, [key.PublicKey]), "ExecutionEvidence");
                 Result.Executions++;
                 var decisionId = Str(payload, "decision_id")!;
                 var hasDecision = run._decisions.TryGetValue(decisionId, out var decision);
@@ -470,6 +678,8 @@ public static partial class OfflineVerifier
                              && Str(payload, "executed_capability") != Str(context, "requested_capability"))
                         Fail("evidence_capability_mismatch");
                 }
+                // v1.3.0: execution evidence never rests on a judgement or a record of a change outside the governed path.
+                if (run._notDecisions.Contains(decisionId)) Fail("evidence_cites_judgement", decisionId);
                 var sequenceNo = PayloadInteger(payload, "sequence_no");
                 var prevEvidence = Str(payload, "prev_evidence_digest");
                 if (run._lastExecution.TryGetValue(decisionId, out var prior))
@@ -482,6 +692,7 @@ public static partial class OfflineVerifier
                     Fail("evidence_chain_break");
                 }
                 run._lastExecution[decisionId] = payload.Clone();
+                run._matchable.Add(Str(payload, "evidence_id")!);
                 if (Str(payload, "resource_id") is { } resourceId)
                 {
                     var hasHead = run._resourceHeads.TryGetValue(resourceId, out var head);
@@ -517,21 +728,22 @@ public static partial class OfflineVerifier
                 }
                 run._checkpoints[Str(payload, "checkpoint_id")!] = payload.Clone();
                 // v1.5.0: the chains a checkpoint removed continue from its heads.
-                if (authentic && IsObject(payload, "resource_heads", out var heads))
-                {
-                    foreach (var head in heads.EnumerateObject())
-                    {
-                        var sequence = PayloadInteger(head.Value, "resource_sequence") ?? 0;
-                        if (!run._resourceHeads.TryGetValue(head.Name, out var held) || held.Sequence < sequence)
-                            run._resourceHeads[head.Name] = (sequence, Str(head.Value, "record_digest")!);
-                    }
-                }
+                if (authentic) run.SeedHeads(payload);
             }
         }
     }
 
     /// <summary>The digest a record links to: <see cref="ExecutionDigest"/> of the record as received.</summary>
     private static string ExecutionDigestOf(JsonElement record) => Sha256Hex(ReceivedCanonical("ExecutionEvidence", record));
+
+    /// <summary>Whether a record of a change outside the governed path is signed, as received, by one of <paramref name="keys"/>.</summary>
+    private static bool OutOfBandSignedBy(JsonElement record, IReadOnlyList<string> keys) =>
+        IsObject(record, "signature", out var signature) && Str(signature, "sig") is { } sig
+        && VerifyEd25519(OutOfBandCanonical(record), sig, keys);
+
+    /// <summary>A field as an envelope comparison reads it: its text, or null when absent or null (the record shapes allow nothing else).</summary>
+    private static string? TextOrNull(JsonElement obj, string name) =>
+        obj.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     /// <summary>
     /// An integer in a payload, as JavaScript reads one (TypeScript <c>Number.isSafeInteger</c>): a number with no

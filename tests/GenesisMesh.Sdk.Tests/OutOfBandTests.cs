@@ -17,13 +17,10 @@ namespace GenesisMesh.Sdk.Tests;
 public class OutOfBandTests
 {
     private static readonly string SuitePath = Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "out_of_band.json");
-    private static readonly HashSet<string> KindsRun = new() { "canonical_form", "verify_record", "metadata_problem" };
+    private static readonly HashSet<string> KindsRun = new() { "canonical_form", "verify_record", "metadata_problem", "verify_export" };
 
-    /// <summary>
-    /// <c>verify_export</c> comes with the out-of-band kinds of <see cref="OfflineVerifier.VerifyEvidenceEvents"/>;
-    /// <c>time_bounds</c> and <c>policy_history</c> are the NA's own rules: an SDK neither admits nor judges records.
-    /// </summary>
-    private static readonly HashSet<string> KindsNotRun = new() { "verify_export", "time_bounds", "policy_history" };
+    /// <summary><c>time_bounds</c> and <c>policy_history</c> are the NA's own rules: an SDK neither admits nor judges records.</summary>
+    private static readonly HashSet<string> KindsNotRun = new() { "time_bounds", "policy_history" };
 
     // The Python reference (genesis_mesh.models.out_of_band), signed with the zero seed.
     private const string PublicKey = "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=";
@@ -54,8 +51,14 @@ public class OutOfBandTests
     {
         var v = Vector(id);
         var expected = v.GetProperty("expected");
+        var kind = v.GetProperty("kind").GetString();
+        if (kind == "verify_export")
+        {
+            VerifiesTheExport(v.GetProperty("input"), expected);
+            return;
+        }
         var record = v.GetProperty("record").GetRawText();
-        switch (v.GetProperty("kind").GetString())
+        switch (kind)
         {
             case "canonical_form":
                 Assert.Equal(expected.GetProperty("canonical").GetString(), OfflineVerifier.OutOfBandCanonical(record));
@@ -73,6 +76,32 @@ public class OutOfBandTests
                 Assert.Equal(want.ValueKind == JsonValueKind.Null ? null : want.GetString(), problem);
                 break;
         }
+    }
+
+    /// <summary>A <c>verify_export</c> vector: the failures in order, whether it verified, and the counts of the kinds it holds.</summary>
+    private static void VerifiesTheExport(JsonElement input, JsonElement expected)
+    {
+        var r = OfflineVerifier.VerifyEvidenceEvents(OfflineVerifier.ParseExportLines(input.GetProperty("lines").GetString()!),
+            new EvidenceVerifyOptions
+            {
+                NAPublicKeys = input.GetProperty("na_public_keys").EnumerateArray().Select(k => k.GetString()!).ToList(),
+                ExecutorKeys = input.GetProperty("executor_keys").Deserialize<List<ExecutorKeyRecord>>()!,
+                Contiguous = input.GetProperty("contiguous").GetBoolean(),
+            });
+        static long? Position(JsonElement f) =>
+            f.GetProperty("store_sequence").ValueKind == JsonValueKind.Null ? null : f.GetProperty("store_sequence").GetInt64();
+        Assert.Equal(expected.GetProperty("failures").EnumerateArray().Select(f => (Position(f), f.GetProperty("reason").GetString()!)),
+            r.Failures.Select(f => (f.StoreSequence, f.Reason)));
+        Assert.Equal(expected.GetProperty("verified").GetBoolean(), r.Verified);
+        var counts = new Dictionary<string, long>
+        {
+            ["observations"] = r.Observations,
+            ["break_glass"] = r.BreakGlass,
+            ["judgements"] = r.Judgements,
+            ["quarantined"] = r.Quarantined,
+        };
+        Assert.Equal(expected.GetProperty("counts").EnumerateObject().Select(c => (c.Name, c.Value.GetInt64())).OrderBy(c => c.Name, StringComparer.Ordinal),
+            counts.Where(c => c.Value > 0).Select(c => (c.Key, c.Value)).OrderBy(c => c.Key, StringComparer.Ordinal));
     }
 
     // ── Observations ─────────────────────────────────────────────────────────

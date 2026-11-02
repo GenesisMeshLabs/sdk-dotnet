@@ -20,7 +20,8 @@ public class FieldRegistryConformanceTests
 
     /// <summary>
     /// Entry kinds: the vectors expect every kind of the registry to be verified, and this SDK verifies the kinds a
-    /// governed store holds (1.9.0, <see cref="OfflineVerifier.VerifiedEntryKinds"/>).
+    /// governed store holds and the records of changes outside the governed path (1.9.0,
+    /// <see cref="OfflineVerifier.VerifiedEntryKinds"/>).
     /// </summary>
     private static readonly HashSet<string> KindsNotRun = new() { "entry_kind" };
 
