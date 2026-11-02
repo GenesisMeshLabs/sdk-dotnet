@@ -156,16 +156,22 @@ public class CanonicalSuiteTests
     [InlineData("-100000000000000000000", "integer_out_of_range")]
     public void IntegersHaveAtMostTwentyDigits(string json, string reason) => Assert.Equal(reason, Reason(json));
 
-    [Fact]
-    public void AnOverlongIntegerIsRefusedBeforeItIsParsed()
+    [Theory]
+    [InlineData("", 6_500_000)]
+    [InlineData("-", 12_500_000)]
+    public void AnOverlongIntegerIsRefusedBeforeItIsParsed(string sign, long mostAllocated)
     {
-        // v1.3.1: BigInteger.Parse takes time that grows faster than the length. The refusal names the length, not the
-        // 64-bit range a parsed value is held to. The clock only backs it up: parsing 3M digits takes about 18 s on .NET 8,
-        // and about 3 s on .NET 10, no longer than the refusal itself on a loaded machine.
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        var e = Assert.Throws<StrictJsonException>(() => StrictJsonReader.Check("[" + new string('7', 3_000_000) + "]"));
+        // v1.3.1: BigInteger.Parse takes time that grows faster than the length (3M digits: about 17 s on .NET 8, 2 to 3 s
+        // on .NET 10), so a longer integer is refused before it is parsed, and the refusal names the length, not the
+        // 64-bit range. The order is told by what the refusal allocates, not by a clock: the reader's copy of the
+        // literal, 6 MB, and a negative integer's digits copied again without the sign, where parsing first would add
+        // at least the value's 1.25 MB.
+        var json = "[" + sign + new string('7', 3_000_000) + "]";
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var e = Assert.Throws<StrictJsonException>(() => StrictJsonReader.Check(json));
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.Equal("JSON refused (integer_out_of_range): an integer longer than 20 digits", e.Message);
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"3M digits took {watch.Elapsed}");
+        Assert.True(allocated < mostAllocated, $"refusing 3M digits allocated {allocated:N0} bytes");
     }
 
     [Fact]
