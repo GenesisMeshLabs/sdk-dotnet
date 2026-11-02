@@ -550,6 +550,20 @@ public class GovernanceTests
         Assert.Equal("recorded", result.Submission!.Status);
     }
 
+    [Fact]
+    public async Task TheActionGetsTheCallersToken()
+    {
+        var x = new Setup();
+        using var cts = new CancellationTokenSource();
+        var seen = CancellationToken.None;
+        await Governance.GovernedAction<string>(x.Gm, x.Recorder, Setup.Request(), (_, ct) =>
+        {
+            seen = ct;
+            return Task.FromResult<ActionReport<string>?>(null);
+        }, cts.Token);
+        Assert.Equal(cts.Token, seen);
+    }
+
     // ── With the outbox ──────────────────────────────────────────────────────
 
     [Fact]

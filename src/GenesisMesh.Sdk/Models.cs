@@ -3789,12 +3789,17 @@ public static class OutboxStates
 /// <summary>Why the NA, or the transport, refused a submission (<see cref="OutboxEntry.LastError"/>).</summary>
 public sealed class SubmissionFailure
 {
-    /// <summary>The HTTP status; 0 when no answer came (a network error or a timeout) or this SDK refused the record.</summary>
+    /// <summary>
+    /// The HTTP status; 0 when no answer came (a network error or a timeout), when this SDK could not read the answer, or
+    /// when it refused the record.
+    /// </summary>
     [JsonPropertyName("status")]
     public int Status { get; init; }
 
     /// <summary>
-    /// The NA's code; <c>network_error</c> when the NA could not be reached, <c>local_error</c> for an exception in
+    /// The NA's code; <c>network_error</c> when the NA could not be reached, <c>response_body_unreadable</c> when it
+    /// answered but this SDK could not read the answer (cut off, stalled, too large or not strict JSON; for a record
+    /// outbox entry, also a success that does not say the NA holds the record), <c>local_error</c> for an exception in
     /// this process before any request (<see cref="EvidenceOutbox.LocalError"/>).
     /// </summary>
     [JsonPropertyName("code")]

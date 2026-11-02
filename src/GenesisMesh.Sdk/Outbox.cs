@@ -173,8 +173,8 @@ public static class EvidenceOutbox
                             ? q.GetString()
                             : null,
                 }, !refused);
-            case NetworkException:
-                return (new SubmissionFailure { Status = 0, Code = NetworkError, Message = error.Message }, true);
+            case NetworkException network:
+                return (new SubmissionFailure { Status = 0, Code = network.Code, Message = error.Message }, true);
             // The NA's answer could not be read: it may have admitted the record.
             case StrictJsonException strict:
                 return (new SubmissionFailure { Status = 0, Code = strict.Reason, Message = error.Message }, true);
@@ -223,11 +223,11 @@ public static class EvidenceOutbox
     /// (<c>response_body_unreadable</c>), so the record stays pending, and a resubmission gets a <c>duplicate</c> if
     /// the NA holds it.
     /// </summary>
-    internal static StrictJsonException NoAnswer() => new("response_body_unreadable", "the NA's answer to the record has no body");
+    internal static StrictJsonException EmptyAnswer() => new("response_body_unreadable", "the NA's answer to the record has no body");
 
     /// <summary>
     /// The failure of a submission answered by a success that does not say what the NA did with the record, such as one
-    /// without a status the NA sends: classified as <see cref="NoAnswer"/> is, so the record stays pending.
+    /// without a status the NA sends: classified as <see cref="EmptyAnswer"/> is, so the record stays pending.
     /// </summary>
     internal static StrictJsonException UnreadAnswer(string detail) => new("response_body_unreadable", detail);
 

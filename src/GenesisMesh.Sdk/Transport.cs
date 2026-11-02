@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Runtime.ExceptionServices;
@@ -136,9 +138,9 @@ internal sealed class Transport : IDisposable
 
     /// <summary>
     /// The NA's public key for admin signatures, read once from /sovereign.json. Requests that need it at the same
-    /// time share one lookup. A lookup that gets no answer throws <see cref="NetworkException"/>; an answer without
-    /// the key throws <c>na_public_key_unavailable</c> with the answer's status. A failed lookup is tried again by the
-    /// next request.
+    /// time share one lookup. A lookup that gets no answer, or a success whose body cannot be read, throws
+    /// <see cref="NetworkException"/>; any other answer without the key throws <c>na_public_key_unavailable</c> with the
+    /// answer's status, whether its body could be read or not. A failed lookup is tried again by the next request.
     /// </summary>
     private async Task<string> AudienceAsync(CancellationToken ct)
     {
@@ -176,12 +178,21 @@ internal sealed class Transport : IDisposable
         var used = Volatile.Read(ref _active);
         int status;
         byte[] body;
+        var unreadable = false;
         try
         {
             (status, body) = await GetAtAsync(Endpoint(used), "/sovereign.json", CancellationToken.None).ConfigureAwait(false);
         }
+        catch (NetworkException e) when (e.Code == NetworkException.ResponseBodyUnreadable && e.AnswerStatus is < 200 or >= 300)
+        {
+            // An answer other than a success counts by its status, as the TypeScript SDK reads it: a 503 is moved past,
+            // a 404 thrown.
+            (status, body, unreadable) = (e.AnswerStatus, [], true);
+        }
         catch (NetworkException)
         {
+            // No answer, or a success whose body cannot be read: the key lookup carries no decision, and the request
+            // waiting for it was not sent, so the endpoint is moved past.
             MoveFrom(used);
             throw;
         }
@@ -201,7 +212,7 @@ internal sealed class Transport : IDisposable
         {
             if (FailoverStatus.Contains(status)) MoveFrom(used);
             throw ErrorMapping.ForStatus(status, LookupUnavailable,
-                $"Could not read the NA public key from /sovereign.json (HTTP {status})");
+                $"Could not read the NA public key from /sovereign.json (HTTP {status}{(unreadable ? ", its body could not be read" : "")})");
         }
         _audience = key;
         return key;
@@ -399,10 +410,10 @@ internal sealed class Transport : IDisposable
             req.Content = new StringContent(json, Encoding.UTF8, new MediaTypeHeaderValue("application/json"));
         }
 
-        // The body is read in full before SendAsync returns, so a dropped body is a NetworkException there.
+        var started = Stopwatch.GetTimestamp();
         using var resp = await SendOnceAsync(req, ct).ConfigureAwait(false);
         // The bytes, so a body that is not UTF-8 is refused rather than repaired.
-        var bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        var bytes = await BodyAsync(req, resp, started, ct).ConfigureAwait(false);
         return new Answer((int)resp.StatusCode, bytes, RetryAfter(resp.Headers.RetryAfter));
     }
 
@@ -411,15 +422,74 @@ internal sealed class Transport : IDisposable
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, baseUrl + path);
         foreach (var (name, value) in _headers) req.Headers.TryAddWithoutValidation(name, value);
+        var started = Stopwatch.GetTimestamp();
         using var resp = await SendOnceAsync(req, ct).ConfigureAwait(false);
-        return ((int)resp.StatusCode, await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false));
+        return ((int)resp.StatusCode, await BodyAsync(req, resp, started, ct).ConfigureAwait(false));
     }
 
+    /// <summary>
+    /// The body of an answer, read within what is left of the request timeout and at most the client's
+    /// <see cref="HttpClient.MaxResponseContentBufferSize"/>, as a buffered read takes it (1.9.0). A body cut off,
+    /// stalled or too large is a <see cref="NetworkException"/> of code
+    /// <see cref="NetworkException.ResponseBodyUnreadable"/>: the NA answered, and may have acted or decided, so it is
+    /// told from a request that got no answer.
+    /// </summary>
+    private async Task<byte[]> BodyAsync(HttpRequestMessage req, HttpResponseMessage resp, long started, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (_http.Timeout != Timeout.InfiniteTimeSpan)
+            deadline.CancelAfter(TimeSpan.FromTicks(Math.Max(0, (_http.Timeout - Stopwatch.GetElapsedTime(started)).Ticks)));
+        try
+        {
+            return await ReadAsync(resp.Content, _http.MaxResponseContentBufferSize, deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // the caller cancelled; not a network error
+        }
+        catch (Exception e)
+        {
+            var why = e is OperationCanceledException ? "its body did not arrive within the request timeout" : "its body could not be read: " + e.Message;
+            throw new NetworkException($"{req.Method} {req.RequestUri?.AbsolutePath} answered {(int)resp.StatusCode}, but {why}",
+                e, connectFailed: false, NetworkException.ResponseBodyUnreadable, (int)resp.StatusCode);
+        }
+    }
+
+    /// <summary>The bytes of <paramref name="content"/>; a body over <paramref name="max"/> bytes is refused.</summary>
+    private static async Task<byte[]> ReadAsync(HttpContent content, long max, CancellationToken ct)
+    {
+        if (content.Headers.ContentLength > max) throw TooLarge(max);
+        using var stream = await content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var bytes = new MemoryStream();
+        var chunk = ArrayPool<byte>.Shared.Rent(16 * 1024);
+        try
+        {
+            int read;
+            while ((read = await stream.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
+            {
+                if (bytes.Length + read > max) throw TooLarge(max);
+                bytes.Write(chunk, 0, read);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(chunk);
+        }
+        return bytes.ToArray();
+    }
+
+    private static HttpRequestException TooLarge(long max) =>
+        new($"the body is larger than the client's MaxResponseContentBufferSize, {max} bytes");
+
+    /// <summary>
+    /// Sends <paramref name="req"/> and returns once the answer's headers are in (1.9.0): its body is read apart
+    /// (<see cref="BodyAsync"/>), so an answer whose body cannot be read is told from no answer.
+    /// </summary>
     private async Task<HttpResponseMessage> SendOnceAsync(HttpRequestMessage req, CancellationToken ct)
     {
         try
         {
-            return await _http.SendAsync(req, ct).ConfigureAwait(false);
+            return await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

@@ -62,14 +62,16 @@ public sealed class ClientOptions
     /// <c>IHttpClientFactory</c>. Takes precedence over <see cref="HttpHandler"/> and <see cref="Timeout"/>: its own
     /// <c>Timeout</c> applies to each attempt. The client does not dispose it. A handler in its pipeline must not retry
     /// POSTs: a repeated admin request carries the same signature and nonce, and the NA refuses it as a replay after
-    /// the first may have been applied.
+    /// the first may have been applied. Nor should one read or buffer the response body: an answer whose body cannot be
+    /// read would then look like no answer (<see cref="NetworkException.Code"/>), and break the glass of a governed
+    /// action.
     /// </summary>
     public HttpClient? HttpClient { get; set; }
 
     /// <summary>
     /// 1.9.0: durable storage for signed execution records the NA has not admitted yet, such as a
-    /// <see cref="FileOutbox"/> or a store of your own. With one, <see cref="Governance.GovernedAction"/> keeps every
-    /// record until the NA admits it, and <see cref="EvidenceStoreClient.FlushPending"/> submits what is left. Give
+    /// <see cref="FileOutbox"/> or a store of your own. With one, a governed action (<see cref="Governance"/>) keeps
+    /// every record until the NA admits it, and <see cref="EvidenceStoreClient.FlushPending"/> submits what is left. Give
     /// each process its own.
     /// </summary>
     public IOutbox<OutboxEntry>? Outbox { get; set; }
@@ -78,7 +80,8 @@ public sealed class ClientOptions
     /// 1.9.0: durable storage for signed observations and break-glass records the NA has not admitted yet, such as a
     /// <see cref="FileRecordOutbox"/> in a directory of its own, or a store of your own.
     /// <see cref="EvidenceStoreClient.EnqueueRecord(ObservationRecord, CancellationToken)"/> keeps a record there until
-    /// the NA admits it, and <see cref="EvidenceStoreClient.FlushRecords"/> submits what is left. Give each process its own.
+    /// the NA admits it, as a governed action with break-glass keeps its record, and
+    /// <see cref="EvidenceStoreClient.FlushRecords"/> submits what is left. Give each process its own.
     /// </summary>
     public IOutbox<RecordOutboxEntry>? RecordOutbox { get; set; }
 }

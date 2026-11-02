@@ -19,16 +19,16 @@ submits execution evidence, reads where each resource's chain ends, and reads
 and administers the store: its status, the NA's verification of it, resource
 and vendor histories, the export, executor keys and retention (see
 [EvidenceStore](#evidencestore)). It runs governed actions with the evidence
-outbox and reconciliation (see [Governed actions](#governed-actions)), and
-verifies an export offline (see [Verifying an export](#verifying-an-export)).
+outbox, break-glass when the NA cannot be reached, and reconciliation (see
+[Governed actions](#governed-actions)), and verifies an export offline (see
+[Verifying an export](#verifying-an-export)).
 It signs observations and break-glass records, the changes made outside the
 governed path, submits and judges them, keeps them in a record outbox until the
 NA admits them, and reads each resource's changes (see
 [Changes outside the governed path](#changes-outside-the-governed-path)).
 Not yet here: verifying the store's 1.3.0 and later entry kinds in an export,
-store anchors, break-glass in governed actions, and none of the 1.4.0
-remediation and review APIs (remediation records, the due queue, reviews,
-urgent actions).
+store anchors, and none of the 1.4.0 remediation and review APIs (remediation
+records, the due queue, reviews, urgent actions).
 Those live in the [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript)
 and the [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust). The embedded
 field registry lists their records.
@@ -160,7 +160,7 @@ values.
 | `Signer` | An `ISigner` for admin requests, used instead of `SigningKey` and `KeyId`: implement it for an HSM, or use `SeedSigner` for a key read at start. |
 | `Headers` | Extra headers on every request, such as for an API gateway in front of the NA. |
 | `HttpHandler` | The handler requests go through, such as a `SocketsHttpHandler` with a `PooledConnectionLifetime`, so that a long-lived client follows DNS changes. The client does not dispose it. |
-| `HttpClient` | An `HttpClient` to send with, such as a typed client from `IHttpClientFactory`; its own `Timeout` applies. The client does not dispose it. A resilience handler in its pipeline must not retry POSTs: a repeated admin request carries the same signature and nonce, and the NA refuses it as a replay after the first may have been applied. |
+| `HttpClient` | An `HttpClient` to send with, such as a typed client from `IHttpClientFactory`; its own `Timeout` applies. The client does not dispose it. A resilience handler in its pipeline must not retry POSTs: a repeated admin request carries the same signature and nonce, and the NA refuses it as a replay after the first may have been applied. Nor should a handler read or buffer the response body: an answer whose body cannot be read would look like no answer, and break the glass of a governed action. |
 | `Timeout` | Each attempt's timeout (each request, and each read of the NA's key); 10 s by default. A call that fails over or retries can take longer. |
 | `Outbox` | Durable storage for signed execution records the NA has not admitted yet: a `FileOutbox`, or your own `IOutbox<OutboxEntry>` (see [Governed actions](#governed-actions)). Give each process its own. |
 | `RecordOutbox` | Durable storage for signed observations and break-glass records the NA has not admitted yet: a `FileRecordOutbox` in a directory of its own, or your own `IOutbox<RecordOutboxEntry>` (see [The record outbox](#the-record-outbox)). Give each process its own. |
@@ -662,6 +662,77 @@ var findings = Governance.ReconcileResources(
 ```
 
 Correct each finding through a governed action.
+
+#### Break-glass when the NA cannot be reached
+
+With `BreakGlassOptions`, a governed action still runs when the NA cannot be
+reached, as the TypeScript SDK's `governedAction` with `breakGlass` does. The
+action gets a null decision, and a break-glass record of it, signed by the
+executor key with your justification, goes to the record outbox. The NA judges
+it once it is back, as the evaluation would have gone:
+
+```csharp
+using var client = new GenesisMeshClient(new ClientOptions
+{
+    BaseUrl = naUrl,
+    Signer = new SeedSigner(operatorSeed, "portal-controller"),
+    Outbox = new FileOutbox("/var/lib/portal/outbox"),
+    RecordOutbox = new FileRecordOutbox("/var/lib/portal/records"),   // required for break-glass
+});
+
+var outcome = await Governance.GovernedAction(client, executor, request,
+    new BreakGlassOptions { Justification = "INC-4711: the leaked key must be rotated now" },
+    async (decision, ct) =>
+    {
+        // decision is null under break-glass: the NA could not be asked
+        var credential = await RotateInGraph(appId, ct);
+        return new ActionReport<string>
+        {
+            Value = credential.SecretText,
+            ExecutionParameters = new Dictionary<string, object?> { ["key_id"] = credential.KeyId },
+        };
+    });
+if (outcome.BrokeGlass)
+    Alert(outcome.BreakGlass.Failure, outcome.BreakGlass.Queued);   // network_error, timeout, server_error or rate_limited
+else if (!outcome.Governed.Authorized)
+    Log(outcome.Governed.Summary.EnforcedFailures);
+```
+
+- **Only on an outage.** The glass breaks when the evaluation gets no answer,
+  times out, or is answered with a 5xx or 429 whose body arrived, whatever it
+  holds, so a proxy's error page breaks it too (`Governance.EvaluationFailure`
+  names which). A denial, a decision that fails verification, a refusal, a
+  success that is not strict JSON, an answer whose body is cut off or stalls,
+  whatever its status (the NA may have decided), and the NA's
+  `admin_auth_throttled` and `evidence_store_unavailable` never break it;
+  cancelling never does either. The lookup of the NA's key before the
+  evaluation counts by its status, even when its body cannot be read: a 5xx or
+  429 breaks the glass, a 403 or 404 does not, and a success is no answer, as
+  it carries no decision.
+- **Checked first.** It needs a record outbox that can be read
+  (`record_outbox_required`, `outbox_file_unreadable`), a resource, an attestation basis (the NA could not judge an agreement it does
+  not see) and a requested capability. The context and justification are
+  checked before anything is evaluated: no secret material, a justification of
+  1 to 1024 characters, and 2048 bytes of the metadata limit left for the
+  action's report (`break_glass_malformed`, `break_glass_secret_material`).
+- **Always recorded once it ran.** A report the secret guard refuses is
+  recorded without the refused fields (`BreakGlass.Dropped`), or with the
+  outcome alone when the rest is still refused; an outcome detail is cut to
+  1024 characters. When the action throws, a `failure` record is kept and the
+  error rethrown. A record the outbox cannot keep throws
+  `EvidenceNotKeptException` with the action's value and the signed record
+  (`BreakGlassRecord`): keep or submit it once you can, and do not run the
+  action again.
+- `BreakGlass.Submission` is set when the NA was back in time to admit the
+  record. Otherwise `BreakGlass.Queued` is its record outbox entry: pending,
+  which `FlushRecords` submits, break-glass records first, or a dead letter
+  when the NA refused it for good, which no flush sends again.
+- **Under the NA's decision**, the record is kept as without break-glass. With
+  an outbox (`ClientOptions.Outbox`) a refused report throws
+  `MetadataRefusedException`; without one the record is submitted at once, so
+  an exception from signing or submitting it (`SecretMaterialException`,
+  `StrictJsonException`, `NetworkException` or the NA's refusal) comes after
+  the action ran: do not run it again.
 
 #### A partner controller on a standard key
 
@@ -1214,7 +1285,11 @@ break-glass record is signed when the NA would refuse it, with the NA's code
 
 A connection failure or timeout is a `NetworkException`. Its `ConnectFailed`
 is true when the request did not reach the NA, so sending it again cannot
-apply it twice. A 2xx response that
+apply it twice. From 1.9 its `Code` is `network_error`, or
+`response_body_unreadable` when the NA answered but the body was cut off,
+stalled past the request timeout, which covers the whole answer, or was larger
+than your `HttpClient`'s `MaxResponseContentBufferSize`: the request reached
+the NA and may have been applied. A 2xx response that
 is not strict JSON (duplicate keys, `-0`, lone surrogates, ...) throws
 `StrictJsonException`, a `JsonException`, not a `GenesisMeshException`. Cancelling through
 your own `CancellationToken` throws `OperationCanceledException`.

@@ -289,6 +289,14 @@ public sealed class OutboxTests : IDisposable
         Assert.Equal(transient, EvidenceOutbox.Classify(error).Transient);
 
     [Fact]
+    public void Classify_KeepsTheCodeOfANetworkError()
+    {
+        var unreadable = EvidenceOutbox.Classify(new NetworkException("cut off", null, connectFailed: false, NetworkException.ResponseBodyUnreadable));
+        Assert.Equal((NetworkException.ResponseBodyUnreadable, true), (unreadable.Failure.Code, unreadable.Transient));
+        Assert.Equal(NetworkException.NoAnswer, EvidenceOutbox.Classify(new NetworkException(new HttpRequestException("down"))).Failure.Code);
+    }
+
+    [Fact]
     public void Classify_KeepsTheStatusCodeMessageAndQuarantine()
     {
         var conflict = EvidenceOutbox.Classify(new ConflictException(409, "evidence_conflict", "taken")).Failure;
