@@ -529,7 +529,8 @@ var flushed = await client.EvidenceStore.FlushRecords();  // at startup and on a
   and a refusal no retry overcomes (`EvidenceOutbox.RecordPermanentRefusals`)
   keeps it as a dead letter with the NA's code and, for a record the NA kept,
   its quarantine entry (`LastError.QuarantineId`). An observer key the NA does
-  not know yet is retried.
+  not know yet is retried. While another call is submitting the same record,
+  `EnqueueRecord` returns it as `Queued` without sending it.
 - `FlushRecords` sends break-glass records first, so an observation of the same
   change finds its break-glass record, then observations in batches of up to
   100, each in the order added. A batch the NA refuses whole, such as one
@@ -538,8 +539,14 @@ var flushed = await client.EvidenceStore.FlushRecords();  // at startup and on a
   then on. A transient answer that names a wait (`Retry-After`, such as a 429
   or a 503) holds every record back that long, at least 5 seconds and at most
   15 minutes; `EnqueueRecord` still submits its own record. A transient
-  failure ends the run; the next one goes on from there. An empty answer, such
-  as a proxy's 204, leaves the record pending (`response_body_unreadable`).
+  failure ends the run; the next one goes on from there. A record another call
+  is submitting is left to it.
+- A record is removed only once the NA says it holds it: `recorded`,
+  `duplicate` or `quarantined`. An empty answer, such as a proxy's 204, or a
+  success with another status, leaves the record pending
+  (`response_body_unreadable`), and so does a batch answer with a result that
+  does not name one observation of the batch by its index. The NA answers a
+  resubmission of a record it holds with a `duplicate`.
 - `FileRecordOutbox` writes the format of the TypeScript and Rust SDKs
   (`gm.evidence.record-outbox.v1`), and keeps each record as it was read, so a
   controller can move between them. A grant use or remediation record one of

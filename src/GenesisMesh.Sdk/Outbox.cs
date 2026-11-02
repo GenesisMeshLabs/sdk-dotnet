@@ -225,6 +225,12 @@ public static class EvidenceOutbox
     /// </summary>
     internal static StrictJsonException NoAnswer() => new("response_body_unreadable", "the NA's answer to the record has no body");
 
+    /// <summary>
+    /// The failure of a submission answered by a success that does not say what the NA did with the record, such as one
+    /// without a status the NA sends: classified as <see cref="NoAnswer"/> is, so the record stays pending.
+    /// </summary>
+    internal static StrictJsonException UnreadAnswer(string detail) => new("response_body_unreadable", detail);
+
     /// <summary>A new pending record outbox entry for a signed observation.</summary>
     public static RecordOutboxEntry RecordEntry(ObservationRecord observation, DateTimeOffset? now = null)
     {

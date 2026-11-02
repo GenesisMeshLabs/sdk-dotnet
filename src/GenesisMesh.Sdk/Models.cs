@@ -3752,6 +3752,29 @@ internal sealed class ObservationBatch
     public IReadOnlyList<ObservationBatchResult> Results { get; set; } = [];
 }
 
+/// <summary>
+/// The body of POST /evidence/observations/batch as the record outbox reads it: what it leaves out is null, so a result
+/// without an index is not taken for the first observation's.
+/// </summary>
+internal sealed class RecordBatchAnswer
+{
+    [JsonPropertyName("results")]
+    public IReadOnlyList<RecordBatchResult?>? Results { get; set; }
+}
+
+/// <summary>One result of a <see cref="RecordBatchAnswer"/>.</summary>
+internal sealed class RecordBatchResult
+{
+    [JsonPropertyName("index")]
+    public int? Index { get; set; }
+
+    [JsonPropertyName("status")]
+    public string? Status { get; set; }
+
+    [JsonPropertyName("error")]
+    public RecordRefusal? Error { get; set; }
+}
+
 // ── The evidence outbox (1.9.0) ───────────────────────────────────────────────
 
 /// <summary>The states of an outbox entry (<see cref="OutboxEntry.State"/>).</summary>

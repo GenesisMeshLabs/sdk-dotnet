@@ -12,10 +12,20 @@ public sealed partial class EvidenceStoreClient
     /// </summary>
     private static readonly string[] FirstKinds = [RecordOutboxKinds.BreakGlass, RecordOutboxKinds.GrantExecution, RecordOutboxKinds.Observation];
 
-    /// <summary>Guards <see cref="_recordFlush"/>, <see cref="_observationBatch"/> and <see cref="_recordsPausedUntil"/>.</summary>
+    /// <summary>
+    /// Guards <see cref="_recordFlush"/>, <see cref="_recordsInFlight"/>, <see cref="_recordsSettled"/>,
+    /// <see cref="_observationBatch"/> and <see cref="_recordsPausedUntil"/>.
+    /// </summary>
     private readonly object _recordGate = new();
     /// <summary>The record flush in progress.</summary>
     private RecordFlushRun? _recordFlush;
+    /// <summary>Records a call is submitting right now (<see cref="ClaimRecord"/>): every other call leaves them to it.</summary>
+    private readonly HashSet<string> _recordsInFlight = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Records admitted or dead-lettered while <see cref="_recordFlush"/> runs: it may have listed them as pending
+    /// before, and skips them rather than sending them again or storing that older state over theirs.
+    /// </summary>
+    private readonly HashSet<string> _recordsSettled = new(StringComparer.Ordinal);
     /// <summary>The most observations a batch carries: halved each time the NA throttles one (429).</summary>
     private int _observationBatch = MaxObservationBatch;
     /// <summary>Until when the NA asked for no more records (<c>Retry-After</c>): a flush waits unless it ignores the backoff.</summary>
@@ -67,7 +77,10 @@ public sealed partial class EvidenceStoreClient
     /// (<see cref="ClientOptions.RecordOutbox"/>) and submits it. A failed submission does not throw: a transient
     /// failure leaves the record pending, with a backoff, for <see cref="FlushRecords"/>, and a refusal no retry
     /// overcomes (<see cref="EvidenceOutbox.RecordPermanentRefusals"/>) keeps it as a dead letter with the NA's code.
-    /// Passing a record already in the outbox submits it again; a dead letter is returned as it is.
+    /// A success that does not say the NA admitted the record (<c>recorded</c>, <c>duplicate</c> or
+    /// <c>quarantined</c>), such as an empty answer, leaves it pending too (<c>response_body_unreadable</c>). Passing a
+    /// record already in the outbox submits it again; a dead letter is returned as it is, and while another call is
+    /// submitting the same record, this one returns it as <see cref="RecordDelivery.Queued"/> without sending it.
     /// </summary>
     /// <exception cref="OutboxException">
     /// No record outbox is configured (<c>record_outbox_required</c>), or it cannot be read.
@@ -101,8 +114,12 @@ public sealed partial class EvidenceStoreClient
     /// wait (<c>Retry-After</c>, such as a 429 or a 503) holds every record back that long, at least 5 seconds and at
     /// most 15 minutes; <see cref="EnqueueRecord(ObservationRecord, CancellationToken)"/> still submits its own record.
     /// Records in backoff are skipped unless <see cref="FlushOptions.IgnoreBackoff"/>; a transient failure ends the run,
-    /// leaving the rest for the next one. Run it at startup and on a timer. A call joins the run in progress when that
-    /// run tries everything it asks for, and otherwise starts one once it ends.
+    /// leaving the rest for the next one, and so does an answer to a batch this SDK cannot read (no results, a result
+    /// without the index of an observation in the batch, two results for one, or a status the NA does not send), which
+    /// leaves the whole batch pending (<c>response_body_unreadable</c>). A record another call is submitting is
+    /// left to it, pending as far as this run knows, and one another call settled since this run read the outbox is
+    /// left out. Run it at startup and on a timer. A call joins the run in progress when that run tries everything it
+    /// asks for, and otherwise starts one once it ends.
     /// </summary>
     /// <exception cref="OutboxException">
     /// No record outbox is configured (<c>record_outbox_required</c>), or it cannot be read.
@@ -143,16 +160,64 @@ public sealed partial class EvidenceStoreClient
 
     private async Task<RecordDelivery> Enqueued(IOutbox<RecordOutboxEntry> outbox, RecordOutboxEntry fresh, CancellationToken ct)
     {
-        var entry = (await outbox.List(ct).ConfigureAwait(false)).FirstOrDefault(e => e.Id == fresh.Id);
-        if (entry is not null && RecordDigest(entry) != RecordDigest(fresh))
-            throw new InvalidOperationException($"genesismesh: a different record with ID {fresh.Id} is in the record outbox");
-        if (entry is null)
+        // Claimed before the outbox is read: a flush that lists the record meanwhile leaves it to this call, and so does
+        // another enqueue of it, so what this call reads is still the record's state when it stores the next.
+        var claimed = ClaimRecord(fresh.Id);
+        try
         {
-            entry = fresh;
-            await outbox.Add(entry, ct).ConfigureAwait(false);
+            var entry = (await outbox.List(ct).ConfigureAwait(false)).FirstOrDefault(e => e.Id == fresh.Id);
+            if (entry is not null && RecordDigest(entry) != RecordDigest(fresh))
+                throw new InvalidOperationException($"genesismesh: a different record with ID {fresh.Id} is in the record outbox");
+            if (!claimed) return new RecordDelivery { Queued = entry ?? fresh };
+            if (entry is null)
+            {
+                entry = fresh;
+                await outbox.Add(entry, ct).ConfigureAwait(false);
+            }
+            if (entry.State == OutboxStates.DeadLetter) return new RecordDelivery { Queued = entry };
+            return await AttemptRecord(outbox, entry, ct).ConfigureAwait(false);
         }
-        if (entry.State == OutboxStates.DeadLetter) return new RecordDelivery { Queued = entry };
-        return await AttemptRecord(outbox, entry, ct).ConfigureAwait(false);
+        finally
+        {
+            if (claimed) ReleaseRecord(fresh.Id);
+        }
+    }
+
+    /// <summary>Marks a record as being submitted by this call; false when another call is submitting it.</summary>
+    private bool ClaimRecord(string id)
+    {
+        lock (_recordGate) return _recordsInFlight.Add(id);
+    }
+
+    private void ReleaseRecord(string id)
+    {
+        lock (_recordGate) _recordsInFlight.Remove(id);
+    }
+
+    /// <summary>
+    /// Claims <paramref name="entry"/> for the flush <paramref name="run"/> when it is to be <paramref name="tried"/>
+    /// now; true when claimed. One another call settled since the run read the outbox is left out; one not tried, or
+    /// that another call is submitting, is pending as far as the run knows.
+    /// </summary>
+    private bool TakeRecord(RecordOutboxEntry entry, bool tried, RecordRun run)
+    {
+        bool settled, claimed = false;
+        lock (_recordGate)
+        {
+            settled = _recordsSettled.Contains(entry.Id);
+            if (tried && !settled) claimed = _recordsInFlight.Add(entry.Id);
+        }
+        if (!settled && !claimed) run.Pending.Add(entry);
+        return claimed;
+    }
+
+    /// <summary>Notes, for the flush in progress, that <paramref name="id"/> is admitted or a dead letter.</summary>
+    private void RecordSettled(string id)
+    {
+        lock (_recordGate)
+        {
+            if (_recordFlush is not null) _recordsSettled.Add(id);
+        }
     }
 
     /// <summary>The digest of an entry's record without its signature: a record never changes once signed.</summary>
@@ -183,9 +248,14 @@ public sealed partial class EvidenceStoreClient
         return done;
     }
 
+    /// <summary>Frees the record flush slot, with what was settled during the run.</summary>
     private void FreeRecords()
     {
-        lock (_recordGate) _recordFlush = null;
+        lock (_recordGate)
+        {
+            _recordFlush = null;
+            _recordsSettled.Clear();
+        }
     }
 
     private async Task<RecordFlushResult> FlushRecordRun(IOutbox<RecordOutboxEntry> outbox, bool ignoreBackoff, CancellationToken ct)
@@ -197,25 +267,36 @@ public sealed partial class EvidenceStoreClient
         var stopped = false;
         for (var i = 0; i < entries.Count;)
         {
-            var entry = entries[i];
-            if (stopped || !Due(entry, ignoreBackoff))
-            {
-                run.Pending.Add(entry);
-                i++;
-                continue;
-            }
+            var entry = entries[i++];
+            if (!TakeRecord(entry, tried: !stopped && Due(entry, ignoreBackoff), run)) continue;
             if (entry.Kind != RecordOutboxKinds.Observation)
             {
-                stopped = !run.Settle(entry, await AttemptRecord(outbox, entry, ct).ConfigureAwait(false));
-                i++;
+                try
+                {
+                    stopped = !run.Settle(entry, await AttemptRecord(outbox, entry, ct).ConfigureAwait(false));
+                }
+                finally
+                {
+                    ReleaseRecord(entry.Id);
+                }
                 continue;
             }
             int size;
             lock (_recordGate) size = _observationBatch;
-            var batch = new List<RecordOutboxEntry>();
-            while (i < entries.Count && batch.Count < size && entries[i].Kind == RecordOutboxKinds.Observation && Due(entries[i], ignoreBackoff))
-                batch.Add(entries[i++]);
-            stopped = await SubmitRecordBatch(outbox, batch, run, ct).ConfigureAwait(false);
+            var batch = new List<RecordOutboxEntry> { entry };
+            try
+            {
+                while (i < entries.Count && batch.Count < size && entries[i].Kind == RecordOutboxKinds.Observation && Due(entries[i], ignoreBackoff))
+                {
+                    var next = entries[i++];
+                    if (TakeRecord(next, tried: true, run)) batch.Add(next);
+                }
+                stopped = await SubmitRecordBatch(outbox, batch, run, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                foreach (var claimed in batch) ReleaseRecord(claimed.Id);
+            }
         }
         return run.Result();
     }
@@ -235,16 +316,18 @@ public sealed partial class EvidenceStoreClient
     /// <summary>
     /// Submits a batch of observations and settles each; true when a transient failure ends the run. A batch the NA
     /// refuses whole (a record it cannot read, <c>invalid_json</c>) or that is larger than it takes (413) is split in
-    /// halves until the record it refuses is tried alone; a batch it throttles (429) halves the batches that follow.
+    /// halves until the record it refuses is tried alone; a batch it throttles (429) halves the batches that follow. An
+    /// answer this SDK cannot read (<see cref="BatchAnswers"/>) leaves the whole batch pending.
     /// </summary>
     private async Task<bool> SubmitRecordBatch(IOutbox<RecordOutboxEntry> outbox, List<RecordOutboxEntry> batch, RecordRun run, CancellationToken ct)
     {
-        IReadOnlyList<ObservationBatchResult> results;
+        RecordBatchResult?[] results;
         try
         {
-            results = (await _t.PublicPostAsync<ObservationBatch?>("/evidence/observations/batch",
+            var answer = await _t.PublicPostAsync<RecordBatchAnswer?>("/evidence/observations/batch",
                 new Dictionary<string, object?> { ["observations"] = batch.Select(e => e.Record).ToList() }, idempotent: true, ct)
-                .ConfigureAwait(false) ?? throw EvidenceOutbox.NoAnswer()).Results;
+                .ConfigureAwait(false) ?? throw EvidenceOutbox.NoAnswer();
+            results = BatchAnswers(answer, batch.Count);
         }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -270,7 +353,7 @@ public sealed partial class EvidenceStoreClient
         for (var index = 0; index < batch.Count; index++)
         {
             var entry = batch[index];
-            var answer = results.FirstOrDefault(r => r.Index == index);
+            var answer = results[index];
             if (answer is null)
             {
                 run.Pending.Add(entry);
@@ -282,7 +365,7 @@ public sealed partial class EvidenceStoreClient
             else
             {
                 await RemoveRecord(outbox, entry.Id).ConfigureAwait(false);
-                run.Admit(entry, answer.Status);
+                run.Admit(entry, answer.Status!);
             }
         }
         return false;
@@ -292,6 +375,32 @@ public sealed partial class EvidenceStoreClient
             ? !run.Settle(records[0], await AttemptRecord(outbox, records[0], ct).ConfigureAwait(false))
             : await SubmitRecordBatch(outbox, records, run, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The result for each observation of a batch of <paramref name="count"/>, by index; null for one the answer leaves
+    /// out. Throws <c>response_body_unreadable</c> for an answer this SDK cannot read, so that no record is taken for
+    /// another's: no results, a result without the index of an observation in the batch or with the index of another
+    /// result, or a status the NA does not send.
+    /// </summary>
+    private static RecordBatchResult?[] BatchAnswers(RecordBatchAnswer answer, int count)
+    {
+        if (answer.Results is not { } results) throw EvidenceOutbox.UnreadAnswer("the NA's answer to the batch has no results");
+        var byIndex = new RecordBatchResult?[count];
+        foreach (var result in results)
+        {
+            if (result is null || result.Index is not { } index || index < 0 || index >= count || byIndex[index] is not null)
+                throw EvidenceOutbox.UnreadAnswer("a result of the NA's answer to the batch names no observation of it, or one another result names");
+            if (result.Status != "refused" && !Admits(result.Status))
+                throw EvidenceOutbox.UnreadAnswer($"a result of the NA's answer to the batch has the status {Quoted(result.Status)}");
+            byIndex[index] = result;
+        }
+        return byIndex;
+    }
+
+    /// <summary>True for the status of a record the NA admitted: recorded, a duplicate of one it holds, or quarantined.</summary>
+    private static bool Admits(string? status) => status is "recorded" or "duplicate" or "quarantined";
+
+    private static string Quoted(string? status) => status is null ? "null" : $"\"{status}\"";
 
     /// <summary>A record a batch's answer refused, as the exception submitting it alone would have thrown.</summary>
     private static GenesisMeshException Refusal(RecordRefusal? error)
@@ -330,6 +439,9 @@ public sealed partial class EvidenceStoreClient
         {
             submission = await _t.PublicPostAsync<RecordSubmission?>(route.Path,
                 new Dictionary<string, object?> { [route.Field] = entry.Record }, idempotent: true, ct).ConfigureAwait(false) ?? throw EvidenceOutbox.NoAnswer();
+            // A success that does not say the NA admitted the record is no answer of the NA's: it may or may not hold it.
+            if (!Admits(submission.Status))
+                throw EvidenceOutbox.UnreadAnswer($"the NA's answer to the record has the status {Quoted(submission.Status)}");
         }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -378,8 +490,9 @@ public sealed partial class EvidenceStoreClient
     /// Stores an entry's new state and returns it. Whatever the outbox throws, even a cancellation of its own, the
     /// answer stands: the entry keeps its previous state, and the next flush settles it.
     /// </summary>
-    private static async Task<RecordOutboxEntry> KeepRecord(IOutbox<RecordOutboxEntry> outbox, RecordOutboxEntry next)
+    private async Task<RecordOutboxEntry> KeepRecord(IOutbox<RecordOutboxEntry> outbox, RecordOutboxEntry next)
     {
+        if (next.State == OutboxStates.DeadLetter) RecordSettled(next.Id);
         try
         {
             await outbox.Update(next, CancellationToken.None).ConfigureAwait(false);
@@ -391,8 +504,9 @@ public sealed partial class EvidenceStoreClient
         return next;
     }
 
-    private static async Task RemoveRecord(IOutbox<RecordOutboxEntry> outbox, string id)
+    private async Task RemoveRecord(IOutbox<RecordOutboxEntry> outbox, string id)
     {
+        RecordSettled(id);
         try
         {
             await outbox.Remove(id, CancellationToken.None).ConfigureAwait(false);

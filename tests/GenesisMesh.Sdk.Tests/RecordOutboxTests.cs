@@ -373,6 +373,75 @@ public sealed class RecordOutboxTests : IDisposable
         Assert.Equal("o-1", Assert.Single(await outbox.List()).Id);
     }
 
+    [Theory]
+    [InlineData("""{}""", "\"\"")]
+    [InlineData("""{"status":null}""", "null")]
+    [InlineData("""{"status":""}""", "\"\"")]
+    [InlineData("""{"status":"refused"}""", "\"refused\"")]
+    [InlineData("""{"status":"accepted","entry":{}}""", "\"accepted\"")]
+    public async Task ASuccessThatDoesNotSayTheNAAdmittedTheRecord_LeavesItPending(string body, string status)
+    {
+        var na = new Na { Answer = (_, _) => Json(200, body) };
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        using var gm = Client(na, outbox);
+        var queued = (await gm.EvidenceStore.EnqueueRecord(await Glass())).Queued!;
+        Assert.Equal((OutboxStates.Pending, 1, "response_body_unreadable"), (queued.State, queued.Attempts, queued.LastError!.Code));
+        Assert.Contains($"has the status {status}", queued.LastError.Message, StringComparison.Ordinal);
+        Assert.Equal((queued.Id, OutboxStates.Pending), (Assert.Single(await outbox.List()).Id, queued.State));
+        // A flush keeps it too.
+        await outbox.Add(Raw("r-1", RecordOutboxKinds.Remediation));
+        var flushed = await gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true });
+        Assert.Empty(flushed.Admitted);
+        Assert.Equal([queued.Id, "r-1"], flushed.Pending.Select(e => e.Id));
+        Assert.Equal(2, (await outbox.List()).Count);
+    }
+
+    [Theory]
+    [InlineData("recorded")]
+    [InlineData("duplicate")]
+    [InlineData("quarantined")]
+    public async Task ARecordIsAdmitted_WhenTheNAAnswersItRecorded_ADuplicate_OrQuarantined(string status)
+    {
+        var na = new Na { Answer = (path, _) => path.EndsWith("/batch", StringComparison.Ordinal) ? Batch(Result(0, status)) : Recorded(status) };
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        using var gm = Client(na, outbox);
+        Assert.Equal(status, (await gm.EvidenceStore.EnqueueRecord(await Glass())).Submission!.Status);
+        await outbox.Add(Raw("o-1"));
+        var flushed = await gm.EvidenceStore.FlushRecords();
+        Assert.Equal("o-1", Assert.Single(flushed.Admitted).Id);
+        Assert.Equal(status == "quarantined" ? new[] { "o-1" } : [], flushed.Quarantined.Select(e => e.Id));
+        Assert.Empty(await outbox.List());
+    }
+
+    [Theory]
+    [InlineData("""{}""")]
+    [InlineData("""{"results":null}""")]
+    [InlineData("""{"results":[null]}""")]
+    [InlineData("""{"results":[{"status":"recorded"}]}""")]
+    [InlineData("""{"results":[{"index":null,"status":"recorded"}]}""")]
+    [InlineData("""{"results":[{"index":1,"status":"recorded"},{"index":1,"status":"recorded"}]}""")]
+    [InlineData("""{"results":[{"index":2,"status":"recorded"}]}""")]
+    [InlineData("""{"results":[{"index":-1,"status":"recorded"}]}""")]
+    [InlineData("""{"results":[{"index":0}]}""")]
+    [InlineData("""{"results":[{"index":0,"status":"accepted"}]}""")]
+    [InlineData("""{"results":[{"index":0,"status":"recorded"},{"index":1,"status":""}]}""")]
+    public async Task ABatchAnswerThisSdkCannotRead_LeavesTheWholeBatchPending_AndEndsTheRun(string body)
+    {
+        // None of these says which observations the NA admitted: taken as it stands, each could remove a record it did not.
+        var na = new Na { Answer = (path, _) => path.EndsWith("/batch", StringComparison.Ordinal) ? Json(200, body) : null };
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        await outbox.Add(Raw("o-0"));
+        await outbox.Add(Raw("o-1"));
+        await outbox.Add(Raw("r-1", RecordOutboxKinds.Remediation));
+        using var gm = Client(na, outbox);
+        var result = await gm.EvidenceStore.FlushRecords();
+        Assert.Empty(result.Admitted);
+        Assert.Equal([("o-0", 1, "response_body_unreadable"), ("o-1", 1, "response_body_unreadable"), ("r-1", 0, null)],
+            result.Pending.Select(e => (e.Id, e.Attempts, e.LastError?.Code)));
+        Assert.Equal(["/evidence/observations/batch"], na.Paths);
+        Assert.Equal(["o-0", "o-1", "r-1"], (await outbox.List()).Select(e => e.Id));
+    }
+
     [Fact]
     public async Task EnqueueRecord_DeadLettersAFinalRefusal_KeepingItsQuarantine_AndRetriesAnUnknownKey()
     {
@@ -715,6 +784,181 @@ public sealed class RecordOutboxTests : IDisposable
         Assert.Same(await a, await b);
         Assert.Same(await a, await c);
         Assert.Single(na.Sent);
+    }
+
+    [Fact]
+    public async Task EnqueueRecord_LeavesARecordAnotherEnqueueIsSubmitting()
+    {
+        var na = new Na();
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        var release = new TaskCompletionSource();
+        na.During = ct => release.Task.WaitAsync(ct);
+        using var gm = Client(na, outbox);
+        var glass = await Glass();
+        var first = gm.EvidenceStore.EnqueueRecord(glass);
+        var second = await gm.EvidenceStore.EnqueueRecord(glass);
+        Assert.Equal((glass.BreakGlassId, OutboxStates.Pending, 0), (second.Queued!.Id, second.Queued.State, second.Queued.Attempts));
+        release.SetResult();
+        Assert.Equal("recorded", (await first).Submission!.Status);
+        Assert.Single(na.Sent);
+        Assert.Empty(await outbox.List());
+    }
+
+    [Fact]
+    public async Task FlushRecords_LeavesARecordInFlightToItsEnqueue()
+    {
+        var na = new Na();
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        var release = new TaskCompletionSource();
+        na.During = ct => release.Task.WaitAsync(ct);
+        using var gm = Client(na, outbox);
+        var observation = await Observe(1);
+        var enqueued = gm.EvidenceStore.EnqueueRecord(observation);
+        var flushed = await gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true });
+        Assert.Equal(observation.ObservationId, Assert.Single(flushed.Pending).Id);
+        release.SetResult();
+        Assert.Equal("recorded", (await enqueued).Submission!.Status);
+        Assert.Equal(["/evidence/observations"], na.Paths);
+    }
+
+    [Fact]
+    public async Task FlushRecords_LeavesOutOfABatchAnObservationAnotherCallIsSubmitting()
+    {
+        var na = new Na();
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        await outbox.Add(Raw("o-1"));
+        var hold = new TaskCompletionSource();
+        var calls = 0;
+        na.During = ct => Interlocked.Increment(ref calls) == 1 ? hold.Task.WaitAsync(ct) : Task.CompletedTask;
+        using var gm = Client(na, outbox);
+        var observation = await Observe(1);
+        var enqueued = gm.EvidenceStore.EnqueueRecord(observation);
+        var flushed = await gm.EvidenceStore.FlushRecords();
+        Assert.Equal("o-1", Assert.Single(flushed.Admitted).Id);
+        Assert.Equal(observation.ObservationId, Assert.Single(flushed.Pending).Id);
+        Assert.Equal([1], na.Batches);
+        hold.SetResult();
+        Assert.Equal("recorded", (await enqueued).Submission!.Status);
+        Assert.Empty(await outbox.List());
+    }
+
+    [Fact]
+    public async Task FlushRecords_LeavesOutARecordAnEnqueueSettledDuringTheRun()
+    {
+        // The flush lists the observation as pending; before it gets to it, an enqueue of it is refused for good.
+        var na = new Na();
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        var observation = await Observe(1);
+        await outbox.Add(Raw("b-1", RecordOutboxKinds.BreakGlass));
+        await outbox.Add(EvidenceOutbox.RecordEntry(observation));
+        var entered = new TaskCompletionSource();
+        var hold = new TaskCompletionSource();
+        na.During = ct =>
+        {
+            if (!entered.TrySetResult()) return Task.CompletedTask;
+            return hold.Task.WaitAsync(ct);
+        };
+        na.Answer = (path, _) => path switch
+        {
+            "/evidence/observations" => Refused(422, "observation_invalid_signature", """{"quarantine_id":"q-1"}"""),
+            // Sent again, the batch would fail transiently and store its older, pending state over the dead letter.
+            "/evidence/observations/batch" => Refused(503, "unavailable"),
+            _ => null,
+        };
+        using var gm = Client(na, outbox);
+        var flush = gm.EvidenceStore.FlushRecords();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var dead = (await gm.EvidenceStore.EnqueueRecord(observation)).Queued!;
+        Assert.Equal((OutboxStates.DeadLetter, "q-1"), (dead.State, dead.LastError!.QuarantineId));
+        hold.SetResult();
+        var result = await flush;
+        Assert.Equal("b-1", Assert.Single(result.Admitted).Id);
+        Assert.Empty(result.Pending);
+        Assert.Empty(result.DeadLettered);
+        Assert.Equal(["/evidence/break-glass", "/evidence/observations"], na.Paths);
+        var stored = Assert.Single(await outbox.List());
+        Assert.Equal((observation.ObservationId, OutboxStates.DeadLetter, 1, "q-1"),
+            (stored.Id, stored.State, stored.Attempts, stored.LastError!.QuarantineId));
+
+        // Admitted meanwhile, it is left out too, and not sent again.
+        await outbox.Remove(observation.ObservationId);
+        var next = await Observe(2);
+        await outbox.Add(Raw("b-2", RecordOutboxKinds.BreakGlass));
+        await outbox.Add(EvidenceOutbox.RecordEntry(next));
+        entered = new TaskCompletionSource();
+        hold = new TaskCompletionSource();
+        na.Answer = (_, _) => null;
+        flush = gm.EvidenceStore.FlushRecords();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("recorded", (await gm.EvidenceStore.EnqueueRecord(next)).Submission!.Status);
+        hold.SetResult();
+        Assert.Equal("b-2", Assert.Single((await flush).Admitted).Id);
+        Assert.Equal(["/evidence/break-glass", "/evidence/observations"], na.Paths.Skip(2));
+        Assert.Empty(await outbox.List());
+
+        // Only for that run: pending again, the record is the next run's to send.
+        na.Answer = (_, _) => Refused(503, "unavailable");
+        Assert.Equal(OutboxStates.Pending, (await gm.EvidenceStore.EnqueueRecord(next)).Queued!.State);
+        na.Answer = (_, _) => null;
+        Assert.Equal(next.ObservationId, Assert.Single((await gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true })).Admitted).Id);
+    }
+
+    [Fact]
+    public async Task EnqueueRecord_ReadsTheOutboxOnlyOnceItHoldsTheRecord()
+    {
+        // The first enqueue's read of the outbox waits; the second, meanwhile, finds the record held and leaves it.
+        var na = new Na { Answer = (_, _) => Refused(503, "unavailable") };
+        var outbox = new HookedOutbox();
+        var release = new TaskCompletionSource();
+        outbox.DuringList = () => outbox.Lists == 1 ? release.Task : Task.CompletedTask;
+        using var gm = Client(na, outbox);
+        var glass = await Glass();
+        var first = gm.EvidenceStore.EnqueueRecord(glass);
+        var second = await gm.EvidenceStore.EnqueueRecord(glass);
+        Assert.Equal((OutboxStates.Pending, 0), (second.Queued!.State, second.Queued.Attempts));
+        Assert.Empty(na.Sent);
+        release.SetResult();
+        // Had it read the outbox before holding the record, it would miss the record another call stored meanwhile, and
+        // adding it would throw.
+        Assert.Equal((OutboxStates.Pending, 1), ((await first).Queued!.State, (await first).Queued!.Attempts));
+        Assert.Single(na.Sent);
+        Assert.Equal(1, Assert.Single(await outbox.List()).Attempts);
+    }
+
+    [Fact]
+    public async Task EnqueueRecord_SubmitsARecordOnce_WhenItRacesAFlush_AndNeverThrowsForItsOwnRecord()
+    {
+        for (var round = 0; round < 100; round++)
+        {
+            var na = new Na();
+            var outbox = new MemoryOutbox<RecordOutboxEntry>();
+            using var gm = Client(na, outbox);
+            var observation = await Observe(round);
+            var start = new TaskCompletionSource();
+            var enqueue = Task.Run(async () =>
+            {
+                await start.Task;
+                return await gm.EvidenceStore.EnqueueRecord(observation);
+            });
+            var flush = Task.Run(async () =>
+            {
+                await start.Task;
+                return await gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true });
+            });
+            var again = Task.Run(async () =>
+            {
+                await start.Task;
+                return await gm.EvidenceStore.EnqueueRecord(observation);
+            });
+            start.SetResult();
+            // Claimed before the outbox is read: a flush never sends it, and an enqueue of it never adds it twice.
+            var deliveries = new[] { await enqueue, await again };
+            Assert.Empty((await flush).Admitted);
+            Assert.Contains(deliveries, d => d.Submission?.Status == "recorded");
+            Assert.All(deliveries, d => Assert.True(d.Submission is not null || d.Queued!.State == OutboxStates.Pending));
+            Assert.All(na.Paths, path => Assert.Equal("/evidence/observations", path));
+            Assert.Empty(await outbox.List());
+        }
     }
 
     [Fact]
