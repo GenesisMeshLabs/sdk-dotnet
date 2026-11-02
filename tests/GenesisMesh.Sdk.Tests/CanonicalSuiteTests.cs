@@ -159,10 +159,13 @@ public class CanonicalSuiteTests
     [Fact]
     public void AnOverlongIntegerIsRefusedBeforeItIsParsed()
     {
-        // v1.3.1: BigInteger.Parse takes time that grows with the square of the length.
+        // v1.3.1: BigInteger.Parse takes time that grows faster than the length. The refusal names the length, not the
+        // 64-bit range a parsed value is held to. The clock only backs it up: parsing 3M digits takes about 18 s on .NET 8,
+        // and about 3 s on .NET 10, no longer than the refusal itself on a loaded machine.
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        Assert.Equal("integer_out_of_range", Reason("[" + new string('7', 3_000_000) + "]"));
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"3M digits took {watch.Elapsed}");
+        var e = Assert.Throws<StrictJsonException>(() => StrictJsonReader.Check("[" + new string('7', 3_000_000) + "]"));
+        Assert.Equal("JSON refused (integer_out_of_range): an integer longer than 20 digits", e.Message);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"3M digits took {watch.Elapsed}");
     }
 
     [Fact]
