@@ -270,6 +270,20 @@ public class BreakGlassTests
         { EvaluationFailures.Timeout, _ => Task.FromException<HttpResponseMessage>(new TaskCanceledException("timed out", new TimeoutException())) },
         { EvaluationFailures.ServerError, _ => Task.FromResult(Error(503, "service_unavailable")) },
         { EvaluationFailures.RateLimited, _ => Task.FromResult(Error(429, "rate_limited")) },
+        // A proxy's own error page, whatever its body holds: the NA did not decide.
+        {
+            EvaluationFailures.ServerError, _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway)
+            {
+                Content = new StringContent("<html><body>502 Bad Gateway</body></html>", Encoding.UTF8, "text/html"),
+            })
+        },
+        { EvaluationFailures.ServerError, _ => Task.FromResult(Json(503, """{"error":{"code":"a","code":"b"}}""")) },
+        {
+            EvaluationFailures.RateLimited, _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent("slow down", Encoding.UTF8, "text/plain"),
+            })
+        },
     };
 
     [Theory]

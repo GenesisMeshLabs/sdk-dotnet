@@ -168,7 +168,7 @@ public sealed class BreakGlassResult<T>
     /// <summary>The signed break-glass record of the action.</summary>
     public BreakGlassRecord Record { get; init; } = new();
 
-    /// <summary>The NA's acknowledgement, when it could be reached again by then.</summary>
+    /// <summary>The NA's acknowledgement, when it was reached again by then and admitted the record.</summary>
     public RecordSubmission? Submission { get; init; }
 
     /// <summary>
@@ -483,7 +483,10 @@ public static partial class Governance
     /// token says.
     /// </param>
     /// <exception cref="ArgumentException">The request is incomplete, such as no resource.</exception>
-    /// <exception cref="OutboxException">No record outbox is configured (<c>record_outbox_required</c>).</exception>
+    /// <exception cref="OutboxException">
+    /// No record outbox is configured (<c>record_outbox_required</c>), or it or the outbox cannot be read
+    /// (<c>outbox_file_unreadable</c>, <c>outbox_file_other_format</c>); nothing was evaluated.
+    /// </exception>
     /// <exception cref="OutOfBandRecordException">
     /// <c>break_glass_malformed</c>: no attestation basis or capability, a justification that is empty or over 1024
     /// characters, or a context and justification that leave no room for the report.
@@ -491,14 +494,25 @@ public static partial class Governance
     /// </exception>
     /// <exception cref="StrictJsonException">
     /// The context or the justification holds a value the NA would not read alike, such as a lone surrogate, or the NA's
-    /// answer is not strict JSON.
+    /// answer is not strict JSON. Under the NA's decision without an outbox (<see cref="ClientOptions.Outbox"/>), it
+    /// comes after the action ran too: from its report, or from the NA's answer to its record.
     /// </exception>
     /// <exception cref="NetworkException">
     /// The evaluation's answer could not be read (<c>response_body_unreadable</c>): the NA may have decided, so nothing
-    /// runs.
+    /// runs. Under the NA's decision without an outbox, the action ran, and the submission of its record got no answer
+    /// or one that could not be read: the NA may hold the record. Do not run the action again.
     /// </exception>
     /// <exception cref="GenesisMeshException">
-    /// The NA refused the evaluation, or failed in a way that is no outage, such as <c>admin_auth_throttled</c>.
+    /// The NA refused the evaluation, or failed in a way that is no outage, such as <c>admin_auth_throttled</c>. Under
+    /// its decision without an outbox, it refused the action's record, after the action ran.
+    /// </exception>
+    /// <exception cref="SecretMaterialException">
+    /// Under the NA's decision without an outbox: the action ran, and its report holds secret material; nothing was
+    /// signed or sent.
+    /// </exception>
+    /// <exception cref="MetadataRefusedException">
+    /// Under the NA's decision with an outbox: the action ran, and the secret guard refused its report; the outcome was
+    /// kept without the refused fields.
     /// </exception>
     /// <exception cref="DecisionVerificationException">The decision failed verification, or cannot be verified as asked.</exception>
     /// <exception cref="GovernedActionException">

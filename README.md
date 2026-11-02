@@ -699,16 +699,18 @@ else if (!outcome.Governed.Authorized)
 ```
 
 - **Only on an outage.** The glass breaks when the evaluation gets no answer,
-  times out, or is answered with a readable 5xx or 429
-  (`Governance.EvaluationFailure` names which). A denial, a decision that fails
-  verification, a refusal, an answer whose body is cut off, stalls or is not
-  strict JSON, whatever its status (the NA may have decided), and the NA's
+  times out, or is answered with a 5xx or 429 whose body arrived, whatever it
+  holds, so a proxy's error page breaks it too (`Governance.EvaluationFailure`
+  names which). A denial, a decision that fails verification, a refusal, a
+  success that is not strict JSON, an answer whose body is cut off or stalls,
+  whatever its status (the NA may have decided), and the NA's
   `admin_auth_throttled` and `evidence_store_unavailable` never break it;
   cancelling never does either. The lookup of the NA's key before the
-  evaluation counts by its status, and a success whose body cannot be read is
-  no answer: it carries no decision.
-- **Checked first.** It needs a record outbox (`record_outbox_required`), a
-  resource, an attestation basis (the NA could not judge an agreement it does
+  evaluation counts by its status, even when its body cannot be read: a 5xx or
+  429 breaks the glass, a 403 or 404 does not, and a success is no answer, as
+  it carries no decision.
+- **Checked first.** It needs a record outbox that can be read
+  (`record_outbox_required`, `outbox_file_unreadable`), a resource, an attestation basis (the NA could not judge an agreement it does
   not see) and a requested capability. The context and justification are
   checked before anything is evaluated: no secret material, a justification of
   1 to 1024 characters, and 2048 bytes of the metadata limit left for the
@@ -722,8 +724,15 @@ else if (!outcome.Governed.Authorized)
   (`BreakGlassRecord`): keep or submit it once you can, and do not run the
   action again.
 - `BreakGlass.Submission` is set when the NA was back in time to admit the
-  record; otherwise `BreakGlass.Queued` is the entry `FlushRecords` submits,
-  break-glass records first.
+  record. Otherwise `BreakGlass.Queued` is its record outbox entry: pending,
+  which `FlushRecords` submits, break-glass records first, or a dead letter
+  when the NA refused it for good, which no flush sends again.
+- **Under the NA's decision**, the record is kept as without break-glass. With
+  an outbox (`ClientOptions.Outbox`) a refused report throws
+  `MetadataRefusedException`; without one the record is submitted at once, so
+  an exception from signing or submitting it (`SecretMaterialException`,
+  `StrictJsonException`, `NetworkException` or the NA's refusal) comes after
+  the action ran: do not run it again.
 
 #### A partner controller on a standard key
 
@@ -1277,9 +1286,10 @@ break-glass record is signed when the NA would refuse it, with the NA's code
 A connection failure or timeout is a `NetworkException`. Its `ConnectFailed`
 is true when the request did not reach the NA, so sending it again cannot
 apply it twice. From 1.9 its `Code` is `network_error`, or
-`response_body_unreadable` when the NA answered but the body was cut off or
-stalled past the request timeout, which covers the whole answer: the request
-reached the NA and may have been applied. A 2xx response that
+`response_body_unreadable` when the NA answered but the body was cut off,
+stalled past the request timeout, which covers the whole answer, or was larger
+than your `HttpClient`'s `MaxResponseContentBufferSize`: the request reached
+the NA and may have been applied. A 2xx response that
 is not strict JSON (duplicate keys, `-0`, lone surrogates, ...) throws
 `StrictJsonException`, a `JsonException`, not a `GenesisMeshException`. Cancelling through
 your own `CancellationToken` throws `OperationCanceledException`.
