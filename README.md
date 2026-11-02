@@ -1029,10 +1029,10 @@ The signature verifiers are the TypeScript SDK's `verifyDecisionSignature`,
 `verifyTreatySignature`, `verifyRevocationFeedSignature` and
 `revocationFeedSigner`:
 - **What they check:** a signature over the record as received. The record
-  must have no field this SDK does not know and be in canonical form: its
-  timestamps as the reference writes them, and every field the reference
-  always writes. The TypeScript SDK checks unknown fields only, and not for
-  a treaty.
+  must have no field this SDK does not know and be in canonical form as this
+  SDK checks it: its timestamps as the reference writes them, and every field
+  the reference always writes. The TypeScript SDK checks unknown fields only,
+  and not for a treaty.
 - **With a key history:** the key valid at the record's time
   (`NAKeyHistory.RecordTimeFields`; a revocation feed's `issued_at`).
 - **With a time to judge at:** an attestation, a treaty or a revocation feed
@@ -1040,9 +1040,16 @@ The signature verifiers are the TypeScript SDK's `verifyDecisionSignature`,
 - **For the reason:** `VerifyBoundaryDecision` also checks a decision's
   expiry and bindings, and `NARecordRefusal` gives the reference's reason
   for an attestation, a treaty or a feed.
-- **What no SDK checks:** neither SDK holds the whole record to the
-  reference's model, as the reference does. An NA-signed record with, say,
-  an invalid `status` still verifies.
+- **What no SDK checks:** the reference also holds the whole record to its
+  model, and to what the model writes back. An NA-signed record that only
+  that refuses still verifies here, for example one with:
+  - an invalid `status`;
+  - an integer written as `1.0` or `"1"` (TypeScript refuses `1.0`, since it
+    writes the number back as `1`);
+  - a timestamp written as a number;
+  - a revocation feed's attestation IDs out of order.
+- **Typed records:** a record this SDK read into its model, written back
+  with `Auth.SerializerOptions`, keeps the form the NA signed.
 
 An accepted DENY has `Accepted` true and `Authorized` false: the decision
 verified, and it denies. Revocation is not checked offline. `Canonical.FromJson`

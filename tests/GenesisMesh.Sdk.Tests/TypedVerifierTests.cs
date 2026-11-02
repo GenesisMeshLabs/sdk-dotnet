@@ -95,18 +95,22 @@ public class TypedVerifierTests
     };
 
     /// <summary><paramref name="record"/> of <paramref name="model"/> after <paramref name="change"/>, signed by <paramref name="key"/> over its signed form.</summary>
-    private static string Signed(string model, JsonObject record, Key key, Action<JsonObject>? change = null)
+    private static string Signed(string model, JsonObject record, Key key, Action<JsonObject>? change = null) =>
+        Signed(model, record, [key], change);
+
+    /// <summary>As the other overload, with a signature by each of <paramref name="keys"/> in order (the first for a single <c>signature</c>).</summary>
+    private static string Signed(string model, JsonObject record, Key[] keys, Action<JsonObject>? change = null)
     {
         change?.Invoke(record);
         var field = StrictFields.Model(model).SignatureField!;
         record.Remove(field);
         var body = OfflineVerifier.ReceivedCanonical(model, JsonSerializer.SerializeToElement(record));
-        var signature = new JsonObject
+        var signatures = keys.Select(key => new JsonObject
         {
             ["key_id"] = "na",
             ["sig"] = Convert.ToBase64String(SignatureAlgorithm.Ed25519.Sign(key, Encoding.UTF8.GetBytes(body))),
-        };
-        record[field] = field == "signatures" ? new JsonArray(signature) : signature;
+        }).ToArray();
+        record[field] = field == "signatures" ? new JsonArray(signatures) : signatures[0];
         return record.ToJsonString();
     }
 
@@ -226,6 +230,91 @@ public class TypedVerifierTests
         Assert.True(Verify(model, json, history));
         Assert.True(Verify(model, json, history, horizon.AddTicks(-10)));
         Assert.False(Verify(model, json, history, horizon));
+    }
+
+    [Theory]
+    [InlineData("MembershipAttestation")]
+    [InlineData("SovereignRevocationFeed")]
+    [InlineData("RecognitionTreaty")]
+    public void JudgedNow_ARecordBothKeysOfAHandOverSigned_VouchesWhileEitherDoes(string model)
+    {
+        // As the TypeScript SDK: any key valid at the record's time that still vouches. NARecordRefusal, as the
+        // reference, judges the first key of the history that signed it, so the two differ past the old key's horizon.
+        var record = Record(model);
+        var at = OfflineVerifier.ParseTimestamp((string)record[TimeFields[model]]!);
+        var succeeded = at.AddSeconds(-100);
+        var history = new NAKeyHistory("TEST", null,
+        [
+            new NAKey(1, "na-1", Pub(Zero), null, succeeded, null, false),
+            new NAKey(2, "na-2", Pub(Other), succeeded, null, null, false),
+        ]);
+        var json = Signed(model, record, [Other, Zero]);
+        var horizon = history.VouchesUntil(Pub(Zero))!.Value;
+        Assert.True(Verify(model, json, history, horizon));
+        Assert.Equal("outlives_key", OfflineVerifier.NARecordRefusal(model, json, history, horizon));
+        Assert.Null(OfflineVerifier.NARecordRefusal(model, json, history, horizon.AddTicks(-10)));
+    }
+
+    [Theory]
+    [MemberData(nameof(Models))]
+    public void AListOfKeys_AnyOfThemMaySign(string model)
+    {
+        var json = Signed(model, Record(model), Zero);
+        Assert.True(Verify(model, json, [Pub(Other), Pub(Zero)]));
+        Assert.True(Verify(model, json, NAKeyHistory.ValidAlways([Pub(Other), Pub(Zero)])));
+    }
+
+    [Theory]
+    [MemberData(nameof(Models))]
+    public void ANullTime_PlacesTheRecordNowhereInAHistory(string model)
+    {
+        // The TypeScript SDK takes every key of the history for a record without its time.
+        var json = Signed(model, Record(model), Zero, r => r[TimeFields[model]] = null);
+        Assert.False(Verify(model, json, NAKeyHistory.ValidAlways([Pub(Zero)])));
+    }
+
+    [Theory]
+    [InlineData("BoundaryDecision")]
+    [InlineData("BoundaryPolicy")]
+    public void ADecisionOrAPolicy_IsJudgedAtItsOwnTimeOnly(string model)
+    {
+        // Signed by a key that has since been succeeded and is past its horizon: no time to judge at is taken.
+        var record = Record(model);
+        var at = OfflineVerifier.ParseTimestamp((string)record[TimeFields[model]]!);
+        var json = Signed(model, record, Zero);
+        var history = new NAKeyHistory("TEST", null,
+        [
+            new NAKey(1, "na-1", Pub(Zero), null, at.AddDays(1), null, false),
+            new NAKey(2, "na-2", Pub(Other), at.AddDays(1), null, null, false),
+        ]);
+        Assert.True(history.RecordOutlivesKey(Pub(Zero), DateTimeOffset.UtcNow));
+        Assert.True(Verify(model, json, history));
+    }
+
+    [Theory]
+    [InlineData("MembershipAttestation")]
+    [InlineData("RecognitionTreaty")]
+    public void ARecord_IsPlacedAtItsIssuedAt_NotItsValidFrom(string model)
+    {
+        var record = Record(model);
+        var issued = OfflineVerifier.ParseTimestamp((string)record["issued_at"]!);
+        var json = Signed(model, record, Zero, r => r["valid_from"] = Canonical.Timestamp(issued.AddDays(-1)));
+        var history = new NAKeyHistory("TEST", null, [new NAKey(1, "na", Pub(Zero), issued, null, null, false)]);
+        Assert.True(Verify(model, json, history));
+    }
+
+    [Fact]
+    public void AFeedBothKeysOfAHandOverSigned_IsSignedByTheFirstKeyOfTheHistory()
+    {
+        var feed = Record("SovereignRevocationFeed");
+        var at = OfflineVerifier.ParseTimestamp((string)feed["issued_at"]!);
+        var history = new NAKeyHistory("TEST", null,
+        [
+            new NAKey(1, "na-1", Pub(Zero), null, at.AddSeconds(-100), null, false),
+            new NAKey(2, "na-2", Pub(Other), at.AddSeconds(-100), null, null, false),
+        ]);
+        var json = Signed("SovereignRevocationFeed", feed, [Other, Zero]);
+        Assert.Equal(Pub(Zero), OfflineVerifier.RevocationFeedSigner(json, history));
     }
 
     [Fact]

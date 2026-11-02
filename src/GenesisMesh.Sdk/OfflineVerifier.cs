@@ -403,14 +403,14 @@ public static partial class OfflineVerifier
     public static bool VerifyJustificationSignature(string proofJson, NAKeyHistory keyHistory)
     {
         ArgumentNullException.ThrowIfNull(keyHistory);
-        return SignedRecord("JustificationProof", proofJson, p =>
-            Str(p, "proof_issued_at") is { } issued && TryParseTimestamp(issued, out var at) ? keyHistory.KeysAt(at) : []);
+        return SignedRecord("JustificationProof", proofJson, p => NAKeysFor(keyHistory, p, "proof_issued_at", null));
     }
 
     /// <summary>
     /// True when one of <paramref name="naPublicKeys"/> signed the boundary decision, and the decision has no field
     /// this SDK does not know and is in canonical form (1.9.0). Only the signature: <see cref="VerifyBoundaryDecision"/>
-    /// also checks its expiry and what it binds.
+    /// also checks its expiry, what it binds and, with a key history, that it is not valid longer than its key may
+    /// vouch for (<c>decision_outlives_key</c>).
     /// </summary>
     /// <param name="decisionJson">The BoundaryDecision JSON, as the NA returned it.</param>
     /// <param name="naPublicKeys">The NA's base64 Ed25519 public keys, any of which may have signed it.</param>
@@ -445,7 +445,9 @@ public static partial class OfflineVerifier
     /// As <see cref="VerifyAttestationSignature(string, IReadOnlyList{string})"/>, but signed by the key of the NA's
     /// verified history that was valid at the attestation's <c>issued_at</c>. With <paramref name="now"/>, that key must
     /// still vouch then (<see cref="NAKeyHistory.KeysVouchingAt"/>): the attestation is judged for the present, not only
-    /// at its own time. <see cref="NARecordRefusal"/> gives the reference's reason, and also applies its time rules.
+    /// at its own time. <see cref="NARecordRefusal"/> gives the reference's reason and also applies its time rules; it
+    /// judges the first key of the history that signed the record, so for a record both keys of a hand-over signed it
+    /// can say <c>outlives_key</c> where this method, as the TypeScript SDK, still finds a key that vouches.
     /// </summary>
     /// <param name="attestationJson">The MembershipAttestation JSON, as the NA returned it.</param>
     /// <param name="keyHistory">The issuing NA's verified key history (<see cref="VerifyKeyHistory(string, string?, string)"/>).</param>
@@ -493,7 +495,8 @@ public static partial class OfflineVerifier
     /// <summary>
     /// As <see cref="VerifyRevocationFeedSignature(string, IReadOnlyList{string})"/>, but signed by the key of the NA's
     /// verified history that was valid at the feed's <c>issued_at</c>. With <paramref name="now"/>, that key must still
-    /// vouch then (<see cref="NAKeyHistory.KeysVouchingAt"/>).
+    /// vouch then (<see cref="NAKeyHistory.KeysVouchingAt"/>), as for
+    /// <see cref="VerifyAttestationSignature(string, NAKeyHistory, DateTimeOffset?)"/>.
     /// </summary>
     /// <param name="feedJson">The SovereignRevocationFeed JSON, as the NA served it.</param>
     /// <param name="keyHistory">The publishing NA's verified key history (<see cref="VerifyKeyHistory(string, string?, string)"/>).</param>
@@ -551,7 +554,8 @@ public static partial class OfflineVerifier
     /// As <see cref="VerifyTreatySignature(string, IReadOnlyList{string})"/>, but signed by the key of the NA's verified
     /// history that was valid at the treaty's <c>issued_at</c>, so a key succession leaves every treaty signed before it
     /// vouching at its own time. With <paramref name="now"/>, that key must still vouch then
-    /// (<see cref="NAKeyHistory.KeysVouchingAt"/>).
+    /// (<see cref="NAKeyHistory.KeysVouchingAt"/>), as for
+    /// <see cref="VerifyAttestationSignature(string, NAKeyHistory, DateTimeOffset?)"/>.
     /// </summary>
     /// <param name="treatyJson">The RecognitionTreaty JSON, as the NA served it.</param>
     /// <param name="keyHistory">The issuing NA's verified key history (<see cref="VerifyKeyHistory(string, string?, string)"/>).</param>
