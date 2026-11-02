@@ -135,18 +135,35 @@ public sealed class RecordOutboxTests : IDisposable
         public bool FailRemoves { get; set; }
         /// <summary>Updates and removals fail as a store's own timeout does, though the caller did not cancel.</summary>
         public bool CancelWrites { get; set; }
+        /// <summary>The next add fails, once.</summary>
+        public bool FailNextAdd { get; set; }
         public Func<Task>? DuringList { get; set; }
+        public Func<Task>? DuringUpdate { get; set; }
+        public Func<Task>? DuringRemove { get; set; }
         public int Lists { get; private set; }
 
-        public Task Add(RecordOutboxEntry entry, CancellationToken ct = default) => _inner.Add(entry, ct);
+        public Task Add(RecordOutboxEntry entry, CancellationToken ct = default)
+        {
+            if (!FailNextAdd) return _inner.Add(entry, ct);
+            FailNextAdd = false;
+            return Task.FromException(new IOException("disk full"));
+        }
 
-        public Task Update(RecordOutboxEntry entry, CancellationToken ct = default) =>
-            CancelWrites ? Task.FromException(new TaskCanceledException("store timeout"))
-            : FailUpdates ? Task.FromException(new IOException("disk")) : _inner.Update(entry, ct);
+        public async Task Update(RecordOutboxEntry entry, CancellationToken ct = default)
+        {
+            if (DuringUpdate is { } during) await during();
+            if (CancelWrites) throw new TaskCanceledException("store timeout");
+            if (FailUpdates) throw new IOException("disk");
+            await _inner.Update(entry, ct);
+        }
 
-        public Task Remove(string id, CancellationToken ct = default) =>
-            CancelWrites ? Task.FromException(new TaskCanceledException("store timeout"))
-            : FailRemoves ? Task.FromException(new IOException("disk")) : _inner.Remove(id, ct);
+        public async Task Remove(string id, CancellationToken ct = default)
+        {
+            if (DuringRemove is { } during) await during();
+            if (CancelWrites) throw new TaskCanceledException("store timeout");
+            if (FailRemoves) throw new IOException("disk");
+            await _inner.Remove(id, ct);
+        }
 
         public async Task<IReadOnlyList<RecordOutboxEntry>> List(CancellationToken ct = default)
         {
@@ -416,10 +433,14 @@ public sealed class RecordOutboxTests : IDisposable
     [Theory]
     [InlineData("""{}""")]
     [InlineData("""{"results":null}""")]
+    [InlineData("""{"results":[]}""")]
+    [InlineData("""{"results":[{"index":0,"status":"recorded"}]}""")]
     [InlineData("""{"results":[null]}""")]
     [InlineData("""{"results":[{"status":"recorded"}]}""")]
     [InlineData("""{"results":[{"index":null,"status":"recorded"}]}""")]
+    [InlineData("""{"results":[{"status":"recorded"},{"index":1,"status":"recorded"}]}""")]
     [InlineData("""{"results":[{"index":1,"status":"recorded"},{"index":1,"status":"recorded"}]}""")]
+    [InlineData("""{"results":[{"index":0,"status":"recorded"},{"index":1,"status":"recorded"},{"index":1,"status":"duplicate"}]}""")]
     [InlineData("""{"results":[{"index":2,"status":"recorded"}]}""")]
     [InlineData("""{"results":[{"index":-1,"status":"recorded"}]}""")]
     [InlineData("""{"results":[{"index":0}]}""")]
@@ -529,6 +550,7 @@ public sealed class RecordOutboxTests : IDisposable
                 Result(0),
                 """{"index":1,"status":"refused","error":{"code":"observation_out_of_scope","message":"out of scope","details":{"quarantine_id":"q-1"}}}""",
                 Result(2, "quarantined"),
+                Result(3, "duplicate"),
                 """{"index":4,"status":"refused","error":{"code":"observation_conflict","message":"taken"}}""",
                 """{"index":5,"status":"refused","error":{"code":"observation_unknown_key","message":"not yet"}}""",
                 """{"index":6,"status":"refused"}""",
@@ -539,14 +561,14 @@ public sealed class RecordOutboxTests : IDisposable
         using var gm = Client(na, outbox);
         var result = await gm.EvidenceStore.FlushRecords();
         Assert.Equal([8], na.Batches);
-        Assert.Equal(["o-0", "o-2"], result.Admitted.Select(e => e.Id));
+        Assert.Equal(["o-0", "o-2", "o-3"], result.Admitted.Select(e => e.Id));
         Assert.Equal("o-2", Assert.Single(result.Quarantined).Id);
         Assert.Equal([("o-1", "observation_out_of_scope", "out of scope", 422, "q-1"), ("o-4", "observation_conflict", "taken", 409, null)],
             result.DeadLettered.Select(e => (e.Id, e.LastError!.Code, e.LastError.Message, e.LastError.Status, e.LastError.QuarantineId)));
-        // Unanswered, refused for a key not registered yet, or refused without a reason: still pending.
-        Assert.Equal([("o-3", null, null), ("o-5", "observation_unknown_key", "not yet"), ("o-6", "unknown", "unknown"), ("o-7", "unknown", "unknown")],
+        // Refused for a key not registered yet, or refused without a reason: still pending.
+        Assert.Equal([("o-5", "observation_unknown_key", "not yet"), ("o-6", "unknown", "unknown"), ("o-7", "unknown", "unknown")],
             result.Pending.Select(e => (e.Id, e.LastError?.Code, e.LastError?.Message)));
-        Assert.Equal(["o-1", "o-3", "o-4", "o-5", "o-6", "o-7"], (await outbox.List()).Select(e => e.Id));
+        Assert.Equal(["o-1", "o-4", "o-5", "o-6", "o-7"], (await outbox.List()).Select(e => e.Id));
     }
 
     [Fact]
@@ -904,9 +926,120 @@ public sealed class RecordOutboxTests : IDisposable
     }
 
     [Fact]
-    public async Task EnqueueRecord_ReadsTheOutboxOnlyOnceItHoldsTheRecord()
+    public async Task FlushRecords_ReportsARecordAnEnqueueFailedDuringTheRun_AsThatCallStoredIt()
     {
-        // The first enqueue's read of the outbox waits; the second, meanwhile, finds the record held and leaves it.
+        // Sent again from the run's older state, it would lose an attempt and skip its backoff.
+        var na = new Na();
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        var observation = await Observe(1);
+        await outbox.Add(Raw("b-1", RecordOutboxKinds.BreakGlass));
+        await outbox.Add(EvidenceOutbox.RecordEntry(observation));
+        var entered = new TaskCompletionSource();
+        var hold = new TaskCompletionSource();
+        na.During = ct => entered.TrySetResult() ? hold.Task.WaitAsync(ct) : Task.CompletedTask;
+        na.Answer = (path, _) => path == "/evidence/observations" ? Refused(503, "unavailable") : null;
+        using var gm = Client(na, outbox);
+        var flush = gm.EvidenceStore.FlushRecords();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var queued = (await gm.EvidenceStore.EnqueueRecord(observation)).Queued!;
+        Assert.Equal(1, queued.Attempts);
+        hold.SetResult();
+        var result = await flush;
+        Assert.Equal("b-1", Assert.Single(result.Admitted).Id);
+        var pending = Assert.Single(result.Pending);
+        Assert.Equal((observation.ObservationId, 1, queued.NextAttemptAt), (pending.Id, pending.Attempts, pending.NextAttemptAt));
+        Assert.Equal(["/evidence/break-glass", "/evidence/observations"], na.Paths);
+        Assert.Equal(1, Assert.Single(await outbox.List()).Attempts);
+    }
+
+    [Fact]
+    public async Task FlushRecords_ReportsARecordAnEnqueueStoresAsTheRunStarts_AsThatCallStoredIt()
+    {
+        // The enqueue's new state of its failed record lands only once a flush has read the outbox.
+        var na = new Na { Answer = (path, _) => path == "/evidence/observations" ? Refused(503, "unavailable") : null };
+        var outbox = new HookedOutbox();
+        await outbox.Add(Raw("b-1", RecordOutboxKinds.BreakGlass));
+        var atUpdate = new TaskCompletionSource();
+        var updating = new TaskCompletionSource();
+        outbox.DuringUpdate = () =>
+        {
+            atUpdate.TrySetResult();
+            return updating.Task;
+        };
+        using var gm = Client(na, outbox);
+        var observation = await Observe(1);
+        var enqueued = gm.EvidenceStore.EnqueueRecord(observation);
+        await atUpdate.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var entered = new TaskCompletionSource();
+        var hold = new TaskCompletionSource();
+        na.During = ct => entered.TrySetResult() ? hold.Task.WaitAsync(ct) : Task.CompletedTask;
+        var flush = gm.EvidenceStore.FlushRecords();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        outbox.DuringUpdate = null;
+        updating.SetResult();
+        var queued = (await enqueued).Queued!;
+        Assert.Equal(1, queued.Attempts);
+        hold.SetResult();
+        var result = await flush;
+        Assert.Equal("b-1", Assert.Single(result.Admitted).Id);
+        var pending = Assert.Single(result.Pending);
+        Assert.Equal((observation.ObservationId, 1, queued.NextAttemptAt), (pending.Id, pending.Attempts, pending.NextAttemptAt));
+        Assert.Equal(["/evidence/observations", "/evidence/break-glass"], na.Paths);
+        Assert.Equal(1, Assert.Single(await outbox.List()).Attempts);
+    }
+
+    [Fact]
+    public async Task FlushRecords_LeavesOutARecordAnEnqueueRemovesAsTheRunStarts()
+    {
+        // The enqueue's removal of its admitted record lands only once a flush has read the outbox.
+        var na = new Na();
+        var outbox = new HookedOutbox();
+        await outbox.Add(Raw("b-1", RecordOutboxKinds.BreakGlass));
+        var atRemove = new TaskCompletionSource();
+        var removing = new TaskCompletionSource();
+        outbox.DuringRemove = () =>
+        {
+            atRemove.TrySetResult();
+            return removing.Task;
+        };
+        using var gm = Client(na, outbox);
+        var observation = await Observe(1);
+        var enqueued = gm.EvidenceStore.EnqueueRecord(observation);
+        await atRemove.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var entered = new TaskCompletionSource();
+        var hold = new TaskCompletionSource();
+        na.During = ct => entered.TrySetResult() ? hold.Task.WaitAsync(ct) : Task.CompletedTask;
+        var flush = gm.EvidenceStore.FlushRecords();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        outbox.DuringRemove = null;
+        removing.SetResult();
+        Assert.Equal("recorded", (await enqueued).Submission!.Status);
+        hold.SetResult();
+        Assert.Equal("b-1", Assert.Single((await flush).Admitted).Id);
+        Assert.Equal(["/evidence/observations", "/evidence/break-glass"], na.Paths);
+        Assert.Empty(await outbox.List());
+    }
+
+    [Fact]
+    public async Task FlushRecords_ResubmitsAnAdmittedRecordWhoseRemovalFailed()
+    {
+        var na = new Na();
+        var outbox = new HookedOutbox { FailRemoves = true };
+        using var gm = Client(na, outbox);
+        var observation = await Observe(1);
+        Assert.Equal("recorded", (await gm.EvidenceStore.EnqueueRecord(observation)).Submission!.Status);
+        // Still stored: the next flush resubmits it, gets a duplicate and removes it.
+        Assert.Single(await outbox.List());
+        outbox.FailRemoves = false;
+        na.Answer = (path, _) => path.EndsWith("/batch", StringComparison.Ordinal) ? Batch(Result(0, "duplicate")) : null;
+        Assert.Equal(observation.ObservationId, Assert.Single((await gm.EvidenceStore.FlushRecords()).Admitted).Id);
+        Assert.Empty(await outbox.List());
+    }
+
+    [Fact]
+    public async Task EnqueueRecord_WaitsForAnotherEnqueueOfTheRecordThatHasNotStoredItYet()
+    {
+        // The first enqueue's read of the outbox waits; the second finds the record held but not stored.
         var na = new Na { Answer = (_, _) => Refused(503, "unavailable") };
         var outbox = new HookedOutbox();
         var release = new TaskCompletionSource();
@@ -914,15 +1047,61 @@ public sealed class RecordOutboxTests : IDisposable
         using var gm = Client(na, outbox);
         var glass = await Glass();
         var first = gm.EvidenceStore.EnqueueRecord(glass);
-        var second = await gm.EvidenceStore.EnqueueRecord(glass);
-        Assert.Equal((OutboxStates.Pending, 0), (second.Queued!.State, second.Queued.Attempts));
+        var second = gm.EvidenceStore.EnqueueRecord(glass);
+        Assert.False(second.IsCompleted);
         Assert.Empty(na.Sent);
         release.SetResult();
-        // Had it read the outbox before holding the record, it would miss the record another call stored meanwhile, and
-        // adding it would throw.
+        // Then it starts over, and finds the record the first stored.
         Assert.Equal((OutboxStates.Pending, 1), ((await first).Queued!.State, (await first).Queued!.Attempts));
+        Assert.Equal((OutboxStates.Pending, 2), ((await second).Queued!.State, (await second).Queued!.Attempts));
+        Assert.Equal(2, na.Sent.Count);
+        Assert.Equal(2, Assert.Single(await outbox.List()).Attempts);
+    }
+
+    [Fact]
+    public async Task EnqueueRecord_StoresTheRecordItself_WhenTheEnqueueItWaitedForCouldNot()
+    {
+        var na = new Na();
+        var outbox = new HookedOutbox { FailNextAdd = true };
+        var release = new TaskCompletionSource();
+        outbox.DuringList = () => outbox.Lists == 1 ? release.Task : Task.CompletedTask;
+        using var gm = Client(na, outbox);
+        var glass = await Glass();
+        var first = gm.EvidenceStore.EnqueueRecord(glass);
+        var second = gm.EvidenceStore.EnqueueRecord(glass);
+        release.SetResult();
+        await Assert.ThrowsAsync<IOException>(() => first);
+        Assert.Equal("recorded", (await second).Submission!.Status);
         Assert.Single(na.Sent);
-        Assert.Equal(1, Assert.Single(await outbox.List()).Attempts);
+        Assert.Empty(await outbox.List());
+    }
+
+    [Fact]
+    public async Task EnqueueRecord_RefusesADifferentRecordWithTheIdOfOneAnotherEnqueueIsStoring()
+    {
+        var na = new Na { Answer = (_, _) => Refused(503, "unavailable") };
+        var outbox = new HookedOutbox();
+        var release = new TaskCompletionSource();
+        outbox.DuringList = () => outbox.Lists == 1 ? release.Task : Task.CompletedTask;
+        using var gm = Client(na, outbox);
+        var record = await Observe(1);
+        var other = await Observer.Record(new ObservationInput
+        {
+            ResourceId = "kv:prod/other",
+            Action = ResourceActions.Delete,
+            Capability = "secret.rotate",
+            ChangedAt = At,
+            Source = "cloud-activity-log",
+            SourceEventId = "event-1",
+        });
+        Assert.Equal(record.ObservationId, other.ObservationId);
+        var first = gm.EvidenceStore.EnqueueRecord(record);
+        var second = gm.EvidenceStore.EnqueueRecord(other);
+        release.SetResult();
+        Assert.Equal(OutboxStates.Pending, (await first).Queued!.State);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => second);
+        Assert.Contains("a different record", error.Message, StringComparison.Ordinal);
+        Assert.Single(na.Sent);
     }
 
     [Fact]
