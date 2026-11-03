@@ -291,8 +291,9 @@ public sealed record RemediationInput
     public static RemediationInput For(RemediationStatus state, string steps, string? resourceId = null)
     {
         ArgumentNullException.ThrowIfNull(state);
-        var resource = state.ResourceId ?? resourceId;
-        if (state.SubjectKind == RemediationSubjectKinds.Decision && state.Fallback == RemediationFallbacks.NotExecuted && resource is not null)
+        // An empty value names nothing, as TypeScript reads it.
+        var resource = !string.IsNullOrEmpty(state.ResourceId) ? state.ResourceId : resourceId;
+        if (state.SubjectKind == RemediationSubjectKinds.Decision && state.Fallback == RemediationFallbacks.NotExecuted && !string.IsNullOrEmpty(resource))
             return new()
             {
                 SubjectKind = state.SubjectKind,
@@ -302,7 +303,7 @@ public sealed record RemediationInput
                 ResourceId = resource,
                 Steps = steps,
             };
-        if (state.ChangeKind is null || state.ChangeId is null || state.ResourceId is null)
+        if (string.IsNullOrEmpty(state.ChangeKind) || string.IsNullOrEmpty(state.ChangeId) || string.IsNullOrEmpty(state.ResourceId))
             throw new OutOfBandRecordException("remediation_subject_not_found",
                 $"the remediation of {state.SubjectId} names no change yet (its execution evidence is not stored)");
         return new()

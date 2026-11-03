@@ -13,4 +13,3 @@
 ### Differs from TypeScript
 
 - **`DecideReview`** refuses a waiver's end given for another verdict, or a waiver without one, before sending anything.
-- **`MarkNotified`, `RequestReview` and `DecideReview`** are not retried, as in TypeScript; `SubmitRemediation` is.

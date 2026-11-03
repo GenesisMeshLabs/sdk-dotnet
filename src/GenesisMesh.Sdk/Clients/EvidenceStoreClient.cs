@@ -735,7 +735,8 @@ public sealed partial class EvidenceStoreClient
 
     /// <summary>
     /// Submits one signed remediation record (<see cref="ExecutionRecorder.SignRemediation"/>), with the NA's remediation
-    /// records on (otherwise 404 <c>remediation_disabled</c>). The executor key's signature authenticates it:
+    /// records on (otherwise 404 <c>remediation_disabled</c>, or <c>out_of_band_disabled</c> with its out-of-band records
+    /// off too). The executor key's signature authenticates it:
     /// <c>recorded</c> with the subject's state (<see cref="RecordSubmission.Remediation"/>), or <c>duplicate</c> for the
     /// same record again, so it is safe to retry. The NA admits it only once it holds the forward rotation's execution
     /// evidence it names (<c>remediation_rotation_missing</c> is transient). An authentic record refused for good is kept
@@ -868,11 +869,15 @@ public sealed partial class EvidenceStoreClient
     /// POST /admin/evidence/reviews
     /// </summary>
     /// <exception cref="ConflictException">
-    /// <c>review_needs_named_holder</c>, <c>review_already_pending</c>, <c>review_after_remediation</c> or
-    /// <c>review_requested_by_actor</c>.
+    /// <c>review_needs_named_holder</c>, <c>review_already_pending</c>, <c>review_after_remediation</c>,
+    /// <c>review_requested_by_actor</c>, <c>illegal_transition</c> (a decision the NA denied) or <c>review_conflict</c>
+    /// (the subject changed meanwhile).
     /// </exception>
-    /// <exception cref="BadRequestException">The request is not one the NA takes (<c>invalid_review</c>).</exception>
-    /// <exception cref="NotFoundException">The subject is not stored (<c>remediation_not_found</c>).</exception>
+    /// <exception cref="BadRequestException">
+    /// The request is not one the NA takes (<c>invalid_review</c>), or would not verify offline
+    /// (<c>review_approval_invalid</c>).
+    /// </exception>
+    /// <exception cref="NotFoundException">The subject is not stored (<c>review_subject_not_found</c>).</exception>
     public async Task<RemediationStatus> RequestReview(ReviewRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -910,11 +915,19 @@ public sealed partial class EvidenceStoreClient
     /// given for another verdict or missing for a waiver: nothing is sent.
     /// </exception>
     /// <exception cref="ConflictException">
-    /// <c>review_not_pending</c>, <c>review_same_holder_as_requester</c>, <c>review_same_holder_as_actor</c>,
-    /// <c>review_waiver_after_remediation</c> or <c>review_conflict</c>.
+    /// <c>review_already_decided</c>, <c>review_same_holder_as_requester</c>, <c>review_same_holder_as_actor</c>,
+    /// <c>review_needs_named_holder</c>, <c>review_waiver_after_remediation</c>, <c>illegal_transition</c> or
+    /// <c>review_conflict</c>.
     /// </exception>
-    /// <exception cref="ValidationException"><c>review_waiver_too_long</c>: past the NA's longest waiver.</exception>
-    /// <exception cref="BadRequestException">The decision is not one the NA takes (<c>invalid_review</c>).</exception>
+    /// <exception cref="ValidationException">
+    /// <c>review_waiver_too_long</c>: past the NA's longest waiver; <c>review_waiver_beyond_lifetime</c>: past an
+    /// emergency change's lifetime.
+    /// </exception>
+    /// <exception cref="BadRequestException">
+    /// The decision is not one the NA takes (<c>invalid_review</c>), or would not verify offline
+    /// (<c>review_approval_invalid</c>).
+    /// </exception>
+    /// <exception cref="NotFoundException">No such review (<c>review_not_found</c>).</exception>
     public async Task<ReviewDecided> DecideReview(string reviewId, ReviewDecision decision, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(decision);

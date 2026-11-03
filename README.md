@@ -648,16 +648,19 @@ var problem = RemediationRules.ReviewApprovalProblem(review, naPublicKeys);
     reads it; an entry its model would not take gives no guidance.
 
 With the NA's remediation records on (`EVIDENCE_REMEDIATION=on`, which needs
-its out-of-band records; otherwise 404 `remediation_disabled`), the store has
-the calls:
+its out-of-band records; otherwise 404 `remediation_disabled`, or
+`out_of_band_disabled` with those off too), the store has the calls:
 
 ```csharp
-// The due queue: the open remediations, oldest first.
+// The due queue: the open changes, oldest first. Only a due or overdue one takes a remediation record;
+// a waived one, or one only under review, does not yet.
 await foreach (var due in client.EvidenceStore.AllRemediations())
 {
-    await client.EvidenceStore.MarkNotified(due.SubjectId, "email");   // the actor is told, before the due time
-    // ... carry out due.Steps, then record it:
-    var record = await executor.SignRemediation(RemediationInput.For(due, due.Steps) with { DisabledVersionId = deniedVersionId });
+    if (due.State is not (RemediationStates.RemediationDue or RemediationStates.Overdue)) continue;
+    if (due.NotifiedAt is null) await client.EvidenceStore.MarkNotified(due.SubjectId, "email");   // before the due time
+    if (due.Steps != RemediationSteps.Disable) continue;                // none alerts; a forward rotation also names its rotation
+    // ... disable the denied version, then record it:
+    var record = await executor.SignRemediation(RemediationInput.For(due, due.Steps) with { DisabledVersionId = due.ChangeVersionId });
     await client.EvidenceStore.EnqueueRecord(record);                   // or SubmitRemediation, without a record outbox
 }
 
@@ -670,7 +673,9 @@ var decided = await decider.EvidenceStore.DecideReview(requested.ReviewId!, new 
 var proved = RemediationRules.ReviewApprovalProblem(decided.Review.Payload, [naPublicKey]) is null;
 ```
 
-- **The due queue:** `Remediations` reads a page (read tier) and
+- **The due queue:** a remediation record is taken only from a change that is
+  `remediation_due` or `overdue`: one sent for any other state is refused for
+  good (`remediation_not_due`). `Remediations` reads a page (read tier) and
   `AllRemediations` follows the pages. Without a filter they list the open
   changes: due, overdue and waived, and those with a pending review that are
   not remediated. A filter takes one of `RemediationStates.Kept`, or

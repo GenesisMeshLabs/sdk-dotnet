@@ -4281,7 +4281,7 @@ public class RemediationStatus
     [JsonPropertyName("subject_id")]
     public string SubjectId { get; set; } = "";
 
-    /// <summary>A value of <see cref="ChangeKinds"/>; null for a decision before its execution evidence is known.</summary>
+    /// <summary>A value of <see cref="ChangeKinds"/>; <c>execution</c> for a decision.</summary>
     [JsonPropertyName("change_kind")]
     public string? ChangeKind { get; set; }
 
@@ -4538,7 +4538,11 @@ public sealed class ReviewDecision
     public string? Note { get; set; }
 }
 
-/// <summary>The subject's remediation state once a review is decided, with the review record the NA signed and stored.</summary>
+/// <summary>
+/// The subject's remediation state once a review is decided, with the review record the NA signed and stored. Read
+/// <see cref="Review"/> from this type: through <see cref="RemediationStatus"/> it is the pending review's summary, null
+/// here.
+/// </summary>
 public sealed class ReviewDecided : RemediationStatus
 {
     /// <summary>The review record, as stored.</summary>

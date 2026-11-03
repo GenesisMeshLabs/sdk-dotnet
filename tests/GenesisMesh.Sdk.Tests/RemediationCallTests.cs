@@ -261,6 +261,19 @@ public class RemediationCallTests
     }
 
     [Fact]
+    public async Task ARequestOrADecisionIsNotRetriedWhenTheNAFails()
+    {
+        // A second request would find the review pending, a second decision find it decided.
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Refused(503, "evidence_store_unavailable"), retries: 2);
+        await Assert.ThrowsAnyAsync<GenesisMeshException>(() =>
+            gm.EvidenceStore.RequestReview(new ReviewRequest { SubjectKind = "judgement", SubjectId = "j-1", Justification = "why" }));
+        Assert.Equal(["/admin/evidence/reviews"], sent.Select(s => s.Path));
+        await Assert.ThrowsAnyAsync<GenesisMeshException>(() => gm.EvidenceStore.DecideReview("r-1", new ReviewDecision { Verdict = ReviewVerdicts.Deny }));
+        Assert.Equal(["/admin/evidence/reviews", "/admin/evidence/reviews/r-1/decide"], sent.Select(s => s.Path));
+    }
+
+    [Fact]
     public async Task ADecisionTheNARefusesIsNotRetried()
     {
         var sent = new List<Sent>();
@@ -328,5 +341,19 @@ public class RemediationCallTests
         executed.Fallback = null;
         Assert.Equal("remediation_subject_not_found", Assert.Throws<OutOfBandRecordException>(() => RemediationInput.For(executed, RemediationSteps.None, "kv:vault/other")).Code);
         Assert.Throws<ArgumentNullException>(() => RemediationInput.For(null!, RemediationSteps.None));
+    }
+
+    [Fact]
+    public void TheStatesResourceWinsAndAnEmptyValueNamesNothing()
+    {
+        var never = Status(State("d-1").Replace("\"subject_kind\":\"judgement\"", "\"subject_kind\":\"decision\"")
+            .Replace("\"fallback\":null", "\"fallback\":\"not_executed\""));
+        Assert.Equal("kv:vault/api-key", RemediationInput.For(never, RemediationSteps.None, "kv:vault/other").ResourceId);
+        never.ResourceId = "";
+        Assert.Equal("kv:vault/other", RemediationInput.For(never, RemediationSteps.None, "kv:vault/other").ResourceId);
+        Assert.Equal("remediation_subject_not_found", Assert.Throws<OutOfBandRecordException>(() => RemediationInput.For(never, RemediationSteps.None, "")).Code);
+        var judged = Status(State());
+        judged.ChangeId = "";
+        Assert.Equal("remediation_subject_not_found", Assert.Throws<OutOfBandRecordException>(() => RemediationInput.For(judged, RemediationSteps.None)).Code);
     }
 }
