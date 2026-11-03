@@ -9,7 +9,7 @@
 
   The result counts them (`Remediations`, `Reviews`). Key succession, archive and grant entries still fail as `unknown_entry_kind`.
 - **`RemediationRules.RotationProblem`** and `RotationFacts`, as TypeScript's `rotationProblem`: whether the forward rotation a remediation record cites can carry it.
-- **Conformance:** the shared `remediation` suite's 28 `verify_export` vectors run; all 340 of its vectors now run. 137 further variants of the suite's store, with the answers of the reference's `verify_evidence_events`, run as unit tests (`testdata/remediation/export_cases.json`).
+- **Conformance:** the shared `remediation` suite's 28 `verify_export` vectors run; all 340 of its vectors now run. 138 further variants of the suite's store, with the answers of the reference's `verify_evidence_events`, run as unit tests (`testdata/remediation/export_cases.json`).
 
 ### Fixed
 
