@@ -27,6 +27,7 @@ public partial class ArchitectureTests
         ("StrictFields.cs", "registry"),
         ("OfflineVerifier.cs", "verify"),
         ("EvidenceVerification.cs", "verify"),
+        ("Anchors.cs", "verify"),
         ("OutOfBandVerification.cs", "verify"),
         ("KeyHistory.cs", "verify"),
         ("Grants.cs", "verify"),
