@@ -40,8 +40,9 @@ public readonly struct GrantNumber : IEquatable<GrantNumber>, IComparable<GrantN
     /// <summary>True when the number is integral.</summary>
     public bool IsIntegral => _integer is not null;
 
-    /// <summary>The number as a double (an integer beyond 2^53 rounded).</summary>
-    public double Value => _integer is { } i ? (double)i : _value;
+    /// <summary>The number as a double (an integer beyond 2^53 rounded to the nearest, as JavaScript and Python round it).</summary>
+    // From its digits: a BigInteger cast truncates (2^64 - 1 becomes 2^64 - 2048).
+    public double Value => _integer is { } i ? double.Parse(i.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture) : _value;
 
     /// <summary>
     /// Reads a JSON number as the reference reads it: an integer literal exactly, any other number as a double, and an

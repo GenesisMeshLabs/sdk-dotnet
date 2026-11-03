@@ -81,7 +81,7 @@ public class GrantRulesTests
         Assert.True(GrantNumber.TryRead(Json("18446744073709551615"), out var top));
         Assert.Equal(1.0, one.Value);
         Assert.Equal(1.5, half.Value);
-        Assert.Equal(18446744073709551615.0, top.Value);
+        Assert.Equal(18446744073709551616.0, top.Value); // rounded to 2^64, not truncated
         Assert.True(one.Equals((object)oneAgain));
         Assert.False(one.Equals((object)"1"));
         Assert.Equal(one.GetHashCode(), oneAgain.GetHashCode());
