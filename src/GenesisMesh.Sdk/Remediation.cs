@@ -729,7 +729,7 @@ public static partial class RemediationRules
     /// White space as Python's <c>str.strip()</c> removes it, which the reference's <c>stands_for</c> check uses: .NET's
     /// white space and U+001C to U+001F.
     /// </summary>
-    private static bool PythonSpace(char c) => char.IsWhiteSpace(c) || c is >= '\u001c' and <= '\u001f';
+    internal static bool PythonSpace(char c) => char.IsWhiteSpace(c) || c is >= '\u001c' and <= '\u001f';
 
     /// <summary>
     /// The issues the NA finds in a policy's 1.4.0 sections (the codes of <c>validate_boundary_policy</c>): remediation

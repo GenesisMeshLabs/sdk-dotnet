@@ -1449,6 +1449,33 @@ OfflineVerifier.CheckEventsAgainstAnchors(events, anchors, run);
   starts, to pass as `EvidenceVerifyOptions.Checkpoint`.
 - It runs the shared `audit` suite's `verify_anchors` vectors.
 
+### Completeness against an outside log
+
+An audit pack's records can be checked against a log kept outside Genesis Mesh
+(a cloud audit log, a ticketing export): every change made in the period should
+have its record (1.9.0, as the reference's `check_completeness`).
+
+```csharp
+var changes = OfflineVerifier.ParseChanges(File.ReadAllText("changes.csv"), csv: true);
+var report = OfflineVerifier.CheckCompleteness(changes, rangeEntries, citedEntries, new CompletenessOptions
+{
+    From = periodStart,
+    To = periodEnd,                      // Tolerance: 300 seconds by default
+});
+// report.UnmatchedChanges: changes in the period the store does not record.
+```
+
+- `ParseChanges` reads CSV (a header row naming `ChangeColumns`: `source`,
+  `source_event_id`, `resource_id`, `action`, `changed_at`, `actor`) or JSON
+  (a list, or `{"changes": [...]}`). `changed_at` is RFC 3339 with an offset
+  (`ParseRfc3339`); `source` and `source_event_id` go together.
+- `CheckCompleteness` sets aside changes repeating a source event, matches a
+  change naming a source event to the record of that event, and matches the
+  rest per resource and action, for the most pairs and then the least total
+  distance within the tolerance. An observation and the record it matched are
+  one change.
+- It runs the shared `audit` suite's `changes_file` and `completeness` vectors.
+
 ### NA key history
 
 From 1.5.0 a Network Authority can move to a new signing key (a key
