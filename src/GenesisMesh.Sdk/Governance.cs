@@ -239,8 +239,12 @@ public sealed class RotateForwardOptions<T>
     /// </summary>
     public RemediationStatus? Remediation { get; init; }
 
-    /// <summary>The denied version: disabled once the readers have the new one. Required.</summary>
-    public string DeniedVersionId { get; init; } = "";
+    /// <summary>
+    /// The denied version: disabled once the readers have the new one. Default the state's
+    /// <see cref="RemediationStatus.ChangeVersionId"/>; when the state names one, it must be that one (the NA refuses a
+    /// record that disables another, <c>remediation_subject_mismatch</c>).
+    /// </summary>
+    public string? DeniedVersionId { get; init; }
 
     /// <summary>
     /// The governed rotation's evaluation and verification, as for <see cref="Governance.GovernedAction{T}(GenesisMeshClient, ExecutionRecorder, GovernedActionRequest, Func{BoundaryDecision, CancellationToken, Task{ActionReport{T}?}}, CancellationToken)"/>.
@@ -441,21 +445,35 @@ public sealed class EvidenceNotKeptException : GenesisMeshException
 
 /// <summary>
 /// The forward rotation ran, but the remediation was not recorded (<c>remediation_not_recorded</c>,
-/// <see cref="Governance.CancelByRotatingForward"/>). The record could not be built (nothing was disabled), the disable
-/// failed, or the record could not be signed, submitted or kept. <see cref="Exception.InnerException"/> is the cause. Do
-/// not rotate again: submit <see cref="Record"/> once the cause is fixed (a resubmission is a duplicate), or disable the
-/// denied version and record it.
+/// <see cref="Governance.CancelByRotatingForward"/>). <see cref="Exception.InnerException"/> is the cause:
+/// <list type="bullet">
+/// <item>Before the disable (<see cref="Disabled"/> false): the rotation's evidence was refused for good
+/// (<see cref="RotationQueued"/> a dead letter), or the record could not be built, for example the rotation issued the
+/// denied version (<c>remediation_malformed</c>). That rotation can never be cited: rotate again.</item>
+/// <item>The disable failed (<see cref="Disabled"/> false): disable the denied version, then record it.</item>
+/// <item>After the disable (<see cref="Disabled"/> true): the record could not be signed, submitted or kept. Submit
+/// <see cref="Record"/> once the cause is fixed (a resubmission is a duplicate); do not rotate again.</item>
+/// </list>
 /// </summary>
 public sealed class RemediationNotRecordedException : GenesisMeshException
 {
-    internal RemediationNotRecordedException(Exception cause, ExecutionEvidence? rotationEvidence, object? value, RemediationRecord? record)
+    internal RemediationNotRecordedException(Exception cause, ExecutionEvidence? rotationEvidence, object? value, RemediationRecord? record,
+        bool disabled = false, OutboxEntry? rotationQueued = null)
         : base(0, "remediation_not_recorded", "the forward rotation ran; the remediation was not recorded: " + cause.Message,
             "genesismesh: the forward rotation ran; the remediation was not recorded: " + cause.Message, cause)
     {
         RotationEvidence = rotationEvidence;
         Value = value;
         Record = record;
+        Disabled = disabled;
+        RotationQueued = rotationQueued;
     }
+
+    /// <summary>True when the denied version was disabled.</summary>
+    public bool Disabled { get; }
+
+    /// <summary>With an evidence outbox: the rotation's evidence entry, when the NA has not admitted it.</summary>
+    public OutboxEntry? RotationQueued { get; }
 
     /// <summary>The forward rotation's execution evidence.</summary>
     public ExecutionEvidence? RotationEvidence { get; }
@@ -1113,8 +1131,10 @@ public static partial class Governance
     /// The state, the plan and the denied version are checked before anything runs, and the record before the denied
     /// version is disabled, so a record the NA would refuse never follows a disable. The NA admits the record once it
     /// holds the rotation's evidence (<c>remediation_rotation_missing</c> is transient): flush the evidence outbox before
-    /// the record outbox. <paramref name="ct"/> cancels the steps up to the disable; once the denied version is
-    /// disabled, the record is kept whatever the token says.
+    /// the record outbox. A rotation the NA refused for good at once is never followed by the disable; one it refuses
+    /// at a later flush leaves the record pending for good, and the change is to be rotated again.
+    /// <paramref name="ct"/> cancels the steps up to the disable; once the denied version is disabled, the record is
+    /// kept whatever the token says.
     /// </summary>
     /// <typeparam name="T">The rotation's value.</typeparam>
     /// <param name="client">The client of the NA, with the operator key that evaluates.</param>
@@ -1135,7 +1155,17 @@ public static partial class Governance
     /// A record outbox is configured and cannot be read (<c>outbox_file_unreadable</c>; a custom outbox throws its own
     /// error): nothing ran.
     /// </exception>
-    /// <exception cref="RemediationNotRecordedException">The rotation ran, and the remediation was not recorded.</exception>
+    /// <exception cref="RemediationNotRecordedException">
+    /// The rotation ran and its evidence is in the NA or the evidence outbox, and the remediation was not recorded:
+    /// what to do next is on the exception.
+    /// </exception>
+    /// <exception cref="GenesisMeshException">
+    /// The rotation's own governed action failed after <see cref="RotateForwardOptions{T}.Rotate"/> ran, as
+    /// <see cref="GovernedAction{T}(GenesisMeshClient, ExecutionRecorder, GovernedActionRequest, Func{BoundaryDecision, CancellationToken, Task{ActionReport{T}?}}, CancellationToken)"/>
+    /// fails: without an evidence outbox, the NA refused its evidence, or did not answer (<see cref="NetworkException"/>),
+    /// or its report holds secret material (<see cref="SecretMaterialException"/>); with one,
+    /// <see cref="EvidenceNotKeptException"/> or <see cref="MetadataRefusedException"/>. Nothing was disabled.
+    /// </exception>
     public static async Task<RotateForwardResult<T>> CancelByRotatingForward<T>(
         GenesisMeshClient client, ExecutionRecorder recorder, RotateForwardOptions<T> options, CancellationToken ct = default)
     {
@@ -1154,9 +1184,13 @@ public static partial class Governance
         if (!string.IsNullOrEmpty(state.State)
             && RemediationRules.NextState(state.State, RemediationEvents.RecordRemediation, state.ReviewPending) is { Allowed: false } refused)
             throw new TransitionRefusedException(refused.Refusal!, refused.Detail);
-        if (string.IsNullOrEmpty(options.DeniedVersionId))
+        var denied = string.IsNullOrEmpty(options.DeniedVersionId) ? state.ChangeVersionId : options.DeniedVersionId;
+        if (string.IsNullOrEmpty(denied))
             throw new OutOfBandRecordException("remediation_malformed", "the denied version is required");
-        if (RemediationRules.SecretProblem(new RemediationRecord { DisabledVersionId = options.DeniedVersionId, Detail = options.Detail }) is { } secret)
+        if (!string.IsNullOrEmpty(state.ChangeVersionId) && denied != state.ChangeVersionId)
+            throw new OutOfBandRecordException("remediation_subject_mismatch",
+                $"the change made version {state.ChangeVersionId}; the denied version cannot be {denied}");
+        if (RemediationRules.SecretProblem(new RemediationRecord { DisabledVersionId = denied, Detail = options.Detail }) is { } secret)
             throw new OutOfBandRecordException("remediation_secret_material", secret);
         var action = rotation.ResourceAction ?? ResourceActions.Rotate;
         if (action is not (ResourceActions.Rotate or ResourceActions.Update))
@@ -1190,12 +1224,17 @@ public static partial class Governance
             return new ActionReport<T> { Value = rotated.Value, ExecutionParameters = parameters };
         }, ct).ConfigureAwait(false);
         if (!result.Authorized) return new RotateForwardResult<T> { Rotation = result };
+        // A rotation the NA refused for good can never be cited: nothing is disabled.
+        if (result.Queued is { State: OutboxStates.DeadLetter } deadLetter)
+            throw new RemediationNotRecordedException(new InvalidOperationException(
+                    $"genesismesh: the rotation's evidence was refused for good ({deadLetter.LastError?.Code}): rotate again"),
+                result.Evidence, result.Value, null, rotationQueued: deadLetter);
 
         var input = subject with
         {
             RotationEvidenceId = result.Evidence!.EvidenceId,
             VersionId = rotated!.VersionId,
-            DisabledVersionId = options.DeniedVersionId,
+            DisabledVersionId = denied,
             Detail = options.Detail,
         };
         try
@@ -1204,12 +1243,14 @@ public static partial class Governance
         }
         catch (Exception e) when (e is OutOfBandRecordException or StrictJsonException)
         {
-            throw new RemediationNotRecordedException(e, result.Evidence, result.Value, null);
+            throw new RemediationNotRecordedException(e, result.Evidence, result.Value, null, rotationQueued: result.Queued);
         }
         RemediationRecord? record = null;
+        var disabled = false;
         try
         {
-            await disable(options.DeniedVersionId, ct).ConfigureAwait(false);
+            await disable(denied, ct).ConfigureAwait(false);
+            disabled = true;
             // Disabled: the record is kept whatever the token says.
             record = await recorder.SignRemediation(input, CancellationToken.None).ConfigureAwait(false);
             if (client.EvidenceStore.RecordOutbox is not null)
@@ -1222,7 +1263,7 @@ public static partial class Governance
         }
         catch (Exception e)
         {
-            throw new RemediationNotRecordedException(e, result.Evidence, result.Value, record);
+            throw new RemediationNotRecordedException(e, result.Evidence, result.Value, record, disabled, result.Queued);
         }
     }
 
@@ -1236,9 +1277,10 @@ public static partial class Governance
     /// does; an ALLOW runs the action under it.</item>
     /// <item>On a DENY, the emergency capability is requested, with the justification in its justification parameter:
     /// the NA decides under the emergency policy before the change, and reviews it after.</item>
-    /// <item>When the NA cannot be reached, times out or answers a 5xx or a 429, the action runs under break-glass naming
-    /// the emergency capability, with the justification parameter in its request parameters, and the NA judges it under
-    /// the emergency policy once it is back.</item>
+    /// <item>When the ordinary evaluation gets no answer, times out or is answered with a 5xx or a 429, the emergency
+    /// capability is evaluated next. When that fails so too, the action runs under break-glass naming the emergency
+    /// capability, with the justification parameter in its request parameters, and the NA judges it under the
+    /// emergency policy once it is back.</item>
     /// </list>
     /// Break-glass needs a record outbox, an attestation basis and a resource; all of it is checked before anything is
     /// evaluated. The emergency capability's decision is verified against

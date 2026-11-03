@@ -304,6 +304,18 @@ public class RemediationLiveTests
             },
             Detail = "rotated forward, then the denied version disabled",
         };
+        // A denied version other than the change's would be disabled, then its record refused for good: refused first.
+        var mismatch = await Assert.ThrowsAsync<OutOfBandRecordException>(() => Governance.CancelByRotatingForward(controller, executor,
+            new RotateForwardOptions<string>
+            {
+                Remediation = due,
+                DeniedVersionId = "v1",
+                Rotation = options.Rotation,
+                Rotate = options.Rotate,
+                Disable = options.Disable,
+            }));
+        Assert.Equal("remediation_subject_mismatch", mismatch.Code);
+        Assert.Empty(disabled);
         var result = await Governance.CancelByRotatingForward(controller, executor, options);
         Assert.True(result.Rotation.Authorized);
         Assert.Equal(["v2"], disabled);

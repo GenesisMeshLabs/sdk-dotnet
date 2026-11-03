@@ -892,7 +892,6 @@ is never rolled back:
 var result = await Governance.CancelByRotatingForward(client, executor, new RotateForwardOptions<string>
 {
     Remediation = due,                                   // from the due queue: remediation_due or overdue
-    DeniedVersionId = due.ChangeVersionId!,
     Rotation = new GovernedActionRequest
     {
         RequestedCapability = "partner-secret.rotate", AttestationId = attestation.AttestationId,
@@ -920,10 +919,21 @@ The state, the plan and the denied version are checked before anything runs:
   (`remediation_not_due`, `remediation_already_recorded`);
 - a plan that is no forward rotation is `remediation_steps_mismatch`.
 
-The record is checked before the denied version is disabled, so a record the
-NA would refuse never follows a disable. Once the rotation has run, a failure
-throws `RemediationNotRecordedException`, with the rotation's evidence and the
-signed record when there is one. Do not rotate again.
+The denied version is the one the change made (`ChangeVersionId`, the
+default): the NA refuses a record that disables another. The record is checked
+before the denied version is disabled, and a rotation whose evidence the NA
+refused for good is never followed by the disable, so a disable is never left
+without a record the NA will take.
+
+Once the rotation's evidence is in the NA or the evidence outbox,
+`RemediationNotRecordedException` says what to do next:
+- `Disabled` false: rotate again when the rotation cannot be cited (its
+  evidence refused for good, or the denied version issued again), or disable
+  and record when the disable failed;
+- `Disabled` true: submit its `Record` once the cause is fixed.
+
+A failure of the rotation's own governed action after it ran throws as
+`GovernedAction` does, before anything is disabled.
 
 `UrgentAction` makes a change that is never blocked and always governed and
 judged:
@@ -943,9 +953,10 @@ var urgent = await Governance.UrgentAction(client, executor, request, new Emerge
 - **On a DENY,** the emergency capability is requested, with the
   justification in its justification parameter. The NA decides under the
   emergency policy, and reviews the change after it.
-- **When the NA cannot be reached,** times out or answers a 5xx or a 429, the
-  action runs under break-glass naming the emergency capability, and the NA
-  judges it once it is back.
+- **When the ordinary evaluation gets no answer,** times out or is answered
+  with a 5xx or a 429, the emergency capability is evaluated next. When that
+  fails so too, the action runs under break-glass naming the emergency
+  capability, and the NA judges it once it is back.
 
 Break-glass needs a record outbox, an attestation basis and a resource: all of
 it is checked before anything is evaluated.

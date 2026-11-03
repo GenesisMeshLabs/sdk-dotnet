@@ -49,6 +49,9 @@ public class RemediationGovernanceTests
         /// <summary>An answer to an evaluation of a capability, instead of a decision.</summary>
         public Dictionary<string, Func<HttpResponseMessage>> Answers { get; } = [];
         public Func<HttpResponseMessage> Remediation { get; set; } = Recorded;
+        public Func<HttpResponseMessage>? Execution { get; set; }
+        public List<string> Paths { get; } = [];
+        public Dictionary<string, Action<JsonObject>> Tamper { get; } = [];
         public List<JsonObject> Evaluated { get; } = [];
         public List<JsonObject> Executions { get; } = [];
         public List<JsonObject> Remediations { get; } = [];
@@ -58,6 +61,7 @@ public class RemediationGovernanceTests
         {
             var path = request.RequestUri!.AbsolutePath;
             var text = request.Content is null ? null : await request.Content.ReadAsStringAsync(CancellationToken.None);
+            Paths.Add(path);
             switch (path)
             {
                 case "/admin/boundary/evaluate":
@@ -68,6 +72,15 @@ public class RemediationGovernanceTests
                     if (Answers.TryGetValue(capability, out var answer)) return answer();
                     var evaluation = Vector(Denied.Contains(capability) ? "denied" : "allowed");
                     var decision = evaluation["decision"]!.AsObject();
+                    if (Tamper.TryGetValue(capability, out var tamper))
+                    {
+                        tamper(decision);
+                        var sorted = new JsonObject();
+                        foreach (var key in decision.Select(kv => kv.Key).OrderBy(k => k, StringComparer.Ordinal).ToList())
+                            sorted[key] = decision[key]?.DeepClone();
+                        evaluation["decision"] = sorted;
+                        decision = sorted;
+                    }
                     decision["context_id"] = (string?)asked["context"]?["context_id"];
                     decision["decision_made_at"] = Canonical.Timestamp(DateTimeOffset.UtcNow.AddSeconds(-1));
                     decision["decision_valid_until"] = Canonical.Timestamp(DateTimeOffset.UtcNow.AddMinutes(1));
@@ -78,6 +91,7 @@ public class RemediationGovernanceTests
                     return Json(200, evaluation.ToJsonString());
                 case "/evidence/execution":
                     Executions.Add(JsonNode.Parse(text!)!["evidence"]!.AsObject());
+                    if (Execution is not null) return Execution();
                     return Json(201, """
                         {"status":"recorded","entry":{"store_sequence":7,"entry_kind":"execution","recorded_at":"2026-10-30T12:00:03Z",
                         "payload_digest":"00","prev_entry_digest":null,"decision_id":null,"context_id":null,"vendor_id":null,
@@ -123,7 +137,7 @@ public class RemediationGovernanceTests
         public List<string> Disabled { get; } = [];
         public List<string> Steps { get; } = [];
 
-        public Setup(bool recordOutbox = true) => Gm = new GenesisMeshClient(new ClientOptions
+        public Setup(bool recordOutbox = true, bool evidenceOutbox = false) => Gm = new GenesisMeshClient(new ClientOptions
         {
             BaseUrl = "http://localhost",
             SigningKey = TestHelpers.ZeroSeedB64,
@@ -132,6 +146,7 @@ public class RemediationGovernanceTests
             Retry = new RetrySettings { Attempts = 0 },
             HttpHandler = new AsyncHandler(Na.Answer),
             RecordOutbox = recordOutbox ? Records : null,
+            Outbox = evidenceOutbox ? new MemoryOutbox<OutboxEntry>() : null,
         });
 
         public static GovernedActionRequest Request(string capability = "sp-secret.rotate", string? resource = null) => new()
@@ -182,7 +197,7 @@ public class RemediationGovernanceTests
             return new RotateForwardOptions<string>
             {
                 Remediation = (RemediationStatus?)o["Remediation"],
-                DeniedVersionId = (string)o["DeniedVersionId"]!,
+                DeniedVersionId = (string?)o["DeniedVersionId"],
                 Rotation = (GovernedActionRequest?)o["Rotation"],
                 Detail = (string?)o["Detail"],
                 Rotate = (_, _) =>
@@ -317,7 +332,6 @@ public class RemediationGovernanceTests
     public async Task WhatTheRecordWouldCarryIsCheckedBeforeAnythingRuns()
     {
         var s = new Setup();
-        Assert.Equal("remediation_malformed", (await Assert.ThrowsAsync<OutOfBandRecordException>(() => s.Cancel(s.Options(o => o["DeniedVersionId"] = "")))).Code);
         Assert.Equal("remediation_secret_material", (await Assert.ThrowsAsync<OutOfBandRecordException>(() =>
             s.Cancel(s.Options(o => o["Detail"] = "the old value -----BEGIN PRIVATE KEY-----")))).Code);
         var unknown = Setup.Due();
@@ -351,6 +365,7 @@ public class RemediationGovernanceTests
         Assert.Equal(("remediation_not_recorded", "remediation_malformed"), (e.Code, ((OutOfBandRecordException)e.InnerException!).Code));
         Assert.NotNull(e.RotationEvidence);
         Assert.Equal("rotated", e.Value);
+        Assert.False(e.Disabled);
         Assert.Null(e.Record);
     }
 
@@ -360,6 +375,7 @@ public class RemediationGovernanceTests
         var s = new Setup();
         var e = await Assert.ThrowsAsync<RemediationNotRecordedException>(() => s.Cancel(s.Options(o => o["DisableThrows"] = new InvalidOperationException("vault busy"))));
         Assert.Equal("vault busy", e.InnerException!.Message);
+        Assert.False(e.Disabled);
         Assert.Null(e.Record);
         Assert.Empty(s.Na.Remediations);
         Assert.Single(s.Na.Executions);
@@ -372,6 +388,7 @@ public class RemediationGovernanceTests
         s.Na.Remediation = () => Error(503, "unavailable");
         var e = await Assert.ThrowsAsync<RemediationNotRecordedException>(() => s.Cancel());
         Assert.Equal(["v2"], s.Disabled);
+        Assert.True(e.Disabled);
         Assert.True(OfflineVerifier.VerifyRemediationRecord(JsonSerializer.Serialize(e.Record!, Auth.SerializerOptions), [NaKey]));
     }
 
@@ -537,5 +554,245 @@ public class RemediationGovernanceTests
         Assert.Equal("break_glass_malformed", (await Assert.ThrowsAsync<OutOfBandRecordException>(() =>
             Urgent(s, new EmergencyOptions { Capability = EmergencyCapability, Justification = "", ExpectedPolicies = [] }))).Code);
         Assert.Empty(s.Na.Evaluated);
+    }
+
+    // ── What each step passes on ───────────────────────────────────────────
+
+    private static GovernedActionRequest Like(GovernedActionRequest r, EvaluationContext? context = null, GovernedVerification? verify = null,
+        string? resource = "kv:v/s", string? action = ResourceActions.Rotate, bool newResource = false) => new()
+        {
+            RequestedCapability = r.RequestedCapability,
+            AttestationId = r.AttestationId,
+            Context = context ?? r.Context,
+            Verify = verify ?? r.Verify,
+            ResourceId = resource,
+            ResourceAction = action,
+            NewResource = newResource,
+        };
+
+    private static Func<BoundaryDecision?, CancellationToken, Task<ActionReport<string>?>> Nothing(List<BoundaryDecision?>? decisions = null) =>
+        (d, _) =>
+        {
+            decisions?.Add(d);
+            return Task.FromResult<ActionReport<string>?>(new ActionReport<string> { Value = "done" });
+        };
+
+    [Fact]
+    public async Task AFailureAfterTheOrdinaryActionRanIsTheCallers()
+    {
+        var s = new Setup();
+        s.Na.Execution = () => Error(503, "service_unavailable");
+        var decisions = new List<BoundaryDecision?>();
+        var e = await Assert.ThrowsAnyAsync<GenesisMeshException>(() =>
+            Governance.UrgentAction(s.Gm, s.Recorder, Setup.Request(resource: "kv:v/s"), Emergency(), Nothing(decisions)));
+        Assert.Equal(503, e.Status);
+        Assert.Single(decisions);
+        Assert.Equal(["sp-secret.rotate"], Capabilities(s));
+    }
+
+    [Fact]
+    public async Task TheEmergencyEvaluationKeepsTheWholeContext()
+    {
+        var s = new Setup();
+        s.Na.Denied.Add("sp-secret.rotate");
+        var r = Setup.Request(resource: "kv:v/s");
+        var context = new EvaluationContext
+        {
+            RequestParameters = r.Context!.RequestParameters,
+            Attributes = r.Context.Attributes,
+            RequesterSovereignId = "requester-a",
+            ProviderSovereignId = "provider-b",
+            ContextId = "ctx-1",
+            ContextFreshnessSeq = 3,
+        };
+        await Governance.UrgentAction(s.Gm, s.Recorder, Like(r, context: context), Emergency(), Nothing());
+        var asked = s.Na.Evaluated[1]["context"]!;
+        Assert.Equal(("team-a", "requester-a", "provider-b", "ctx-1", 3L),
+            ((string)asked["attributes"]!["owner"]!, (string)asked["requester_sovereign_id"]!, (string)asked["provider_sovereign_id"]!,
+             (string)asked["context_id"]!, (long)asked["context_freshness_seq"]!));
+    }
+
+    [Fact]
+    public async Task TheEmergencyDecisionIsVerifiedUnderTheOrdinaryKeyHistory()
+    {
+        var s = new Setup();
+        s.Na.Denied.Add("sp-secret.rotate");
+        var r = Setup.Request(resource: "kv:v/s");
+        var history = new GovernedVerification
+        {
+            KeyHistory = NAKeyHistory.ValidAlways([NaKey]),
+            ExpectedPolicies = r.Verify!.ExpectedPolicies,
+            ExpectedAttestation = r.Verify.ExpectedAttestation,
+        };
+        var result = await Governance.UrgentAction(s.Gm, s.Recorder, Like(r, verify: history), Emergency(), Nothing());
+        Assert.True(result.Outcome.Governed!.Authorized);
+    }
+
+    [Fact]
+    public async Task TheEmergencyDecisionsFreshnessProofIsVerifiedAsAsked()
+    {
+        var s = new Setup();
+        s.Na.Denied.Add("sp-secret.rotate");
+        s.Na.Tamper[EmergencyCapability] = d => d["freshness_proof"] = new JsonObject
+        {
+            ["proof_id"] = "p-1",
+            ["feed_digest"] = null,
+            ["feed_sequence"] = null,
+            ["feed_sovereign_id"] = null,
+            ["issuer_sovereign_id"] = "feed-a",
+            ["attested_at"] = Canonical.Timestamp(DateTimeOffset.UtcNow.AddMinutes(-1)),
+            ["proof_valid_until"] = Canonical.Timestamp(DateTimeOffset.UtcNow.AddDays(1)),
+            ["signature"] = new JsonObject { ["key_id"] = "x", ["sig"] = Convert.ToBase64String(new byte[64]) },
+        };
+        var r = Setup.Request(resource: "kv:v/s");
+        var fresh = new GovernedVerification
+        {
+            OperatorPublicKeys = [NaKey],
+            FreshnessProofIssuerKeys = [NaKey],
+            ExpectedPolicies = r.Verify!.ExpectedPolicies,
+            ExpectedAttestation = r.Verify.ExpectedAttestation,
+        };
+        var decisions = new List<BoundaryDecision?>();
+        var e = await Assert.ThrowsAsync<DecisionVerificationException>(() =>
+            Governance.UrgentAction(s.Gm, s.Recorder, Like(r, verify: fresh), Emergency(), Nothing(decisions)));
+        Assert.Equal("freshness_proof_invalid_signature", e.Code);
+        Assert.Empty(decisions);
+    }
+
+    [Fact]
+    public async Task TheEmergencyChangeKeepsANewResourceNew()
+    {
+        var s = new Setup();
+        s.Na.Denied.Add("sp-secret.rotate");
+        await Governance.UrgentAction(s.Gm, s.Recorder, Like(Setup.Request(), newResource: true), Emergency(), Nothing());
+        Assert.DoesNotContain(s.Na.Paths, p => p.StartsWith("/admin/evidence/resource-heads/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WithoutARecordOutboxOnceDisabledTheRecordIsSubmittedWhateverTheTokenSays()
+    {
+        var s = new Setup(recordOutbox: false);
+        using var cancel = new CancellationTokenSource();
+        var o = s.Options();
+        var cancelling = new RotateForwardOptions<string>
+        {
+            Remediation = o.Remediation,
+            DeniedVersionId = o.DeniedVersionId,
+            Rotation = o.Rotation,
+            Rotate = o.Rotate,
+            Disable = async (version, ct) =>
+            {
+                Assert.True(ct.CanBeCanceled); // the disable gets the caller's token
+                await o.Disable!(version, ct);
+                await cancel.CancelAsync();
+            },
+        };
+        var result = await s.Cancel(cancelling, cancel.Token);
+        Assert.Equal("recorded", result.Submission!.Status);
+    }
+
+    [Fact]
+    public async Task AnUpdateIsRecordedAsAnUpdate()
+    {
+        var s = new Setup();
+        await s.Cancel(s.Options(o => o["Rotation"] = Like(Setup.Request(), resource: null, action: ResourceActions.Update)));
+        Assert.Equal("update", (string)Assert.Single(s.Na.Executions)["resource_action"]!);
+    }
+
+    [Fact]
+    public async Task TheRotationIsEvaluatedWithItsContextAndBasis()
+    {
+        var s = new Setup();
+        await s.Cancel();
+        Assert.Equal("app-1", (string)s.Na.Evaluated[0]["context"]!["request_parameters"]!["app_id"]!);
+        Assert.Equal((string)VectorData.Value["attestation"]!["attestation_id"]!, (string)s.Na.Evaluated[0]["attestation_id"]!);
+    }
+
+    [Fact]
+    public async Task TheIssuedVersionIsTheOneTheEvidenceNames()
+    {
+        var s = new Setup();
+        var o = s.Options();
+        var overriding = new RotateForwardOptions<string>
+        {
+            Remediation = o.Remediation,
+            DeniedVersionId = o.DeniedVersionId,
+            Rotation = o.Rotation,
+            Disable = o.Disable,
+            Rotate = (_, _) => Task.FromResult(new RotatedVersion<string>
+            {
+                VersionId = "v3",
+                ExecutionParameters = new Dictionary<string, object?> { ["version_id"] = "v9" },
+            }),
+        };
+        var result = await s.Cancel(overriding);
+        Assert.Equal("v3", (string)Assert.Single(s.Na.Executions)["execution_parameters"]!["version_id"]!);
+        Assert.Equal("v3", result.Remediation!.VersionId);
+    }
+
+    [Fact]
+    public async Task ARotationOfANewResourceReadsNoHead()
+    {
+        var s = new Setup();
+        await s.Cancel(s.Options(o => o["Rotation"] = Like(Setup.Request(), resource: null, action: null, newResource: true)));
+        Assert.DoesNotContain(s.Na.Paths, p => p.StartsWith("/admin/evidence/resource-heads/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ARotateThatReturnsNoVersionIsAFailedAction()
+    {
+        var s = new Setup();
+        var o = s.Options();
+        var none = new RotateForwardOptions<string>
+        {
+            Remediation = o.Remediation,
+            DeniedVersionId = o.DeniedVersionId,
+            Rotation = o.Rotation,
+            Disable = o.Disable,
+            Rotate = (_, _) => Task.FromResult<RotatedVersion<string>>(null!),
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => s.Cancel(none));
+        Assert.Equal("failure", (string)Assert.Single(s.Na.Executions)["outcome"]!);
+        Assert.Empty(s.Disabled);
+    }
+
+    // ── A disable is never left without a record the NA will take ──────────
+
+    [Fact]
+    public async Task ARotationWhoseEvidenceIsADeadLetterIsNotFollowedByTheDisable()
+    {
+        var s = new Setup(evidenceOutbox: true);
+        s.Na.Execution = () => Error(409, "evidence_chain_mismatch");
+        var e = await Assert.ThrowsAsync<RemediationNotRecordedException>(() => s.Cancel());
+        Assert.Equal(OutboxStates.DeadLetter, e.RotationQueued!.State);
+        Assert.Contains("evidence_chain_mismatch", e.InnerException!.Message, StringComparison.Ordinal);
+        Assert.False(e.Disabled);
+        Assert.Null(e.Record);
+        Assert.Empty(s.Disabled);
+        Assert.Empty(s.Na.Remediations);
+    }
+
+    [Fact]
+    public async Task TheDeniedVersionIsTheOneTheChangeMade()
+    {
+        var s = new Setup();
+        var e = await Assert.ThrowsAsync<OutOfBandRecordException>(() => s.Cancel(s.Options(o => o["DeniedVersionId"] = "v1")));   // the state says v2
+        Assert.Equal("remediation_subject_mismatch", e.Code);
+        await s.NothingRan();
+        var result = await s.Cancel(s.Options(o => o["DeniedVersionId"] = null));
+        Assert.Equal(["v2"], s.Disabled);
+        Assert.Equal("v2", result.Remediation!.DisabledVersionId);
+    }
+
+    [Fact]
+    public async Task AStateWithoutTheChangesVersionTakesTheOneGiven()
+    {
+        var s = new Setup();
+        var unversioned = Setup.Due();
+        unversioned.ChangeVersionId = null;
+        var result = await s.Cancel(s.Options(o => { o["Remediation"] = unversioned; o["DeniedVersionId"] = "v1"; }));
+        Assert.Equal("v1", result.Remediation!.DisabledVersionId);
+        var e = await Assert.ThrowsAsync<OutOfBandRecordException>(() => s.Cancel(s.Options(o => { o["Remediation"] = unversioned; o["DeniedVersionId"] = ""; })));
+        Assert.Equal("remediation_malformed", e.Code);
     }
 }
