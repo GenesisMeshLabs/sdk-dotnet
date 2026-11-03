@@ -63,7 +63,7 @@ jobs:
           --file KeyHistory.cs=94 --file Grants.cs=100 --file Transport.cs=97 --file Metadata.cs=96
           --file Execution.cs=98 --file Clients/EvidenceStoreClient.cs=100
           --file Governance.cs=99 --file Outbox.cs=97
-          --file OutOfBand.cs=100 --file OutOfBandVerification.cs=100 --file Clients/EvidenceStoreRecordOutbox.cs=100
+          --file OutOfBand.cs=100 --file OutOfBandVerification.cs=100 --file Clients/EvidenceStoreRecordOutbox.cs=100 --file Remediation.cs=100
 
       # Package validation: the public API against the baseline release in
       # the csproj; a removed or changed member fails (see the "API

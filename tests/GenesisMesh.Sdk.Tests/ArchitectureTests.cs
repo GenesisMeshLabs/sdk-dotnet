@@ -32,6 +32,7 @@ public partial class ArchitectureTests
         ("Grants.cs", "verify"),
         ("Vouching.cs", "verify"),
         ("Metadata.cs", "verify"),
+        ("Remediation.cs", "verify"),
         ("Models.cs", "models"),
         ("Errors.cs", "errors"),
         ("Auth.cs", "auth"),

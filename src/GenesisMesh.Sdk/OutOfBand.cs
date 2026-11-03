@@ -269,9 +269,94 @@ public sealed class BreakGlassInput
     public IDictionary<string, object?>? ExecutionParameters { get; init; }
 }
 
+/// <summary>
+/// What <see cref="ExecutionRecorder.SignRemediation"/> records (1.9.0): what a controller did about a change whose
+/// remediation the NA made due. The subject, change and resource come from the change's remediation state.
+/// </summary>
+public sealed class RemediationInput
+{
+    /// <summary>A value of <see cref="RemediationSubjectKinds"/>. Required.</summary>
+    public string SubjectKind { get; init; } = "";
+
+    /// <summary>The judgement (or decision) that made the remediation due. Required.</summary>
+    public string SubjectId { get; init; } = "";
+
+    /// <summary>A value of <see cref="ChangeKinds"/>. Required.</summary>
+    public string ChangeKind { get; init; } = "";
+
+    /// <summary>The record of the change: the observation, break-glass record or execution evidence. Required.</summary>
+    public string ChangeId { get; init; } = "";
+
+    /// <summary>The resource: an identifier, never a value. Required.</summary>
+    public string ResourceId { get; init; } = "";
+
+    /// <summary>A value of <see cref="RemediationSteps"/>. Required.</summary>
+    public string Steps { get; init; } = "";
+
+    /// <summary>A value of <see cref="RemediationOutcomes"/>; default <c>alerted</c> for steps <c>none</c>, <c>cancelled</c> otherwise.</summary>
+    public string? Outcome { get; init; }
+
+    /// <summary>For a forward rotation: its execution evidence, stored first.</summary>
+    public string? RotationEvidenceId { get; init; }
+
+    /// <summary>For a forward rotation: the version it issued.</summary>
+    public string? VersionId { get; init; }
+
+    /// <summary>The version disabled or deleted.</summary>
+    public string? DisabledVersionId { get; init; }
+
+    /// <summary>When it was done; default now.</summary>
+    public DateTimeOffset? RemediatedAt { get; init; }
+
+    /// <summary>Up to 1024 characters; no secret material.</summary>
+    public string? Detail { get; init; }
+
+    /// <summary>The record's ID; default a new UUID.</summary>
+    public string? RemediationId { get; init; }
+}
+
 /// <summary>Building, checking and signing records of changes outside the governed path.</summary>
 internal static class OutOfBandRecords
 {
+    /// <summary>The unsigned remediation record for <paramref name="input"/>.</summary>
+    public static RemediationRecord RemediationOf(RemediationInput input, string executorSovereignId)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        return new RemediationRecord
+        {
+            RemediationId = input.RemediationId ?? Guid.NewGuid().ToString(),
+            ExecutorSovereignId = executorSovereignId,
+            SubjectKind = input.SubjectKind,
+            SubjectId = input.SubjectId,
+            ChangeKind = input.ChangeKind,
+            ChangeId = input.ChangeId,
+            ResourceId = input.ResourceId,
+            Outcome = input.Outcome ?? (input.Steps == RemediationSteps.None ? RemediationOutcomes.Alerted : RemediationOutcomes.Cancelled),
+            Steps = input.Steps,
+            RotationEvidenceId = input.RotationEvidenceId,
+            VersionId = input.VersionId,
+            DisabledVersionId = input.DisabledVersionId,
+            RemediatedAt = Canonical.Timestamp(input.RemediatedAt ?? DateTimeOffset.UtcNow),
+            Detail = input.Detail,
+        };
+    }
+
+    /// <summary>
+    /// Throws what the NA would refuse an unsigned remediation record for, in its order: a value it could not read
+    /// (<see cref="StrictJsonException"/>), a record its model does not take (<c>remediation_malformed</c>: a field
+    /// missing, empty, too long or of another type, or steps that do not fit the outcome and versions), then secret
+    /// material in its versions or detail (<c>remediation_secret_material</c>). Returns the record as it is signed.
+    /// </summary>
+    public static JsonElement CheckRemediation(RemediationRecord record)
+    {
+        var unsigned = Signable(record);
+        if (!OfflineVerifier.ValidOutOfBand("RemediationRecord", unsigned))
+            throw new OutOfBandRecordException("remediation_malformed", OfflineVerifier.RemediationStepsProblem(unsigned)
+                ?? "the record does not match the RemediationRecord model (a field missing, empty, too long or of another type)");
+        if (RemediationRules.SecretProblem(record) is { } secret) throw new OutOfBandRecordException("remediation_secret_material", secret);
+        return unsigned;
+    }
+
     /// <summary>The reference's limits on a break-glass record's justification and outcome detail, in characters.</summary>
     private const int MaxJustification = 1024;
     private const int MaxOutcomeDetail = 1024;

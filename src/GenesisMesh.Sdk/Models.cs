@@ -3775,6 +3775,450 @@ internal sealed class RecordBatchResult
     public RecordRefusal? Error { get; set; }
 }
 
+// ── Remediation and reviews (1.9.0) ───────────────────────────────────────────
+
+/// <summary>
+/// One gate's evaluation, as a decision's or judgement's policy binding lists it (<c>gate_evaluations</c>): what
+/// <see cref="RemediationRules.Plan"/> reads the failing gates from.
+/// </summary>
+public sealed class PolicyGateEvaluation
+{
+    /// <summary>The policy the gate belongs to.</summary>
+    [JsonPropertyName("policy_id")]
+    public string PolicyId { get; set; } = "";
+
+    /// <summary>The policy's version.</summary>
+    [JsonPropertyName("policy_version")]
+    public int PolicyVersion { get; set; }
+
+    /// <summary>The gate's ID within the policy.</summary>
+    [JsonPropertyName("gate_id")]
+    public string GateId { get; set; } = "";
+
+    /// <summary>The gate's type.</summary>
+    [JsonPropertyName("gate_type")]
+    public string GateType { get; set; } = "";
+
+    /// <summary>The gate's position.</summary>
+    [JsonPropertyName("order")]
+    public int Order { get; set; }
+
+    /// <summary><c>enforce</c> or <c>observe</c>.</summary>
+    [JsonPropertyName("mode")]
+    public string Mode { get; set; } = "";
+
+    /// <summary>True when the gate passed.</summary>
+    [JsonPropertyName("passed")]
+    public bool Passed { get; set; }
+
+    /// <summary><c>pass</c>, <c>fail</c>, <c>missing_context</c>, <c>invalid_context</c> or <c>gate_error</c>.</summary>
+    [JsonPropertyName("outcome")]
+    public string Outcome { get; set; } = "";
+}
+
+/// <summary>What a remediation or review is about (<see cref="RemediationRecord.SubjectKind"/>).</summary>
+public static class RemediationSubjectKinds
+{
+    /// <summary>A judgement of a change outside the governed path.</summary>
+    public const string Judgement = "judgement";
+    /// <summary>A decision under a policy that requires review.</summary>
+    public const string Decision = "decision";
+}
+
+/// <summary>The record of the change a remediation acts on (<see cref="RemediationRecord.ChangeKind"/>).</summary>
+public static class ChangeKinds
+{
+    /// <summary>An observation.</summary>
+    public const string Observation = "observation";
+    /// <summary>A break-glass record.</summary>
+    public const string BreakGlass = "break_glass";
+    /// <summary>Execution evidence.</summary>
+    public const string Execution = "execution";
+}
+
+/// <summary>What a controller did about a judged change (<see cref="RemediationRecord.Steps"/>).</summary>
+public static class RemediationSteps
+{
+    /// <summary>A new version issued under a governed decision, then the denied version disabled.</summary>
+    public const string RotateForwardThenDisable = "rotate_forward_then_disable";
+    /// <summary>The resource disabled (one nothing reads yet).</summary>
+    public const string Disable = "disable";
+    /// <summary>The resource deleted: a controller may carry out a planned <see cref="Disable"/> so.</summary>
+    public const string Delete = "delete";
+    /// <summary>Nothing changed: the remediation alerted.</summary>
+    public const string None = "none";
+}
+
+/// <summary>The outcome of a remediation (<see cref="RemediationRecord.Outcome"/>).</summary>
+public static class RemediationOutcomes
+{
+    /// <summary>The change was cancelled.</summary>
+    public const string Cancelled = "cancelled";
+    /// <summary>The change stands; its author was told.</summary>
+    public const string Alerted = "alerted";
+}
+
+/// <summary>What a denied change leads to, as the NA states it (<see cref="RemediationPlan.Mode"/>).</summary>
+public static class RemediationModes
+{
+    /// <summary>The controller cancels the change once the grace has passed.</summary>
+    public const string Cancel = "cancel";
+    /// <summary>The denial is recorded and its author told; nothing is changed.</summary>
+    public const string AlertOnly = "alert_only";
+}
+
+/// <summary>Why a <c>cancel</c> fell back to <c>alert_only</c> (<see cref="RemediationPlan.Fallback"/>).</summary>
+public static class RemediationFallbacks
+{
+    /// <summary>The change names no version to rotate past.</summary>
+    public const string NotVersioned = "not_versioned";
+    /// <summary>The record of the change says the resource cannot be rotated.</summary>
+    public const string NotRotatable = "not_rotatable";
+    /// <summary>A revocation or deletion: cancelling it would restore something.</summary>
+    public const string NotReversible = "not_reversible";
+    /// <summary>The judgement was indeterminate, which always alerts.</summary>
+    public const string Indeterminate = "indeterminate";
+    /// <summary>A decision never executed: there is nothing to cancel.</summary>
+    public const string NotExecuted = "not_executed";
+}
+
+/// <summary>Where a plan's guidance came from (<see cref="RemediationPlan.Source"/>).</summary>
+public static class GuidanceSources
+{
+    /// <summary>The guidance of an enforce-mode gate that failed.</summary>
+    public const string Gate = "gate";
+    /// <summary>The <c>"*"</c> guidance of a policy that applied.</summary>
+    public const string Policy = "policy";
+    /// <summary>The NA's defaults.</summary>
+    public const string Default = "default";
+}
+
+/// <summary>A second holder's verdict (<see cref="ReviewRecord.Verdict"/>).</summary>
+public static class ReviewVerdicts
+{
+    /// <summary>The change stands.</summary>
+    public const string Uphold = "uphold";
+    /// <summary>Remediation becomes due.</summary>
+    public const string Deny = "deny";
+    /// <summary>The change stands until <see cref="ReviewRecord.WaiveUntil"/>.</summary>
+    public const string WaiveUntil = "waive_until";
+}
+
+/// <summary>Why a review was opened (<see cref="ReviewRecord.OpenedFor"/>).</summary>
+public static class ReviewOpenedFor
+{
+    /// <summary>An operator asked for it.</summary>
+    public const string Requested = "requested";
+    /// <summary>The judgement was flagged for review.</summary>
+    public const string FlaggedForReview = "flagged_for_review";
+    /// <summary>The policy requires review of every change it allows.</summary>
+    public const string ReviewRequired = "review_required";
+}
+
+/// <summary>
+/// The states of a change in the NA's remediation table (<see cref="RemediationRules.NextState"/>). A change enters from its
+/// judgement's state (<see cref="JudgedDenied"/>, <see cref="JudgedAllowed"/>, <see cref="Indeterminate"/>,
+/// <see cref="Matched"/>), or <see cref="Recorded"/> for a governed change under a policy that requires review. A
+/// pending review is not a state but a flag beside it: it stops no clock.
+/// </summary>
+public static class RemediationStates
+{
+    /// <summary>Judged DENY: armed at once.</summary>
+    public const string JudgedDenied = "judged_denied";
+    /// <summary>Judged ALLOW after the fact.</summary>
+    public const string JudgedAllowed = "judged_allowed";
+    /// <summary>Judged INDETERMINATE: armed at once, and it always alerts.</summary>
+    public const string Indeterminate = "indeterminate";
+    /// <summary>Matched to a governed decision's execution (or, from 1.6.0, a grant use).</summary>
+    public const string Matched = "matched";
+    /// <summary>A governed change under a policy that requires review.</summary>
+    public const string Recorded = "recorded";
+    /// <summary>A remediation is due by <c>remediation_due_at</c>.</summary>
+    public const string RemediationDue = "remediation_due";
+    /// <summary>The remediation is past its due time.</summary>
+    public const string Overdue = "overdue";
+    /// <summary>The remediation is recorded.</summary>
+    public const string Remediated = "remediated";
+    /// <summary>A review upheld the change.</summary>
+    public const string Upheld = "upheld";
+    /// <summary>A review waived the remediation until a time.</summary>
+    public const string Waived = "waived";
+    /// <summary>A review denied the change: passed through at once, on the way to <see cref="RemediationDue"/>.</summary>
+    public const string ReviewDenied = "review_denied";
+
+    /// <summary>An allowed change a remediation state concerns: under review, or with a lifetime running.</summary>
+    public static IReadOnlyList<string> Standing { get; } = [JudgedAllowed, Matched, Recorded];
+
+    /// <summary>The states in which something is still to happen.</summary>
+    public static IReadOnlyList<string> Open { get; } = [RemediationDue, Overdue, Waived];
+
+    /// <summary>
+    /// The states the NA keeps for a change: every state but the three a change leaves at once (<see cref="JudgedDenied"/>
+    /// and <see cref="Indeterminate"/> are armed, <see cref="ReviewDenied"/> passed through).
+    /// </summary>
+    public static IReadOnlyList<string> Kept { get; } = [JudgedAllowed, Matched, Recorded, RemediationDue, Overdue, Remediated, Upheld, Waived];
+}
+
+/// <summary>What moves a change from one state to the next (<see cref="RemediationRules.NextState"/>).</summary>
+public static class RemediationEvents
+{
+    /// <summary>A denied or indeterminate change, or a review's denial, makes remediation due.</summary>
+    public const string Arm = "arm";
+    /// <summary>A review is opened: the flag is set, the state stays.</summary>
+    public const string OpenReview = "open_review";
+    /// <summary>The due time passed.</summary>
+    public const string DuePassed = "due_passed";
+    /// <summary>A remediation record was stored.</summary>
+    public const string RecordRemediation = "record_remediation";
+    /// <summary>The pending review upheld the change.</summary>
+    public const string Uphold = "uphold";
+    /// <summary>The pending review denied it.</summary>
+    public const string Deny = "deny";
+    /// <summary>The pending review waived it until a time.</summary>
+    public const string Waive = "waive";
+    /// <summary>The waiver ended.</summary>
+    public const string WaiverExpired = "waiver_expired";
+    /// <summary>An emergency change's lifetime ended.</summary>
+    public const string LifetimeEnded = "lifetime_ended";
+}
+
+/// <summary>
+/// What a controller did about a judged change (Python <c>RemediationRecord</c>, v1.4.0), signed by the executor key
+/// that carried it out (<see cref="ExecutionRecorder.SignRemediation"/>). Every field but the signature is signed;
+/// absent optional fields are left out, never null.
+/// </summary>
+public sealed class RemediationRecord
+{
+    /// <summary>The record's ID (a UUID).</summary>
+    [JsonPropertyName("remediation_id")]
+    public string RemediationId { get; set; } = "";
+
+    /// <summary>The sovereign that acted; its executor key signs the record.</summary>
+    [JsonPropertyName("executor_sovereign_id")]
+    public string ExecutorSovereignId { get; set; } = "";
+
+    /// <summary>A value of <see cref="RemediationSubjectKinds"/>.</summary>
+    [JsonPropertyName("subject_kind")]
+    public string SubjectKind { get; set; } = "";
+
+    /// <summary>The judgement (or decision) that made the remediation due.</summary>
+    [JsonPropertyName("subject_id")]
+    public string SubjectId { get; set; } = "";
+
+    /// <summary>A value of <see cref="ChangeKinds"/>.</summary>
+    [JsonPropertyName("change_kind")]
+    public string ChangeKind { get; set; } = "";
+
+    /// <summary>The record of the change: the observation, break-glass record or execution evidence.</summary>
+    [JsonPropertyName("change_id")]
+    public string ChangeId { get; set; } = "";
+
+    /// <summary>The resource: an identifier, never a value.</summary>
+    [JsonPropertyName("resource_id")]
+    public string ResourceId { get; set; } = "";
+
+    /// <summary>A value of <see cref="RemediationOutcomes"/>: <c>alerted</c> exactly when <see cref="Steps"/> is <c>none</c>.</summary>
+    [JsonPropertyName("outcome")]
+    public string Outcome { get; set; } = "";
+
+    /// <summary>A value of <see cref="RemediationSteps"/>.</summary>
+    [JsonPropertyName("steps")]
+    public string Steps { get; set; } = "";
+
+    /// <summary>For a forward rotation: its execution evidence, stored first.</summary>
+    [JsonPropertyName("rotation_evidence_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RotationEvidenceId { get; set; }
+
+    /// <summary>For a forward rotation: the version it issued.</summary>
+    [JsonPropertyName("version_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? VersionId { get; set; }
+
+    /// <summary>The version disabled or deleted (never with steps <c>none</c>).</summary>
+    [JsonPropertyName("disabled_version_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisabledVersionId { get; set; }
+
+    /// <summary>When it was done.</summary>
+    [JsonPropertyName("remediated_at")]
+    public string RemediatedAt { get; set; } = "";
+
+    /// <summary>Up to 1024 characters; no secret material.</summary>
+    [JsonPropertyName("detail")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Detail { get; set; }
+
+    /// <summary>The executor's signature, <c>{"key_id", "sig"}</c>, over the record without it.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
+/// <summary>
+/// An operator's signed admin request, kept whole in a review (Python <c>AdminApproval</c>, v1.4.0; signature version
+/// 2): the fields of the payload the operator signed, the signature it sent, and the operator's public key as the NA
+/// held it. The timestamp is kept as sent, since the signature covers its exact text.
+/// </summary>
+public sealed class AdminApproval
+{
+    /// <summary>The operator key.</summary>
+    [JsonPropertyName("key_id")]
+    public string KeyId { get; set; } = "";
+
+    /// <summary>The operator key's public key, base64.</summary>
+    [JsonPropertyName("public_key")]
+    public string PublicKey { get; set; } = "";
+
+    /// <summary>The request's method.</summary>
+    [JsonPropertyName("method")]
+    public string Method { get; set; } = "";
+
+    /// <summary>The request's path.</summary>
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = "";
+
+    /// <summary>The request's query parameters.</summary>
+    [JsonPropertyName("query")]
+    public IDictionary<string, IList<string>> Query { get; set; } = new Dictionary<string, IList<string>>();
+
+    /// <summary>The NA's public key: the request's audience.</summary>
+    [JsonPropertyName("audience")]
+    public string Audience { get; set; } = "";
+
+    /// <summary>The request's body (an object), as signed.</summary>
+    [JsonPropertyName("body")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Body { get; set; }
+
+    /// <summary>The timestamp the operator signed, as sent.</summary>
+    [JsonPropertyName("timestamp")]
+    public string Timestamp { get; set; } = "";
+
+    /// <summary>The nonce the operator signed.</summary>
+    [JsonPropertyName("nonce")]
+    public string Nonce { get; set; } = "";
+
+    /// <summary>The operator's signature over the request (<c>X-Admin-Signature</c>).</summary>
+    [JsonPropertyName("admin_signature")]
+    public string AdminSignature { get; set; } = "";
+}
+
+/// <summary>
+/// A second holder's verdict on a judged change or a decision (Python <c>ReviewRecord</c>, v1.4.0), signed by the NA,
+/// with the operators' signed requests embedded so the approval verifies offline
+/// (<see cref="RemediationRules.ReviewApprovalProblem"/>). Absent optional fields are left out, never null.
+/// </summary>
+public sealed class ReviewRecord
+{
+    /// <summary>The review's ID.</summary>
+    [JsonPropertyName("review_id")]
+    public string ReviewId { get; set; } = "";
+
+    /// <summary>A value of <see cref="RemediationSubjectKinds"/>.</summary>
+    [JsonPropertyName("subject_kind")]
+    public string SubjectKind { get; set; } = "";
+
+    /// <summary>The judgement or decision reviewed.</summary>
+    [JsonPropertyName("subject_id")]
+    public string SubjectId { get; set; } = "";
+
+    /// <summary>SHA-256 hex of the subject entry's stored payload.</summary>
+    [JsonPropertyName("subject_digest")]
+    public string SubjectDigest { get; set; } = "";
+
+    /// <summary>The resource, when the subject names one.</summary>
+    [JsonPropertyName("resource_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourceId { get; set; }
+
+    /// <summary>The capability, when the subject names one.</summary>
+    [JsonPropertyName("capability")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Capability { get; set; }
+
+    /// <summary>A value of <see cref="ReviewOpenedFor"/>.</summary>
+    [JsonPropertyName("opened_for")]
+    public string OpenedFor { get; set; } = "";
+
+    /// <summary>For a requested review: the requester's operator key.</summary>
+    [JsonPropertyName("requested_by")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RequestedBy { get; set; }
+
+    /// <summary>For a requested review: the requester's holder.</summary>
+    [JsonPropertyName("requester_holder")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RequesterHolder { get; set; }
+
+    /// <summary>For a requested review: why it was asked for.</summary>
+    [JsonPropertyName("justification")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Justification { get; set; }
+
+    /// <summary>For a requested review: the requester's signed request.</summary>
+    [JsonPropertyName("request_approval")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AdminApproval? RequestApproval { get; set; }
+
+    /// <summary>When the review was opened.</summary>
+    [JsonPropertyName("requested_at")]
+    public string RequestedAt { get; set; } = "";
+
+    /// <summary>The change's actor as the source reported it (not authenticated).</summary>
+    [JsonPropertyName("actor")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Actor { get; set; }
+
+    /// <summary>The holder the NA mapped the actor to.</summary>
+    [JsonPropertyName("actor_holder")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ActorHolder { get; set; }
+
+    /// <summary>A value of <see cref="ReviewVerdicts"/>.</summary>
+    [JsonPropertyName("verdict")]
+    public string Verdict { get; set; } = "";
+
+    /// <summary>Present exactly for a waiver: after <see cref="DecidedAt"/>, at most 90 days later.</summary>
+    [JsonPropertyName("waive_until")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WaiveUntil { get; set; }
+
+    /// <summary>The decider's note.</summary>
+    [JsonPropertyName("note")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Note { get; set; }
+
+    /// <summary>The decider's operator key.</summary>
+    [JsonPropertyName("decided_by")]
+    public string DecidedBy { get; set; } = "";
+
+    /// <summary>The decider's holder.</summary>
+    [JsonPropertyName("decider_holder")]
+    public string DeciderHolder { get; set; } = "";
+
+    /// <summary>The decider's signed request.</summary>
+    [JsonPropertyName("approval")]
+    public AdminApproval Approval { get; set; } = new();
+
+    /// <summary>When it was decided.</summary>
+    [JsonPropertyName("decided_at")]
+    public string DecidedAt { get; set; } = "";
+
+    /// <summary>The NA's sovereign.</summary>
+    [JsonPropertyName("issuer_sovereign_id")]
+    public string IssuerSovereignId { get; set; } = "";
+
+    /// <summary>The NA key that signed it.</summary>
+    [JsonPropertyName("issued_by")]
+    public string IssuedBy { get; set; } = "";
+
+    /// <summary>The NA's signature, <c>{"key_id", "sig"}</c>, over the record without it.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
 // ── The evidence outbox (1.9.0) ───────────────────────────────────────────────
 
 /// <summary>The states of an outbox entry (<see cref="OutboxEntry.State"/>).</summary>
