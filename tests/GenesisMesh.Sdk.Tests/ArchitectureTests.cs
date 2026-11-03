@@ -29,6 +29,7 @@ public partial class ArchitectureTests
         ("EvidenceVerification.cs", "verify"),
         ("Anchors.cs", "verify"),
         ("AuditPack.cs", "verify"),
+        ("AuditPackVerification.cs", "verify"),
         ("OutOfBandVerification.cs", "verify"),
         ("KeyHistory.cs", "verify"),
         ("Grants.cs", "verify"),

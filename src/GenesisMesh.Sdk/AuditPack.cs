@@ -397,8 +397,55 @@ public static partial class OfflineVerifier
         { ValueKind: JsonValueKind.True } => "True",
         { ValueKind: JsonValueKind.False } => "False",
         { ValueKind: JsonValueKind.String } v => v.GetString()!,
-        { } v => v.GetRawText(),
+        // An int in decimal (-0 is 0), a float as Python writes it (1e2 is 100.0).
+        { ValueKind: JsonValueKind.Number } v => v.GetRawText() is "-0" ? "0" : Canonical.NumberLiteral(v.GetRawText()),
+        { } v => PythonRepr(v),
     };
+
+    /// <summary>Python's <c>repr()</c> of a value read from JSON: what <c>str()</c> writes of a list or a dict.</summary>
+    private static string PythonRepr(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => PythonStringRepr(value.GetString()!),
+        JsonValueKind.Array => "[" + string.Join(", ", value.EnumerateArray().Select(PythonRepr)) + "]",
+        JsonValueKind.Object => "{" + string.Join(", ", value.EnumerateObject().Select(p => PythonStringRepr(p.Name) + ": " + PythonRepr(p.Value))) + "}",
+        _ => PythonStr(value),
+    };
+
+    /// <summary>
+    /// Python's <c>repr()</c> of a string: in single quotes (double when it holds a single quote and no double one),
+    /// with a backslash, the quote, tab, line feed and return escaped, and any other character Python does not print
+    /// written <c>\xhh</c>, <c>\uhhhh</c> or <c>\Uhhhhhhhh</c>.
+    /// </summary>
+    private static string PythonStringRepr(string s)
+    {
+        var quote = s.Contains('\'') && !s.Contains('"') ? '"' : '\'';
+        var sb = new StringBuilder().Append(quote);
+        for (var i = 0; i < s.Length; i++)
+        {
+            int code = s[i];
+            if (char.IsHighSurrogate(s[i]) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1])) code = char.ConvertToUtf32(s[i], s[++i]);
+            if (code == quote || code == '\\') sb.Append('\\').Append((char)code);
+            else if (code == '\t') sb.Append(@"\t");
+            else if (code == '\n') sb.Append(@"\n");
+            else if (code == '\r') sb.Append(@"\r");
+            else if (code is < 0x20 or 0x7f || (code > 0x7f && !PythonPrintable(code)))
+                sb.Append(code switch
+                {
+                    <= 0xff => @"\x" + code.ToString("x2", CultureInfo.InvariantCulture),
+                    <= 0xffff => @"\u" + code.ToString("x4", CultureInfo.InvariantCulture),
+                    _ => @"\U" + code.ToString("x8", CultureInfo.InvariantCulture),
+                });
+            else sb.Append(char.ConvertFromUtf32(code));
+        }
+        return sb.Append(quote).ToString();
+    }
+
+    /// <summary>Python's <c>str.isprintable()</c> of one character: not a control, format, surrogate, private-use, unassigned or separator one.</summary>
+    private static bool PythonPrintable(int code) =>
+        code is < 0xd800 or > 0xdfff
+        && CharUnicodeInfo.GetUnicodeCategory(code) is not (UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.Surrogate
+            or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned or UnicodeCategory.LineSeparator
+            or UnicodeCategory.ParagraphSeparator or UnicodeCategory.SpaceSeparator);
 
     private static JsonElement? Member(JsonElement obj, string name) =>
         obj.ValueKind == JsonValueKind.Object && obj.TryGetProperty(name, out var v) ? v : null;

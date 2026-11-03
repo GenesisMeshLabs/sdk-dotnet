@@ -288,9 +288,50 @@ public static partial class OfflineVerifier
             ("anchored_at", Utc), ("previous_anchor_digest", Absent(Text)), ("issued_by", Text), ("signature", Optional(Signature)),
         ], exact: true);
 
+        // An audit pack's manifest, and what a verifier reads of the records a pack carries outside the store.
+        private static readonly Check PackFileFields = Shape([("path", Bounded(256)), ("sha256", Sha256), ("bytes", NonNegative)], exact: true);
+
+        private static readonly Check ManifestFields = Shape(
+        [
+            ("format", Filled(OneOf(PackFormat))), ("format_version", Filled(v => v is { } e && PayloadInteger(e) == PackFormatVersion)),
+            ("pack_id", Filled(Bounded(128))), ("sovereign_id", Bounded(256)), ("created_at", Utc), ("requested_by", Absent(Bounded(256))),
+            ("from_sequence", Positive), ("through_sequence", Positive), ("start_anchor_sequence", Absent(Positive)),
+            ("end_anchor_sequence", Positive), ("period_from", Absent(Utc)), ("period_until", Absent(Utc)), ("files", ListOf(PackFileFields)),
+            ("issued_by", Text), ("signature", Optional(Signature)),
+        ], exact: true);
+
+        private static readonly Check PolicyRecordFields = Shape(
+        [
+            ("policy_id", Text), ("version", Positive), ("valid_from", Time), ("valid_until", Time), ("issued_at", Time),
+            ("issued_by", Text), ("issuer_sovereign_id", Text), ("signature", Optional(Signature)),
+        ]);
+
+        private static readonly Check AttestationRecordFields = Shape(
+        [
+            ("attestation_id", Text), ("issuer_sovereign_id", Text), ("subject_id", Text), ("issued_at", Time), ("valid_from", Time),
+            ("expires_at", Time), ("issued_by", Text), ("signatures", Filled(Signatures)),
+        ]);
+
+        private static readonly Check TreatyFields = Shape(
+        [
+            ("treaty_id", Text), ("issuer_sovereign_id", Text), ("subject_sovereign_id", Text), ("subject_public_keys", ListOf(Text)),
+            ("issued_at", Time), ("valid_from", Time), ("expires_at", Time), ("issued_by", Text), ("signatures", Filled(Signatures)),
+        ]);
+
+        private static readonly Check FeedFields = Shape(
+        [
+            ("feed_id", Text), ("issuer_sovereign_id", Text), ("sequence", NonNegative), ("issued_at", Time), ("issued_by", Text),
+            ("signatures", Filled(Signatures)),
+        ]);
+
         public static bool Anchor(JsonElement value) => AnchorFields(value);
         public static bool KeySuccession(JsonElement value) => KeySuccessionFields(value);
         public static bool Archive(JsonElement value) => ArchiveFields(value);
+        public static bool Manifest(JsonElement value) => ManifestFields(value);
+        public static bool PolicyRecord(JsonElement value) => PolicyRecordFields(value);
+        public static bool AttestationRecord(JsonElement value) => AttestationRecordFields(value);
+        public static bool Treaty(JsonElement value) => TreatyFields(value);
+        public static bool Feed(JsonElement value) => FeedFields(value);
 
         public static bool BreakGlass(JsonElement value) => BreakGlassFields(value);
         public static bool Judgement(JsonElement value) => JudgementFields(value);

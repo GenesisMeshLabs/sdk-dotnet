@@ -1476,6 +1476,51 @@ var report = OfflineVerifier.CheckCompleteness(changes, rangeEntries, citedEntri
   one change.
 - It runs the shared `audit` suite's `changes_file` and `completeness` vectors.
 
+### Audit packs
+
+An audit pack is one range of the evidence store between two anchors, with
+everything its records cite, the NA's key history and a manifest the NA signs
+(protocol 1.5.0). An auditor verifies it offline, with no network and no
+private key, from what they hold themselves: the root public key and their
+copies of the anchors (1.9.0, as the reference's `verify_audit_pack`):
+
+```csharp
+var files = OfflineVerifier.ReadAuditPackDirectory("pack/");   // or AuditPackFiles(the NA's answer)
+var result = OfflineVerifier.VerifyAuditPack(files, new VerifyAuditPackOptions
+{
+    RootPublicKey = rootPublicKey,   // root.pub, held out of band
+    HeldAnchors = heldAnchors,       // your copies; null checks the pack's integrity only (no_held_anchors)
+    Changes = changes,               // optional: the completeness check against an outside log
+    Period = (from, until),          // optional: a period the pack must cover
+    PriorEntries = earlierDigests,   // optional: PackEntryDigests of packs verified before
+});
+// result.Verified; result.Failures and result.Warnings, each with its file, entry and reason;
+// result.Period, the period the pack covers; result.Completeness.
+```
+
+- The manifest first: every file of the format listed with its digest and
+  nothing else (`manifest_unknown_file`, `manifest_file_missing`,
+  `manifest_digest_mismatch`, `manifest_unlisted_file`), in the NA's canonical
+  form (`manifest_invalid`), signed as received by the NA key valid at its
+  `created_at` (`manifest_invalid_signature`). A pack whose manifest fails is
+  not checked further.
+- NA keys come only from the key history, verified from the root key. Executor
+  and observer keys come from the registry records the NA signed
+  (`RegistryKeys`, placed where the store registered and retired them), or
+  from `ExecutorKeys` you supply.
+- The anchors tie the range to the anchors you hold (`pack_end_anchor_not_held`,
+  `anchor_mismatch`, `pack_start_not_tied`); each cited entry is checked against
+  a pack verified before or an anchor you hold (`cited_entry_mismatch`, or the
+  warning `cited_entry_unanchored`). The entries are verified as an export,
+  with the entries they cite. Policies, attestations, treaties, feeds and a
+  grant's agreement are each checked as received.
+- `report.md` must be the report the pack's own files render to
+  (`RenderReport`, `report_mismatch`); `ReportDifferences` lists the lines.
+- `VerifyArchiveRecord` checks an archive record (the NA's statement that a
+  pack was written to immutable storage and read back intact).
+- It runs the shared `audit` suite's `pack`, `registry_keys` and `report_cell`
+  vectors: every vector of the suite.
+
 ### NA key history
 
 From 1.5.0 a Network Authority can move to a new signing key (a key

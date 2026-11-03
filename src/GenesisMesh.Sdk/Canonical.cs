@@ -31,6 +31,17 @@ public static class Canonical
     }
 
     /// <summary>
+    /// The canonical form with non-ASCII text kept as it is (Python's <c>ensure_ascii=False</c>): only <c>"</c>,
+    /// <c>\</c> and control characters are escaped. The form of an audit pack's files (v1.5.0).
+    /// </summary>
+    internal static string OfUnescaped(JsonElement element)
+    {
+        var sb = new StringBuilder();
+        Write(sb, element, null, null, ascii: false);
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// Canonical form of a JSON object without the <paramref name="exclude"/> keys, and without
     /// the <paramref name="omitWhenNull"/> keys when their value is null or absent.
     /// </summary>
@@ -73,7 +84,8 @@ public static class Canonical
         return sb.Append('}').ToString();
     }
 
-    internal static void Write(StringBuilder sb, JsonElement e, IReadOnlyCollection<string>? exclude, IReadOnlyCollection<string>? omitWhenNull)
+    internal static void Write(StringBuilder sb, JsonElement e, IReadOnlyCollection<string>? exclude, IReadOnlyCollection<string>? omitWhenNull,
+        bool ascii = true)
     {
         switch (e.ValueKind)
         {
@@ -86,9 +98,9 @@ public static class Canonical
                     if (omitWhenNull is not null && omitWhenNull.Contains(p.Name) && p.Value.ValueKind == JsonValueKind.Null) continue;
                     if (!first) sb.Append(',');
                     first = false;
-                    WriteString(sb, p.Name);
+                    WriteString(sb, p.Name, ascii);
                     sb.Append(':');
-                    Write(sb, p.Value, null, null);
+                    Write(sb, p.Value, null, null, ascii);
                 }
                 sb.Append('}');
                 break;
@@ -99,12 +111,12 @@ public static class Canonical
                 {
                     if (!firstItem) sb.Append(',');
                     firstItem = false;
-                    Write(sb, item, null, null);
+                    Write(sb, item, null, null, ascii);
                 }
                 sb.Append(']');
                 break;
             case JsonValueKind.String:
-                WriteString(sb, e.GetString()!);
+                WriteString(sb, e.GetString()!, ascii);
                 break;
             case JsonValueKind.Number:
                 sb.Append(NumberLiteral(e.GetRawText()));
@@ -121,8 +133,8 @@ public static class Canonical
         }
     }
 
-    /// <summary>Escape a string as <c>json.dumps(..., ensure_ascii=True)</c> does.</summary>
-    internal static void WriteString(StringBuilder sb, string s)
+    /// <summary>Escape a string as <c>json.dumps(..., ensure_ascii=True)</c> does (with <paramref name="ascii"/> false, <c>ensure_ascii=False</c>).</summary>
+    internal static void WriteString(StringBuilder sb, string s, bool ascii = true)
     {
         sb.Append('"');
         foreach (var c in s) // UTF-16 code units: astral characters become surrogate pairs, as in Python
@@ -137,7 +149,7 @@ public static class Canonical
                 case '\b': sb.Append("\\b"); break;
                 case '\f': sb.Append("\\f"); break;
                 default:
-                    if (c < 0x20 || c >= 0x7f)
+                    if (c < 0x20 || (ascii && c >= 0x7f))
                         sb.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
                     else
                         sb.Append(c);
