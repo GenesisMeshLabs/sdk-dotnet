@@ -2732,6 +2732,49 @@ public sealed class AnchorSummary
     public AnchorVerification? Chain { get; set; }
 }
 
+/// <summary>
+/// A signed statement of the evidence store's head (<c>GET /admin/evidence/anchors</c>, v1.2.0): the NA signs the head's
+/// store position and entry digest, and anchors form their own chain. Copies kept out of the operator's reach prove an
+/// export holds every entry they cover (<see cref="OfflineVerifier.VerifyStoreAnchors"/>,
+/// <see cref="OfflineVerifier.CheckEventsAgainstAnchors"/>).
+/// </summary>
+public sealed class StoreAnchor
+{
+    /// <summary>The anchor's gap-free position in the anchor chain, from 1.</summary>
+    [JsonPropertyName("anchor_sequence")]
+    public long AnchorSequence { get; set; }
+
+    /// <summary>The NA's sovereign: its genesis block's <c>network_name</c>.</summary>
+    [JsonPropertyName("sovereign_id")]
+    public string SovereignId { get; set; } = "";
+
+    /// <summary>The anchored head's <c>store_sequence</c>.</summary>
+    [JsonPropertyName("store_sequence")]
+    public long StoreSequence { get; set; }
+
+    /// <summary>The anchored head's entry digest.</summary>
+    [JsonPropertyName("entry_digest")]
+    public string EntryDigest { get; set; } = "";
+
+    /// <summary>When the NA signed the anchor (UTC), as received.</summary>
+    [JsonPropertyName("anchored_at")]
+    public string AnchoredAt { get; set; } = "";
+
+    /// <summary>The previous anchor's digest (<see cref="OfflineVerifier.AnchorDigest"/>); null for the first.</summary>
+    [JsonPropertyName("previous_anchor_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PreviousAnchorDigest { get; set; }
+
+    /// <summary>The NA key's ID.</summary>
+    [JsonPropertyName("issued_by")]
+    public string IssuedBy { get; set; } = "";
+
+    /// <summary>The NA's signature over <see cref="OfflineVerifier.AnchorCanonical"/>, as received.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
 /// <summary>A run of store anchors verified as a chain: signatures, links and heads that never go back (v1.2.0).</summary>
 public sealed class AnchorVerification
 {
