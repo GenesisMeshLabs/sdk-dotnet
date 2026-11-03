@@ -336,7 +336,8 @@ public static partial class RemediationRules
     /// <exception cref="ArgumentException">A time is not a timestamp.</exception>
     public static string DueAfterDenial(string? currentDue, string decidedAt, int graceSeconds)
     {
-        var due = Micros(decidedAt, nameof(decidedAt)) + graceSeconds * MicrosPerSecond;
+        // Past the year 9999 the reference cannot reckon the grace, whenever it was due before.
+        var due = InYears(Micros(decidedAt, nameof(decidedAt)) + graceSeconds * MicrosPerSecond);
         return Print(currentDue is null ? due : Math.Min(Micros(currentDue, nameof(currentDue)), due));
     }
 
@@ -359,13 +360,20 @@ public static partial class RemediationRules
     [GeneratedRegex(@"(T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6})[0-9]+", RegexOptions.CultureInvariant)]
     private static partial Regex FinerFraction();
 
+    /// <summary>A recorded time's instant when it is in UTC (<c>Z</c> or <c>+00:00</c>), as a review's model reads its times; null otherwise.</summary>
+    private static long? RecordedUtcMicros(string? value) => value is not null && UtcZone().IsMatch(value) ? RecordedMicros(value) : null;
+
+    [GeneratedRegex(@"(?:Z|[+-]00:00)\z", RegexOptions.CultureInvariant)]
+    private static partial Regex UtcZone();
+
+    /// <summary>The instant, when it falls in the years 1 to 9999, the reference's times.</summary>
+    /// <exception cref="ArgumentException">It falls outside them.</exception>
+    private static long InYears(long micros) => micros >= 0 && micros <= DateTime.MaxValue.Ticks / 10
+        ? micros
+        : throw new ArgumentException("genesismesh: the time is outside the years 1 to 9999");
+
     /// <summary>An instant in microseconds from 0001-01-01 as the reference prints a time: UTC, microseconds when not zero, <c>Z</c>.</summary>
-    private static string Print(long micros)
-    {
-        if (micros < 0 || micros > DateTime.MaxValue.Ticks / 10)
-            throw new ArgumentException("genesismesh: the time is outside the years 1 to 9999");
-        return Canonical.Timestamp(new DateTimeOffset(micros * 10, TimeSpan.Zero));
-    }
+    private static string Print(long micros) => Canonical.Timestamp(new DateTimeOffset(InYears(micros) * 10, TimeSpan.Zero));
 
     /// <summary>
     /// Why a remediation record does not carry out the plan the NA stated, or null (the NA refuses it as
@@ -606,16 +614,17 @@ public static partial class RemediationRules
     public static string? Rfc3339(string? value) =>
         Instant(value) is { } at && at >= 0 && at <= DateTime.MaxValue.Ticks / 10 ? Print(at) : null;
 
-    private static string? ApprovalProblem(AdminApproval approval, string who, string keyId, string path, IReadOnlyList<string> audiences, string at)
+    private static string? ApprovalProblem(AdminApproval approval, string who, string keyId, string path, IReadOnlyList<string> audiences,
+        string at, string field)
     {
         if (!AdminApprovalValid(approval)) return $"the {who}'s signature does not verify over its request";
         if (approval.KeyId != keyId) return $"the {who}'s request is signed by {approval.KeyId}, not {keyId}";
         if (approval.Method != "POST" || approval.Path != path || approval.Query?.Count > 0)
             return $"the {who}'s request is {approval.Method} {approval.Path}, not POST {path}";
         if (!audiences.Contains(approval.Audience, StringComparer.Ordinal)) return $"the {who}'s request is for another Network Authority";
-        // A recorded time this SDK cannot read refuses it, where TypeScript skips the bound.
-        if (Instant(approval.Timestamp) is not { } signedAt || RecordedMicros(at) is not { } recordedAt
-            || Math.Abs(signedAt - recordedAt) > ApprovalMaxAgeMicros)
+        // The review's model reads its times as UTC timestamps only: another time proves no age.
+        if (RecordedUtcMicros(at) is not { } recordedAt) return $"the review's {field} is not a UTC timestamp";
+        if (Instant(approval.Timestamp) is not { } signedAt || Math.Abs(signedAt - recordedAt) > ApprovalMaxAgeMicros)
             return $"the {who}'s request was signed more than 300s from when it was recorded";
         return null;
     }
@@ -625,8 +634,10 @@ public static partial class RemediationRules
     /// keys (the audience): the decider signed <c>POST /admin/evidence/reviews/&lt;review_id&gt;/decide</c>, without a
     /// query, as <c>decided_by</c>, with exactly the verdict, waiver end and note the review records, within 300
     /// seconds of <c>decided_at</c>; a requester signed <c>POST /admin/evidence/reviews</c> with exactly the subject and
-    /// justification it records, within 300 seconds of <c>requested_at</c>. A recorded time this SDK cannot read
-    /// refuses the review. Whether each public key is the operator key's is for the holder registry to say.
+    /// justification it records, within 300 seconds of <c>requested_at</c>. A recorded time that is not a UTC timestamp
+    /// (<c>Z</c> or <c>+00:00</c>, as the review's model reads it) refuses the review
+    /// (<c>the review's decided_at is not a UTC timestamp</c>). Whether each public key is the operator key's is for the
+    /// holder registry to say.
     /// </summary>
     /// <param name="review">The review record.</param>
     /// <param name="naPublicKeys">The NA's public keys: the audiences the requests may name.</param>
@@ -635,7 +646,7 @@ public static partial class RemediationRules
         ArgumentNullException.ThrowIfNull(review);
         ArgumentNullException.ThrowIfNull(naPublicKeys);
         var approval = review.Approval ?? new AdminApproval();
-        if (ApprovalProblem(approval, "decider", review.DecidedBy, ReviewDecisionPath(review.ReviewId), naPublicKeys, review.DecidedAt) is { } problem)
+        if (ApprovalProblem(approval, "decider", review.DecidedBy, ReviewDecisionPath(review.ReviewId), naPublicKeys, review.DecidedAt, "decided_at") is { } problem)
             return problem;
         var body = approval.Body.ValueKind == JsonValueKind.Object ? approval.Body : JsonSerializer.SerializeToElement(new JsonObject());
         if (body.EnumerateObject().Any(p => p.Name is not ("verdict" or "waive_until" or "note")))
@@ -668,7 +679,7 @@ public static partial class RemediationRules
         AdminApproval approval, string requestedBy, string subjectKind, string subjectId, string justification, string requestedAt,
         IReadOnlyList<string> naPublicKeys)
     {
-        if (ApprovalProblem(approval, "requester", requestedBy, ReviewRequestPath, naPublicKeys, requestedAt) is { } problem) return problem;
+        if (ApprovalProblem(approval, "requester", requestedBy, ReviewRequestPath, naPublicKeys, requestedAt, "requested_at") is { } problem) return problem;
         var expected = new Dictionary<string, string>
         {
             ["subject_kind"] = subjectKind,

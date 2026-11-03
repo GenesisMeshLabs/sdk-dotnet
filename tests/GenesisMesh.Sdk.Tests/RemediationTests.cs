@@ -955,12 +955,48 @@ public class RemediationTests
     [InlineData("not a time")]
     [InlineData("2026-01-01 00:09:00Z")]
     [InlineData("")]
-    public async Task ARecordedTimeThatCannotBeReadRefusesTheApproval(string decidedAt)
+    // Read by the SDK's reader, but not a UTC time: the review's model reads none of these.
+    [InlineData("2026-01-01T00:09:00")]
+    [InlineData("2026-01-01T01:09:00+01:00")]
+    [InlineData("2026-01-01T00:10:00+00:01")]
+    [InlineData("2026-01-01t00:09:00z")]
+    [InlineData("2026-02-29T00:09:00Z")]
+    [InlineData("0000-12-31T23:59:59Z")]
+    [InlineData("+002026-01-01T00:09:00Z")]
+    public async Task ARecordedTimeThatIsNoUtcTimestampRefusesTheApproval(string at)
     {
-        var review = Review(await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z"));
-        review.DecidedAt = decidedAt;
-        Assert.Equal("the decider's request was signed more than 300s from when it was recorded",
-            RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        var decided = await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z");
+        var request = await Signed(RequestPath, RequestBody, "2026-01-01T00:08:00Z", keyId: "operator-1");
+        var review = Review(decided, request);
+        Assert.Null(RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        review.DecidedAt = at;
+        Assert.Equal("the review's decided_at is not a UTC timestamp", RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        review = Review(decided, request);
+        review.RequestedAt = at;
+        Assert.Equal("the review's requested_at is not a UTC timestamp", RemediationRules.ReviewApprovalProblem(review, [Audience]));
+    }
+
+    [Theory]
+    [InlineData("2026-01-01T00:09:00+00:00")]
+    [InlineData("2026-01-01T00:09:00-00:00")]
+    [InlineData("2026-01-01T00:09:00.0000009Z")]
+    public async Task ARecordedTimeInUtcIsRead(string at)
+    {
+        var decided = await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z");
+        var request = await Signed(RequestPath, RequestBody, "2026-01-01T00:09:00Z", keyId: "operator-1");
+        var review = Review(decided, request);
+        review.DecidedAt = at;
+        review.RequestedAt = at;
+        Assert.Null(RemediationRules.ReviewApprovalProblem(review, [Audience]));
+    }
+
+    [Fact]
+    public void PastTheYear9999NoGraceIsReckonedEvenWhenTheChangeWasDueEarlier()
+    {
+        Assert.Throws<ArgumentException>(() => RemediationRules.DueAfterDenial("2026-03-01T00:00:30Z", "9999-12-31T23:59:59Z", 60));
+        Assert.Equal("9999-12-31T23:59:59.999999Z", RemediationRules.DueAfterDenial(null, "9999-12-31T23:59:58.999999Z", 1));
+        Assert.Equal("2026-03-01T00:01:00Z", RemediationRules.DueAfterDenial("9999-12-31T23:59:59.999999Z", "2026-03-01T00:00:00Z", 60));
+        Assert.Throws<ArgumentException>(() => RemediationRules.DueAt("0001-01-01T00:00:59.999999+00:01", 0));
     }
 
     [Fact]

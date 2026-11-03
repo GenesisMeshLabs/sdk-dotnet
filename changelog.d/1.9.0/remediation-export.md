@@ -9,8 +9,10 @@
 
   The result counts them (`Remediations`, `Reviews`). Key succession, archive and grant entries still fail as `unknown_entry_kind`.
 - **`RemediationRules.RotationProblem`** and `RotationFacts`, as TypeScript's `rotationProblem`: whether the forward rotation a remediation record cites can carry it.
-- **Conformance:** the shared `remediation` suite's 28 `verify_export` vectors run; all 340 of its vectors now run.
+- **Conformance:** the shared `remediation` suite's 28 `verify_export` vectors run; all 340 of its vectors now run. 123 further variants of the suite's store, with the answers of the reference's `verify_evidence_events`, run as unit tests (`testdata/remediation/export_cases.json`).
 
 ### Fixed
 
+- **`RemediationRules.ReviewApprovalProblem` reads a review's recorded times (`decided_at`, `requested_at`) as the review's model does: UTC timestamps only** (`Z` or `+00:00`). Another time gives `the review's decided_at is not a UTC timestamp`; a time without an offset or in another zone was taken.
+- **`RemediationRules.DueAfterDenial` refuses a decision whose grace runs past the year 9999** even when the change was due earlier, as the reference does; it returned the earlier due time.
 - **`RemediationRules.PolicySectionIssues` reads a blank `stands_for` as the reference does:** Python's `str.strip()` also removes U+001C to U+001F, which .NET does not count as white space, so a `stands_for` of only those characters was accepted.
