@@ -51,10 +51,12 @@ idempotent requests, and sign with a key it does not hold (see
 [Client options](#client-options)). It also reads the NA's health and its key
 history (see [Health](#health) and [NA](#na)).
 
-From 1.6 it checks a pre-issued grant's NA signature (see
-[Pre-issued grants](#pre-issued-grants)). Requesting grants, holding time
-tokens, acting within a grant offline, recording its uses and falling back to
-break-glass live in the
+From 1.6 it checks a pre-issued grant's NA signature, and from 1.9 it holds
+the grants' records and rules offline: the parameter envelope, a use's place
+in its chain and the rules it keeps, and uses and time token requests signed
+with the bearer key (see [Pre-issued grants](#pre-issued-grants)).
+Requesting grants, holding time tokens, acting within a grant offline and
+falling back to break-glass live in the
 [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript) and the
 [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust), as does verifying
 grants, their uses and revocations in an evidence export.
@@ -1461,18 +1463,66 @@ every signed field known and in canonical form.
 
 ```csharp
 var g = OfflineVerifier.VerifyCapabilityGrant(grantJson, h.History!); // or NAKeyHistory.ValidAlways(new[] { naKey })
-// g.Valid; otherwise g.Reason: "missing_signature", "invalid_signature", "unknown_field",
-// "non_canonical_form" or "na_key_not_valid_at_time".
+// g.Valid; otherwise g.Reason: "missing_signature", "malformed" (1.9.0), "invalid_signature",
+// "unknown_field", "non_canonical_form" or "na_key_not_valid_at_time".
 g = OfflineVerifier.VerifyCapabilityGrant(grantJson, h.History!, DateTimeOffset.UtcNow);
 // 1.8.0: also "outlives_key" once the grant's key has passed its vouching horizon.
 ```
 
-It does not check the grant's validity, budget, parameter envelope or
-revocation. The NA's revocation feed lists revoked grants in
-`revoked_grant_ids` while grants are on (left out while they are off); the
-embedded field registry knows both forms. The SDK runs the signed-form and
-signature vectors of the shared `grants` suite
-(`tests/GenesisMesh.Sdk.Tests/testdata/conformance/grants.json`).
+From 1.9.0 a grant must also be one the reference's model takes
+(`malformed` otherwise): a validity of at most 24 hours, starting within 24
+hours of its issue, each envelope parameter readable. A list of NA keys may
+stand for the key history (`VerifyCapabilityGrant(grantJson, [naKey])`).
+
+The NA's revocation feed lists revoked grants in `revoked_grant_ids` while
+grants are on (left out while they are off); the embedded field registry knows
+both forms.
+
+From 1.9.0, the grants' records and rules, as the TypeScript SDK's
+`grants.ts`:
+
+- **Records:** `CapabilityGrant`, `TimeToken`, `TimeTokenRequest`,
+  `GrantExecutionEvidence` (a use) and `GrantRevocationRecord`; the limits
+  (`GrantLimits`) and the codes the NA refuses a use with, in its order
+  (`GrantUseRejectionCodes`).
+- **Numbers:** `GrantNumber` reads a number as every implementation does: an
+  integral number is an integer (`5.0` is `5`), integers fit 64 bits, and
+  comparisons are exact. Scalars compare type-strictly (`true` is not `1`).
+- **The envelope:** `GrantRules.Parameter` reads an envelope parameter
+  (`one_of`, `subset_of` or `number_range`) or names why the NA would refuse
+  it; `EnvelopeProblem` says why a use's `request_parameters` fall outside a
+  grant's closed envelope.
+- **Uses:** `GrantRules.UseProblem` gives the first rule a use breaks, in the
+  reference's order (capability, envelope, budget, the time token, order,
+  validity, upload time, revocation); `ContinuesChain`, `NextPreviousUse`,
+  `UseSecretProblem`, and the digests uses chain by (`GrantDigest`,
+  `UseDigest`, `RecordDigest`).
+- **Verifiers:** `OfflineVerifier.VerifyTimeToken` and
+  `VerifyGrantRevocation` (NA keys or a key history), `VerifyGrantUse` and
+  `VerifyTimeTokenRequest` (the bearer key), and `TokenSignatureValid`.
+- **Signing:** `GrantRecords.SignUse` and `SignTimeTokenRequest` sign with the
+  bearer key, refused first as the NA would refuse them
+  (`GrantRecordException`: `grant_use_malformed`,
+  `grant_use_secret_material`, `time_token_request_malformed`).
+
+```csharp
+var use = await GrantRecords.SignUse(new GrantUseInput
+{
+    Grant = grant,
+    UseSequence = 1,                    // the first use; later ones give Previous
+    Capability = "secret.rotate",
+    RequestParameters = new Dictionary<string, object?> { ["lifetime_days"] = 30 },
+    TimeToken = token,                  // the latest time token, as received
+    Outcome = GrantUseOutcomes.Success,
+}, bearerSigner);
+var problem = GrantRules.UseProblem(use, new UseCheck { Grant = grant, TokenKeys = [naKey] });
+```
+
+The SDK runs the shared `grants` suite's signed-form, signature, envelope,
+envelope parameter and use vectors
+(`tests/GenesisMesh.Sdk.Tests/testdata/conformance/grants.json`), and 1,510
+further cases the Python reference judged
+(`tests/GenesisMesh.Sdk.Tests/testdata/grants/rule_cases.json`).
 
 ## Raw admin calls
 

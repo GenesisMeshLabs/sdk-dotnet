@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -4855,4 +4856,392 @@ internal static class ModelHelpers
         signatures.ValueKind == JsonValueKind.Array && signatures.GetArrayLength() > 0
             ? signatures[0].Clone()
             : default;
+}
+
+// ── Pre-issued grants (Genesis Mesh 1.6.0; 1.9.0 in this SDK) ──────────────────
+
+/// <summary>The limits every implementation applies to pre-issued grants (Python <c>genesis_mesh.models.grants</c>).</summary>
+public static class GrantLimits
+{
+    /// <summary>The longest a grant may be valid, whatever the NA's configuration.</summary>
+    public const int MaxValiditySeconds = 86_400;
+
+    /// <summary>The largest budget a grant may carry.</summary>
+    public const int MaxUses = 10_000;
+
+    /// <summary>The most uses one time token may anchor.</summary>
+    public const int MaxUsesPerTimeToken = 1_000;
+
+    /// <summary>How far a use may be dated after the time its entry is recorded (fixed, so every verifier applies one rule).</summary>
+    public const int ClockSkewSeconds = 300;
+
+    /// <summary>The most capabilities one grant may name.</summary>
+    public const int MaxCapabilities = 16;
+
+    /// <summary>The most parameters one grant's envelope may name.</summary>
+    public const int MaxEnvelopeParameters = 64;
+
+    /// <summary>The most values a <c>one_of</c> or <c>subset_of</c> may list.</summary>
+    public const int MaxEnvelopeValues = 256;
+}
+
+/// <summary>Why a grant was revoked (<see cref="GrantRevocationRecord.Reason"/>).</summary>
+public static class GrantRevocationReasons
+{
+    /// <summary>An operator revoked it.</summary>
+    public const string Operator = "operator";
+
+    /// <summary>Its attestation basis was revoked.</summary>
+    public const string AttestationRevoked = "attestation_revoked";
+
+    /// <summary>A policy it was checked against was deactivated.</summary>
+    public const string PolicyDeactivated = "policy_deactivated";
+
+    /// <summary>A policy that applies to it was activated.</summary>
+    public const string PolicyActivated = "policy_activated";
+
+    /// <summary>Its bearer key was retired.</summary>
+    public const string BearerKeyRetired = "bearer_key_retired";
+
+    /// <summary>Its agreement basis is no longer signed by trusted parties.</summary>
+    public const string AgreementUntrusted = "agreement_untrusted";
+}
+
+/// <summary>What a grant use did (<see cref="GrantExecutionEvidence.Outcome"/>).</summary>
+public static class GrantUseOutcomes
+{
+    /// <summary>The action succeeded.</summary>
+    public const string Success = "success";
+
+    /// <summary>The action failed.</summary>
+    public const string Failure = "failure";
+
+    /// <summary>Part of the action succeeded.</summary>
+    public const string Partial = "partial";
+}
+
+/// <summary>
+/// Why the NA refuses a grant use at admission, in the order it checks; every verifier names the same. The chain's
+/// checks come before the checks of the use against its grant, so a quarantined use takes its place in the chain when it
+/// continues it.
+/// </summary>
+public static class GrantUseRejectionCodes
+{
+    /// <summary>Every code, in the order the NA checks.</summary>
+    public static IReadOnlyList<string> All { get; } =
+    [
+        "grant_use_malformed", "grant_not_found", "grant_use_invalid_signature", "grant_use_secret_material",
+        "grant_use_conflict", "grant_use_chain_gap", "grant_use_chain_mismatch", "grant_bearer_mismatch",
+        "grant_bearer_key_retired", "grant_use_out_of_scope", "grant_mismatch", "grant_capability_mismatch",
+        "grant_envelope_mismatch", "grant_budget_exhausted", "grant_time_token_invalid", "grant_time_token_mismatch",
+        "grant_time_token_regressed", "grant_time_token_exhausted", "grant_use_before_time_token", "grant_use_out_of_order",
+        "grant_use_outside_validity", "grant_use_in_future", "grant_use_uploaded_late", "grant_revoked",
+    ];
+
+    /// <summary>
+    /// Refusals of an authentic use the NA keeps as a quarantine entry: the use happened, and no retry overcomes them.
+    /// Not a chain gap (the holder uploads the earlier uses first), secret material (never stored) nor a use dated in
+    /// the future (retried once the NA's clock reaches it). A quarantined use that continues the chain
+    /// (<see cref="GrantRules.ContinuesChain"/>; never a conflict or a chain mismatch) becomes the chain's head: the
+    /// holder's later uses are judged on their own.
+    /// </summary>
+    public static IReadOnlySet<string> Quarantined { get; } = new[]
+    {
+        "grant_use_conflict", "grant_use_chain_mismatch", "grant_bearer_mismatch", "grant_bearer_key_retired",
+        "grant_use_out_of_scope", "grant_mismatch", "grant_capability_mismatch", "grant_envelope_mismatch",
+        "grant_budget_exhausted", "grant_time_token_invalid", "grant_time_token_mismatch", "grant_time_token_regressed",
+        "grant_time_token_exhausted", "grant_use_before_time_token", "grant_use_out_of_order", "grant_use_outside_validity",
+        "grant_use_uploaded_late", "grant_revoked",
+    }.ToFrozenSet(StringComparer.Ordinal);
+}
+
+/// <summary>
+/// A bounded authorisation the NA signs in advance for one bearer key (Python <c>CapabilityGrant</c>, v1.6.0; entry
+/// kind <c>grant</c>): the capabilities, a basis, a validity of at most 24 hours, a budget of uses and a closed parameter
+/// envelope. Every field but the signature is signed.
+/// </summary>
+public sealed class CapabilityGrant
+{
+    /// <summary>The grant's ID.</summary>
+    [JsonPropertyName("grant_id")]
+    public string GrantId { get; set; } = "";
+
+    /// <summary>The bearer key: the only key whose uses the grant admits.</summary>
+    [JsonPropertyName("bearer_key_id")]
+    public string BearerKeyId { get; set; } = "";
+
+    /// <summary>The bearer key's public key, base64.</summary>
+    [JsonPropertyName("bearer_public_key")]
+    public string BearerPublicKey { get; set; } = "";
+
+    /// <summary>The bearer key's sovereign: the executor of every use.</summary>
+    [JsonPropertyName("bearer_sovereign_id")]
+    public string BearerSovereignId { get; set; } = "";
+
+    /// <summary>The capabilities a use may name: 1 to 16 exact IDs.</summary>
+    [JsonPropertyName("capabilities")]
+    public List<string> Capabilities { get; set; } = [];
+
+    /// <summary><c>agreement</c> or <c>attestation</c>.</summary>
+    [JsonPropertyName("basis_kind")]
+    public string BasisKind { get; set; } = "";
+
+    /// <summary>The agreement or attestation the grant rests on.</summary>
+    [JsonPropertyName("basis_id")]
+    public string BasisId { get; set; } = "";
+
+    /// <summary>SHA-256 of the basis's signed form.</summary>
+    [JsonPropertyName("basis_digest")]
+    public string BasisDigest { get; set; } = "";
+
+    /// <summary>The requesting sovereign.</summary>
+    [JsonPropertyName("requester_sovereign_id")]
+    public string RequesterSovereignId { get; set; } = "";
+
+    /// <summary>The providing sovereign.</summary>
+    [JsonPropertyName("provider_sovereign_id")]
+    public string ProviderSovereignId { get; set; } = "";
+
+    /// <summary>When the grant starts.</summary>
+    [JsonPropertyName("valid_from")]
+    public string ValidFrom { get; set; } = "";
+
+    /// <summary>When the grant ends: at most 24 hours after <see cref="ValidFrom"/>.</summary>
+    [JsonPropertyName("valid_until")]
+    public string ValidUntil { get; set; } = "";
+
+    /// <summary>The budget: how many uses the NA admits.</summary>
+    [JsonPropertyName("max_uses")]
+    public int MaxUses { get; set; }
+
+    /// <summary>How many uses one time token may anchor.</summary>
+    [JsonPropertyName("max_uses_per_time_token")]
+    public int MaxUsesPerTimeToken { get; set; }
+
+    /// <summary>The closed parameter envelope, as received: parameter name to envelope parameter (<see cref="GrantRules.Parameter"/>).</summary>
+    [JsonPropertyName("parameter_envelope")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement ParameterEnvelope { get; set; }
+
+    /// <summary>The checks of the basis at issue, as gate results.</summary>
+    [JsonPropertyName("basis_checks")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement BasisChecks { get; set; }
+
+    /// <summary>The policy versions the grant was checked against, and how each gate was decided over its envelope.</summary>
+    [JsonPropertyName("policy_binding")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement PolicyBinding { get; set; }
+
+    /// <summary>When the NA issued it.</summary>
+    [JsonPropertyName("issued_at")]
+    public string IssuedAt { get; set; } = "";
+
+    /// <summary>The NA's sovereign.</summary>
+    [JsonPropertyName("issuer_sovereign_id")]
+    public string IssuerSovereignId { get; set; } = "";
+
+    /// <summary>The NA key that signed it.</summary>
+    [JsonPropertyName("issued_by")]
+    public string IssuedBy { get; set; } = "";
+
+    /// <summary>The NA's signature, <c>{"key_id", "sig"}</c>, over the grant without it.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
+/// <summary>
+/// A time the NA signed for a grant's holder (Python <c>TimeToken</c>, v1.6.0), bound to the head of its use chain:
+/// <see cref="UseSequence"/> uses made, the last one's digest <see cref="UseHeadDigest"/> (left out before the first use).
+/// A use is never dated before it, and only so many uses may cite one.
+/// </summary>
+public sealed class TimeToken
+{
+    /// <summary>The token's ID.</summary>
+    [JsonPropertyName("time_token_id")]
+    public string TimeTokenId { get; set; } = "";
+
+    /// <summary>The grant it is for.</summary>
+    [JsonPropertyName("grant_id")]
+    public string GrantId { get; set; } = "";
+
+    /// <summary>The uses made when it was issued.</summary>
+    [JsonPropertyName("use_sequence")]
+    public int UseSequence { get; set; }
+
+    /// <summary>The digest of the last of them; absent before the first.</summary>
+    [JsonPropertyName("use_head_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UseHeadDigest { get; set; }
+
+    /// <summary>The time the NA signed.</summary>
+    [JsonPropertyName("issued_at")]
+    public string IssuedAt { get; set; } = "";
+
+    /// <summary>The NA's sovereign.</summary>
+    [JsonPropertyName("issuer_sovereign_id")]
+    public string IssuerSovereignId { get; set; } = "";
+
+    /// <summary>The NA key that signed it.</summary>
+    [JsonPropertyName("issued_by")]
+    public string IssuedBy { get; set; } = "";
+
+    /// <summary>The NA's signature, <c>{"key_id", "sig"}</c>, over the token without it.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
+/// <summary>A holder's request for a time token, signed by the grant's bearer key (Python <c>TimeTokenRequest</c>, beta).</summary>
+public sealed class TimeTokenRequest
+{
+    /// <summary>The grant.</summary>
+    [JsonPropertyName("grant_id")]
+    public string GrantId { get; set; } = "";
+
+    /// <summary>The uses the holder has made (0 before the first).</summary>
+    [JsonPropertyName("use_sequence")]
+    public int UseSequence { get; set; }
+
+    /// <summary>The digest of the last of them; absent for none.</summary>
+    [JsonPropertyName("use_head_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UseHeadDigest { get; set; }
+
+    /// <summary>When the holder asked: within 300 seconds of the NA's clock.</summary>
+    [JsonPropertyName("requested_at")]
+    public string RequestedAt { get; set; } = "";
+
+    /// <summary>The bearer key's signature, <c>{"key_id", "sig"}</c>, over the request without it.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
+/// <summary>
+/// One use of a grant (Python <c>GrantExecutionEvidence</c>, v1.6.0; entry kind <c>grant_execution</c>), signed by its
+/// bearer key, in a per-grant use chain. The NA assigns it its resource position when it admits it. Absent optional
+/// fields are left out, never null.
+/// </summary>
+public sealed class GrantExecutionEvidence
+{
+    /// <summary>The use's ID: a UUID in its canonical lowercase form (observations match a use by it).</summary>
+    [JsonPropertyName("use_id")]
+    public string UseId { get; set; } = "";
+
+    /// <summary>The grant used.</summary>
+    [JsonPropertyName("grant_id")]
+    public string GrantId { get; set; } = "";
+
+    /// <summary>SHA-256 of the grant's signed form (<see cref="GrantRules.GrantDigest"/>).</summary>
+    [JsonPropertyName("grant_digest")]
+    public string GrantDigest { get; set; } = "";
+
+    /// <summary>The use's position in the grant's use chain, from 1.</summary>
+    [JsonPropertyName("use_sequence")]
+    public int UseSequence { get; set; }
+
+    /// <summary>The previous use's digest (<see cref="GrantRules.UseDigest"/>); absent for the first use.</summary>
+    [JsonPropertyName("prev_use_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PrevUseDigest { get; set; }
+
+    /// <summary>The executor: the grant's bearer sovereign.</summary>
+    [JsonPropertyName("executor_sovereign_id")]
+    public string ExecutorSovereignId { get; set; } = "";
+
+    /// <summary>One of the grant's capabilities.</summary>
+    [JsonPropertyName("capability")]
+    public string Capability { get; set; } = "";
+
+    /// <summary>The request's parameters: inside the grant's envelope.</summary>
+    [JsonPropertyName("request_parameters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement RequestParameters { get; set; }
+
+    /// <summary>The resource: an identifier, never a value; absent for none.</summary>
+    [JsonPropertyName("resource_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourceId { get; set; }
+
+    /// <summary>A value of <see cref="ResourceActions"/>, given with <see cref="ResourceId"/>.</summary>
+    [JsonPropertyName("resource_action")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourceAction { get; set; }
+
+    /// <summary>When the action ran.</summary>
+    [JsonPropertyName("executed_at")]
+    public string ExecutedAt { get; set; } = "";
+
+    /// <summary>The latest time token the holder saw, exactly as the NA signed it (<see cref="GenesisMesh.TimeToken"/>).</summary>
+    [JsonPropertyName("time_token")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement TimeToken { get; set; }
+
+    /// <summary>A value of <see cref="GrantUseOutcomes"/>.</summary>
+    [JsonPropertyName("outcome")]
+    public string Outcome { get; set; } = "";
+
+    /// <summary>Up to 1024 characters; no secret material.</summary>
+    [JsonPropertyName("outcome_detail")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OutcomeDetail { get; set; }
+
+    /// <summary>Metadata of the action: identifiers and versions only.</summary>
+    [JsonPropertyName("execution_parameters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement ExecutionParameters { get; set; }
+
+    /// <summary>The bearer key's signature, <c>{"key_id", "sig"}</c>, over the use without it.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
+}
+
+/// <summary>The NA's revocation of a grant from <see cref="RevokedAt"/> (Python <c>GrantRevocationRecord</c>, v1.6.0; entry kind <c>grant_revocation</c>).</summary>
+public sealed class GrantRevocationRecord
+{
+    /// <summary>The revocation's ID.</summary>
+    [JsonPropertyName("revocation_id")]
+    public string RevocationId { get; set; } = "";
+
+    /// <summary>The grant revoked.</summary>
+    [JsonPropertyName("grant_id")]
+    public string GrantId { get; set; } = "";
+
+    /// <summary>SHA-256 of the grant's signed form.</summary>
+    [JsonPropertyName("grant_digest")]
+    public string GrantDigest { get; set; } = "";
+
+    /// <summary>A value of <see cref="GrantRevocationReasons"/>.</summary>
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    /// <summary>Up to 1024 characters.</summary>
+    [JsonPropertyName("detail")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Detail { get; set; }
+
+    /// <summary>The operator key that revoked it, for an operator's revocation.</summary>
+    [JsonPropertyName("revoked_by")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RevokedBy { get; set; }
+
+    /// <summary>From when the grant is revoked.</summary>
+    [JsonPropertyName("revoked_at")]
+    public string RevokedAt { get; set; } = "";
+
+    /// <summary>The NA's sovereign.</summary>
+    [JsonPropertyName("issuer_sovereign_id")]
+    public string IssuerSovereignId { get; set; } = "";
+
+    /// <summary>The NA key that signed it.</summary>
+    [JsonPropertyName("issued_by")]
+    public string IssuedBy { get; set; } = "";
+
+    /// <summary>The NA's signature, <c>{"key_id", "sig"}</c>, over the record without it.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
 }

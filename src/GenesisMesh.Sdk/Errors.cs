@@ -135,6 +135,23 @@ public sealed class SecretMaterialException : GenesisMeshException
 }
 
 /// <summary>
+/// Thrown before anything is signed when the NA would refuse a pre-issued grant's record (1.9.0):
+/// <c>grant_use_malformed</c> (a use its model does not take), <c>grant_use_secret_material</c> or
+/// <c>time_token_request_malformed</c>. A value the NA would refuse to read throws <see cref="StrictJsonException"/>
+/// instead.
+/// </summary>
+public sealed class GrantRecordException : GenesisMeshException
+{
+    /// <summary>A grant record refused with <paramref name="code"/> for <paramref name="detail"/>.</summary>
+    /// <param name="code">The code the NA would refuse it with.</param>
+    /// <param name="detail">What is refused.</param>
+    public GrantRecordException(string code, string detail)
+        : base(0, code, detail, "genesismesh: " + detail)
+    {
+    }
+}
+
+/// <summary>
 /// Thrown before anything is signed when the NA would refuse a record of a change outside the governed path (1.9.0):
 /// <c>observation_malformed</c> or <c>break_glass_malformed</c> (a field it does not take, an impossible change time),
 /// or <c>observation_secret_material</c> or <c>break_glass_secret_material</c>. A value the NA would refuse to read

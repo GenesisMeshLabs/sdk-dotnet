@@ -18,11 +18,13 @@ namespace GenesisMesh.Sdk.Tests;
 public class GrantsTests
 {
     private static readonly string SuitePath = Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "grants.json");
-    private static readonly HashSet<string> KindsRun = new() { "canonical_form", "verify_record" };
-    private static readonly HashSet<string> KindsNotRun = new()
-    {
-        "envelope_parameter", "envelope", "issuance", "use", "verify_export",
-    };
+    private static readonly HashSet<string> KindsRun = new() { "canonical_form", "verify_record", "envelope_parameter", "envelope", "use" };
+
+    /// <summary>
+    /// <c>issuance</c> is the NA's own decision (an SDK never issues a grant); <c>verify_export</c>: an export's grant
+    /// entries are verified offline in a later step of 1.9.0.
+    /// </summary>
+    private static readonly HashSet<string> KindsNotRun = new() { "issuance", "verify_export" };
 
     private static JsonElement.ArrayEnumerator Vectors()
     {
@@ -48,10 +50,16 @@ public class GrantsTests
     public void ReproducesTheReferenceOutcome(string id)
     {
         var v = Vector(id);
+        var kind = v.GetProperty("kind").GetString();
+        if (kind is "envelope_parameter" or "envelope" or "use")
+        {
+            Assert.Equal(Canonical.FromJson(v.GetProperty("expected").GetRawText()), Canonical.FromJson(RuleOutcome(kind, v.GetProperty("input"))));
+            return;
+        }
         var model = v.GetProperty("model").GetString()!;
         var record = v.GetProperty("record");
         object got;
-        switch (v.GetProperty("kind").GetString())
+        switch (kind)
         {
             case "canonical_form":
                 {
@@ -73,6 +81,71 @@ public class GrantsTests
                 throw new InvalidOperationException($"vector kind {v.GetProperty("kind").GetString()} is not run");
         }
         Assert.Equal(Canonical.FromJson(v.GetProperty("expected").GetRawText()), Canonical.FromJson(JsonSerializer.Serialize(got)));
+    }
+
+    /// <summary>An envelope, a parameter or a use as the grants rules read it, in the vector's terms.</summary>
+    private static string RuleOutcome(string kind, JsonElement input)
+    {
+        switch (kind)
+        {
+            case "envelope_parameter":
+                {
+                    // A parameter given as text is read as every implementation reads JSON (2^64 is refused).
+                    JsonElement parameter;
+                    if (input.TryGetProperty("parameter_json", out var text))
+                    {
+                        try
+                        {
+                            using var doc = StrictJsonReader.Parse(text.GetString()!);
+                            parameter = doc.RootElement.Clone();
+                        }
+                        catch (StrictJsonException)
+                        {
+                            return """{"valid": false}""";
+                        }
+                    }
+                    else
+                    {
+                        parameter = input.GetProperty("parameter");
+                    }
+                    return GrantRules.Parameter(parameter, out _) is { } read
+                        ? "{\"valid\": true, \"normalized\": " + read.ToJson() + "}"
+                        : """{"valid": false}""";
+                }
+            case "envelope":
+                {
+                    var envelope = new JsonObject();
+                    foreach (var p in input.GetProperty("envelope").EnumerateObject())
+                        envelope[p.Name] = JsonNode.Parse(GrantRules.Parameter(p.Value, out var problem)?.ToJson() ?? throw new InvalidOperationException(problem));
+                    var within = GrantRules.EnvelopeProblem(JsonSerializer.SerializeToElement(envelope), input.GetProperty("request_parameters")) is null;
+                    return JsonSerializer.Serialize(new Dictionary<string, bool> { ["within"] = within });
+                }
+            default:
+                {
+                    static string? Str(JsonElement o, string name) =>
+                        o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+                    var use = input.GetProperty("use").Deserialize<GrantExecutionEvidence>()!;
+                    var grant = input.TryGetProperty("grant", out var g) && g.ValueKind == JsonValueKind.Object ? g.Deserialize<CapabilityGrant>() : null;
+                    var previous = input.TryGetProperty("previous", out var p) && p.ValueKind == JsonValueKind.Object
+                        ? new PreviousUse(Str(p, "executed_at")!, Str(p, "time_token_issued_at")!)
+                        : null;
+                    var head = input.TryGetProperty("token_head", out var h) && h.ValueKind == JsonValueKind.Object
+                        ? new TokenHead(Str(h, "digest")!, Str(h, "executed_at")!)
+                        : null;
+                    var found = GrantRules.UseProblem(use, new UseCheck
+                    {
+                        Grant = grant,
+                        Previous = previous,
+                        Admitted = input.TryGetProperty("admitted", out var a) && a.ValueKind == JsonValueKind.Number ? a.GetInt32() : null,
+                        TokenHead = head,
+                        TokenKeys = input.GetProperty("na_public_keys").EnumerateArray().Select(k => k.GetString()!).ToList(),
+                        RawToken = input.GetProperty("use").GetProperty("time_token"),
+                        RevokedAt = Str(input, "revoked_at"),
+                        RecordedAt = Str(input, "recorded_at"),
+                    });
+                    return JsonSerializer.Serialize(new Dictionary<string, string?> { ["code"] = found?.Code });
+                }
+        }
     }
 
     [Theory]
@@ -124,7 +197,8 @@ public class GrantsTests
         var unsigned = JsonNode.Parse(GrantJson)!.AsObject();
         unsigned.Remove("signature");
         Assert.Equal("missing_signature", Verify(unsigned.ToJsonString(), NAKeyHistory.ValidAlways(new[] { SignerKey })));
-        Assert.Throws<ArgumentNullException>(() => OfflineVerifier.VerifyCapabilityGrant(GrantJson, null!));
+        Assert.Throws<ArgumentNullException>(() => OfflineVerifier.VerifyCapabilityGrant(GrantJson, (NAKeyHistory)null!));
+        Assert.Throws<ArgumentNullException>(() => OfflineVerifier.VerifyCapabilityGrant(GrantJson, (IReadOnlyList<string>)null!));
     }
 
     [Theory]
@@ -153,6 +227,15 @@ public class GrantsTests
         Assert.Equal("accepted", Verify(SignedAgain(key), keys));
         Assert.Equal("unknown_field", Verify(SignedAgain(key, g => g["delegable"] = true), keys));
         Assert.Equal("non_canonical_form", Verify(SignedAgain(key, g => g["issued_at"] = "2026-01-01T00:00:00+00:00"), keys));
-        Assert.Equal("non_canonical_form", Verify(SignedAgain(key, g => g.Remove("max_uses_per_time_token")), keys));
+        // A field the reference fills when absent: read, but not in the form it writes.
+        Assert.Equal("non_canonical_form", Verify(SignedAgain(key, g => g.Remove("parameter_envelope")), keys));
+        // 1.9.0: a field the reference requires, missing, or a validity longer than 24 hours: no grant at all.
+        Assert.Equal("malformed", Verify(SignedAgain(key, g => g.Remove("max_uses_per_time_token")), keys));
+        Assert.Equal("malformed", Verify(SignedAgain(key, g => g["valid_until"] = "2099-01-01T00:00:00Z"), keys));
+        // The budget's bounds: 10,000 uses, 1,000 per time token.
+        Assert.Equal("accepted", Verify(SignedAgain(key, g => g["max_uses"] = 10000), keys));
+        Assert.Equal("malformed", Verify(SignedAgain(key, g => g["max_uses"] = 10001), keys));
+        Assert.Equal("accepted", Verify(SignedAgain(key, g => g["max_uses_per_time_token"] = 1000), keys));
+        Assert.Equal("malformed", Verify(SignedAgain(key, g => g["max_uses_per_time_token"] = 1001), keys));
     }
 }
