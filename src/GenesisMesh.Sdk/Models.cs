@@ -2865,6 +2865,34 @@ public sealed class ExecutorKeyRecord
     [JsonPropertyName("resource_prefix")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ResourcePrefix { get; set; }
+
+    /// <summary>
+    /// v1.5.0: the store position of the registry record that registered the key, for a key read from the store's
+    /// registry records (as an audit pack places it). A record verifies only with a key registered before it and not
+    /// retired before it (<see cref="OfflineVerifier.KeyPlacementProblem"/>); a key given without a position or time is
+    /// not placed. Not part of the NA's answer.
+    /// </summary>
+    [JsonPropertyName("registered_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? RegisteredSequence { get; set; }
+
+    /// <summary>
+    /// v1.5.0: when the key was registered, for a registry record backfilled at an upgrade or carried past retention,
+    /// which places the key by time instead of by position.
+    /// </summary>
+    [JsonPropertyName("registered_at_time")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RegisteredAtTime { get; set; }
+
+    /// <summary>v1.5.0: the store position of the registry record that retired the key; null while it is not.</summary>
+    [JsonPropertyName("retired_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? RetiredSequence { get; set; }
+
+    /// <summary>v1.5.0: when the key was retired, for a retirement placed by time.</summary>
+    [JsonPropertyName("retired_at_time")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RetiredAtTime { get; set; }
 }
 
 /// <summary>Returned by POST /admin/evidence/retention/apply (<see cref="EvidenceStoreClient.ApplyRetention"/>).</summary>

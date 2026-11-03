@@ -45,35 +45,52 @@ public sealed class EvidenceVerifyOptions
     /// no field this SDK does not know (<c>unknown_field</c>); otherwise nothing of the run is checked.
     /// </summary>
     public string? Checkpoint { get; init; }
+
+    /// <summary>
+    /// v1.5.0: an audit pack's cited entries (<c>cited.jsonl</c>), outside the run; null (the default) for none. They
+    /// seed what the run's records rest on (their decisions, subjects and matched records, the grants of their uses,
+    /// and the heads of the chains the run continues) and are verified for authenticity, not as a run: their failures
+    /// fail the run, named <c>cited …</c>, and their counts do not count. The run then holds every chain from its
+    /// start, and a record it cites that neither holds is <c>cited_record_missing</c>.
+    /// </summary>
+    public IReadOnlyList<EvidenceEvent>? Prior { get; init; }
 }
 
 public static partial class OfflineVerifier
 {
     /// <summary>
-    /// The entry kinds this SDK verifies (1.9.0): those a governed store holds, the records of changes outside the
-    /// governed path, remediation and review records, and pre-issued grants, their uses and revocations. The store's
-    /// other kinds (key successions and archives) fail as <c>unknown_entry_kind</c>, as a kind from a later release does;
-    /// their envelopes still chain.
+    /// The entry kinds this SDK verifies (1.9.0), every kind of the store: those a governed store holds, the records of
+    /// changes outside the governed path, remediation and review records, key successions and archive records, and
+    /// pre-issued grants, their uses and revocations. A kind from a later release fails as <c>unknown_entry_kind</c>;
+    /// its envelope still chains.
     /// </summary>
     internal static readonly string[] VerifiedEntryKinds =
     [
         "decision", "justification", "execution", "retention_checkpoint",
         "observation", "break_glass", "judgement", "quarantine", "registry",
         "remediation", "review",
+        "key_succession", "archive",
         "grant", "grant_execution", "grant_revocation",
     ];
 
     /// <summary>
-    /// The kinds the NA signs among the records it stores exactly as signed (v1.6.0: also grants and their revocations);
-    /// an observer or executor key signs the others (a grant use: its grant's bearer key).
+    /// The kinds the NA signs among the records it stores exactly as signed (v1.5.0: also archive records, v1.6.0:
+    /// grants and their revocations); an observer or executor key signs the others (a grant use: its grant's bearer key).
     /// </summary>
     private static readonly HashSet<string> NASignedOutOfBandKinds = new(StringComparer.Ordinal)
     {
-        "judgement", "quarantine", "registry", "review", "grant", "grant_revocation",
+        "judgement", "quarantine", "registry", "review", "archive", "grant", "grant_revocation",
     };
 
-    /// <summary>v1.3.0: a kind whose record the store holds exactly as signed: a record of a change outside the governed path.</summary>
-    private static bool IsOutOfBand(string kind) => EnvelopeFields.ContainsKey(kind);
+    /// <summary>
+    /// v1.3.0: a kind whose record the store holds exactly as signed: a record of a change outside the governed path
+    /// (v1.4.0: a remediation or review record, v1.5.0: an archive record, v1.6.0: a grant, a use or a revocation). A key
+    /// succession's envelope names its ID too, but the record is the key history's, signed as one.
+    /// </summary>
+    private static bool IsOutOfBand(string kind) => EnvelopeFields.ContainsKey(kind) && kind != "key_succession";
+
+    /// <summary>v1.5.0: how long before it takes effect the store records a key succession at the latest, in microseconds.</summary>
+    private const long SuccessionMinLead = 60_000_000;
 
     /// <summary>How far before an earlier entry of a run an entry may be recorded, in microseconds (v1.5.0, the reference's tolerance).</summary>
     private const long RecordTimeTolerance = 300_000_000;
@@ -95,6 +112,8 @@ public static partial class OfflineVerifier
         ["registry"] = "registry_record_id",
         ["remediation"] = "remediation_id",
         ["review"] = "review_id",
+        ["key_succession"] = "succession_id",
+        ["archive"] = "archive_id",
         ["grant"] = "grant_id",
         ["grant_execution"] = "use_id",
         ["grant_revocation"] = "revocation_id",
@@ -113,6 +132,8 @@ public static partial class OfflineVerifier
         ["registry"] = "RegistryRecord",
         ["remediation"] = "RemediationRecord",
         ["review"] = "ReviewRecord",
+        ["key_succession"] = "KeySuccessionRecord",
+        ["archive"] = "ArchiveRecord",
         ["grant"] = "CapabilityGrant",
         ["grant_execution"] = "GrantExecutionEvidence",
         ["grant_revocation"] = "GrantRevocationRecord",
@@ -154,6 +175,9 @@ public static partial class OfflineVerifier
             ("record_id", "review_id"), ("subject_id", "subject_id"), ("resource_id", "resource_id"), ("capability", "capability"),
             ("outcome", "verdict"),
         ],
+        // v1.5.0: a key succession's and an archive record's envelopes carry their record's ID only.
+        ["key_succession"] = [("record_id", "succession_id")],
+        ["archive"] = [("record_id", "archive_id")],
         // v1.6.0 (no new envelope field): a use's grant is its subject_id, its place in its chain its exec_sequence_no; its
         // resource_sequence is the NA's, outside the record.
         ["grant"] = [("record_id", "grant_id"), ("executor_sovereign_id", "bearer_sovereign_id")],
@@ -180,19 +204,24 @@ public static partial class OfflineVerifier
     /// operator key when the run holds a holder record for it). A grant (v1.6.0, signed by the NA) is held for its uses
     /// and revocation; a use (signed by its grant's bearer key) continues its grant's use chain, names the grant the run
     /// holds and its digest, keeps the use rules (<see cref="GrantRules.UseProblem"/>) against what the run holds, and
-    /// takes the next place of its resource's chain; a revocation names a grant held, once. Pass an export (<see cref="ParseExportLines(string)"/>,
-    /// <see cref="EvidenceStoreClient.ExportAll"/>) or, with <see cref="EvidenceVerifyOptions.Contiguous"/> false, a
-    /// history. Nothing is thrown for a bad entry, or an event built by hand that is not one: each finding is a failure,
-    /// with the reason codes every implementation uses.
+    /// takes the next place of its resource's chain; a revocation names a grant held, once. A key succession (v1.5.0)
+    /// is signed by its outgoing key, its new key and, given the NA's key history, the root key, and is one of that
+    /// history's successions, recorded at least a minute before it takes effect; an archive record is the NA's. A record
+    /// signed by a key the store placed (<see cref="ExecutorKeyRecord.RegisteredSequence"/>) verifies only with a key
+    /// registered before it and not retired before it (<see cref="KeyPlacementProblem"/>). Pass an export
+    /// (<see cref="ParseExportLines(string)"/>, <see cref="EvidenceStoreClient.ExportAll"/>), a range of an audit pack with
+    /// its cited entries (<see cref="EvidenceVerifyOptions.Prior"/>), or, with <see cref="EvidenceVerifyOptions.Contiguous"/>
+    /// false, a history. Nothing is thrown for a bad entry, or an event built by hand that is not one: each finding is a
+    /// failure, with the reason codes every implementation uses.
     /// </summary>
     /// <remarks>
-    /// This SDK verifies the kinds a governed store holds (<c>decision</c>, <c>justification</c>, <c>execution</c>,
-    /// <c>retention_checkpoint</c>) and, from 1.9.0, the records of changes outside the governed path
-    /// (<c>observation</c>, <c>break_glass</c>, <c>judgement</c>, <c>quarantine</c>, <c>registry</c>), remediation
-    /// and review records (<c>remediation</c>, <c>review</c>), and pre-issued grants (<c>grant</c>,
-    /// <c>grant_execution</c>, <c>grant_revocation</c>). Any other kind fails as <c>unknown_entry_kind</c>; verify
-    /// such a store with the TypeScript or Rust SDK, or the core's <c>genesis-mesh audit verify</c>. Anchors are not
-    /// checked here, nor where the store placed an executor key (an audit pack's registry records).
+    /// This SDK verifies every kind of the store (1.9.0): those a governed store holds (<c>decision</c>,
+    /// <c>justification</c>, <c>execution</c>, <c>retention_checkpoint</c>), the records of changes outside the
+    /// governed path (<c>observation</c>, <c>break_glass</c>, <c>judgement</c>, <c>quarantine</c>, <c>registry</c>),
+    /// remediation and review records (<c>remediation</c>, <c>review</c>), key successions and archive records
+    /// (<c>key_succession</c>, <c>archive</c>), and pre-issued grants (<c>grant</c>, <c>grant_execution</c>,
+    /// <c>grant_revocation</c>). A kind from a later release fails as <c>unknown_entry_kind</c>. Store anchors are not
+    /// checked here.
     /// </remarks>
     /// <param name="events">The entries, in store order.</param>
     /// <param name="options">The keys, and what the run is.</param>
@@ -218,7 +247,10 @@ public static partial class OfflineVerifier
         using var checkpoint = options.Checkpoint is { } json ? StrictJsonReader.Parse(json) : null;
         var run = new EventRun(options, checkpoint?.RootElement);
         if (run.CheckpointAccepted())
+        {
+            if (options.Prior is { } prior) run.VisitCited(prior);
             foreach (var e in events) run.Visit(e);
+        }
         return run.Result;
     }
 
@@ -317,6 +349,12 @@ public static partial class OfflineVerifier
         private long? _clock;
         /// <summary>v1.5.0: whether the entries just visited are a block retention carried forward.</summary>
         private bool _carrying;
+        /// <summary>v1.5.0: an audit pack's run, given its cited entries (<see cref="EvidenceVerifyOptions.Prior"/>).</summary>
+        private readonly bool _pack;
+        /// <summary>v1.5.0: the digests of the successions a key history with its root key holds; null without one.</summary>
+        private readonly HashSet<string>? _successions;
+        /// <summary>Where findings and counts go: the result, or the cited entries' own while they are visited.</summary>
+        private EvidenceStoreVerification _target;
 
         public EvidenceStoreVerification Result { get; } = new() { Verified = true };
 
@@ -328,18 +366,36 @@ public static partial class OfflineVerifier
             foreach (var key in options.ExecutorKeys) _executorKeys[key.KeyId] = key;
             _contiguous = options.Contiguous;
             _checkpoint = checkpoint?.Clone();
+            _pack = options.Prior is not null;
+            _successions = _history is { RootPublicKey: not null } held ? held.SuccessionDigests.ToHashSet(StringComparer.Ordinal) : null;
+            _target = Result;
         }
 
         private IReadOnlyList<string> KeysAt(long at) => _history?.KeysAt(Instant(at)) ?? _naKeys;
 
         private void Fail(long? sequence, string reason, string detail = "")
         {
-            Result.Verified = false;
-            Result.Failures.Add(new EvidenceVerificationFailure { StoreSequence = sequence, Reason = reason, Detail = detail });
+            _target.Verified = false;
+            _target.Failures.Add(new EvidenceVerificationFailure { StoreSequence = sequence, Reason = reason, Detail = detail });
         }
 
         private void Warn(long? sequence, string reason, string detail) =>
-            (Result.Warnings ??= []).Add(new EvidenceVerificationFailure { StoreSequence = sequence, Reason = reason, Detail = detail });
+            (_target.Warnings ??= []).Add(new EvidenceVerificationFailure { StoreSequence = sequence, Reason = reason, Detail = detail });
+
+        /// <summary>
+        /// v1.5.0: an audit pack's cited entries, in store order, before the run: they seed what the run rests on and are
+        /// checked for authenticity, not as a run. Their failures fail the run (<c>cited …</c>); their counts do not count.
+        /// </summary>
+        public void VisitCited(IEnumerable<EvidenceEvent> prior)
+        {
+            var cited = new EvidenceStoreVerification { Verified = true };
+            _target = cited;
+            foreach (var e in prior.OrderBy(e => e?.Entry?.StoreSequence ?? 0)) Visit(e, cited: true);
+            _target = Result;
+            foreach (var failure in cited.Failures) Fail(failure.StoreSequence, failure.Reason, $"cited {failure.Detail}".TrimEnd());
+            if (cited.Warnings is { } warnings) (Result.Warnings ??= []).AddRange(warnings);
+            _previous = null;
+        }
 
         /// <summary>A checkpoint the caller supplied is the NA's, with no field this SDK does not know.</summary>
         public bool CheckpointAccepted()
@@ -410,7 +466,7 @@ public static partial class OfflineVerifier
                     || !OutOfBandSignedBy(raw, [held.Grant.BearerPublicKey])))
                 return;
             var hasHead = _chainHeads.TryGetValue(use.GrantId, out var head);
-            if (!hasHead && !_fromStart && use.UseSequence != 1) return;
+            if (!hasHead && !_fromStart && !_pack && use.UseSequence != 1) return;
             if (!GrantRules.ContinuesChain(use, hasHead ? head! : new UseChainHead(0, null))) return;
             var digest = GrantRecordDigest("GrantExecutionEvidence", raw);
             _chainHeads[use.GrantId] = new UseChainHead(use.UseSequence, digest);
@@ -432,22 +488,23 @@ public static partial class OfflineVerifier
                 : null;
         }
 
-        public void Visit(EvidenceEvent e)
+        /// <summary>One entry, of the run or (<paramref name="cited"/>) among an audit pack's cited entries.</summary>
+        public void Visit(EvidenceEvent e, bool cited = false)
         {
             if (Envelope(e) is not { } entry)
             {
-                Result.CheckedEntries++;
+                _target.CheckedEntries++;
                 Fail(null, "payload_invalid", "event envelope");
                 return;
             }
             var seq = e.Entry.StoreSequence;
             var kind = e.Entry.EntryKind;
-            Result.CheckedEntries++;
+            _target.CheckedEntries++;
             // v1.5.0: in a contiguous run an entry is not recorded more than the tolerance before an earlier one
             // (carried entries keep their first time), and an NA key must also be valid at the latest earlier time.
             TryReadTimestamp(e.Entry.RecordedAt, out var recordedAt);
             long? notBefore = null;
-            if (_contiguous)
+            if (_contiguous && !cited)
             {
                 var adjacent = _previous is not null && seq == _previousSequence + 1;
                 _carrying = CarriedKinds.Contains(kind) && adjacent && (_previousKind == "retention_checkpoint" || _carrying);
@@ -462,7 +519,7 @@ public static partial class OfflineVerifier
             }
             if (EntryDigest(entry) != e.EntryDigest) Fail(seq, "entry_digest_mismatch");
             if (PayloadDigest(e.Payload) != e.Entry.PayloadDigest) Fail(seq, "payload_digest_mismatch");
-            if (_previous is { } previous && (_contiguous || seq == _previousSequence + 1))
+            if (_previous is { } previous && ((_contiguous && !cited) || seq == _previousSequence + 1))
             {
                 if (seq != _previousSequence + 1) Fail(seq, "store_sequence_gap");
                 else if (e.Entry.PrevEntryDigest != EntryDigest(previous)) Fail(seq, "store_chain_break");
@@ -472,10 +529,10 @@ public static partial class OfflineVerifier
             {
                 Fail(seq, "store_chain_break", "does not continue from the checkpoint");
             }
-            if (_firstSequence is null)
+            if (_firstSequence is null && !cited)
             {
                 _firstSequence = seq;
-                _fromStart = seq == 1 || (_checkpoint is { } start && seq == PayloadInteger(start, "removed_through_sequence") + 1);
+                _fromStart = _pack || seq == 1 || (_checkpoint is { } start && seq == PayloadInteger(start, "removed_through_sequence") + 1);
             }
             _previous = entry;
             _previousSequence = seq;
@@ -497,8 +554,8 @@ public static partial class OfflineVerifier
             {
                 Warn(seq, "unsigned_field", string.Join(", ", unsignedUnknown));
                 // v1.3.0: the reference stores the records of changes outside the governed path exactly as signed, and
-                // (v1.5.0) a retention checkpoint: a field outside the signature is no part of one.
-                if (kind == "retention_checkpoint" || IsOutOfBand(kind))
+                // (v1.5.0) a key succession and a retention checkpoint: a field outside the signature is no part of one.
+                if (kind is "retention_checkpoint" or "key_succession" || IsOutOfBand(kind))
                 {
                     Fail(seq, "payload_invalid", string.Join(", ", unsignedUnknown));
                     return;
@@ -510,7 +567,7 @@ public static partial class OfflineVerifier
                 return;
             }
             var record = kind == "decision" ? payload.GetProperty("decision") : payload;
-            new RecordCheck(this, seq, kind, recordedAt, notBefore, entry, payload, record).Check();
+            new RecordCheck(this, seq, kind, recordedAt, notBefore, entry, payload, record, cited).Check();
         }
 
         /// <summary>The event's envelope as received, or null when it is not one (TypeScript <c>validEvent</c>).</summary>
@@ -559,6 +616,8 @@ public static partial class OfflineVerifier
             var signedAsReceived = kind switch
             {
                 "execution" => KeyNamed(payload) is { } key && SignedAsReceived(model, payload, [key.PublicKey]),
+                // v1.5.0: by an NA key, the root key or the new key, as the key history reads it.
+                "key_succession" => SignedAsReceived(model, payload, SuccessionSigners(payload)),
                 // An observation or break-glass record: by the key the signature names, whatever its role, so that an
                 // authentic record with a field this SDK does not know is refused by name first, as the reference refuses it.
                 _ when IsOutOfBand(kind) => NASignedOutOfBandKinds.Contains(kind)
@@ -567,6 +626,15 @@ public static partial class OfflineVerifier
                 _ => SignedAsReceived(model, payload, _allNaKeys),
             };
             return signedAsReceived ? (fields, [], payload) : ([], fields, StrictFields.WithoutUnknownFields(model, payload));
+        }
+
+        /// <summary>The keys that may sign a key succession: the NA's, the history's root key and the record's new key.</summary>
+        private List<string> SuccessionSigners(JsonElement record)
+        {
+            var keys = new List<string>(_allNaKeys);
+            if (_history?.RootPublicKey is { } root) keys.Add(root);
+            if (Str(record, "new_public_key") is { } newKey) keys.Add(newKey);
+            return keys;
         }
 
         /// <summary>The registered key a record's signature names, or null.</summary>
@@ -587,19 +655,38 @@ public static partial class OfflineVerifier
             "quarantine" => Shapes.Quarantine(payload),
             "remediation" => Shapes.Remediation(payload),
             "review" => Shapes.Review(payload),
+            "key_succession" => Shapes.KeySuccession(payload),
+            "archive" => Shapes.Archive(payload),
             "grant" => Shapes.Grant(payload),
             "grant_execution" => Shapes.GrantUse(payload),
             "grant_revocation" => Shapes.GrantRevocation(payload),
             _ => Shapes.Registry(payload),
         };
 
-        /// <summary>One entry's record, checked once its envelope and payload are.</summary>
+        /// <summary>
+        /// One entry's record, checked once its envelope and payload are. A record among an audit pack's cited entries
+        /// (<paramref name="cited"/>) is not checked against its predecessors: they are no run.
+        /// </summary>
         private sealed class RecordCheck(EventRun run, long seq, string kind, long recordedAt, long? notBefore,
-            JsonElement entry, JsonElement payload, JsonElement record)
+            JsonElement entry, JsonElement payload, JsonElement record, bool cited)
         {
-            private EvidenceStoreVerification Result => run.Result;
+            private EvidenceStoreVerification Result => run._target;
+
+            /// <summary>Whether the checks that need the record's predecessors in the run apply.</summary>
+            private bool Chained => !cited;
 
             private void Fail(string reason, string detail = "") => run.Fail(seq, reason, detail);
+
+            /// <summary>
+            /// v1.5.0: a key-signed record verifies only with a key registered before it and not retired before it
+            /// (<see cref="KeyPlacementProblem"/>); true, with the failure, when its key is not.
+            /// </summary>
+            private bool Misplaced(ExecutorKeyRecord? key)
+            {
+                var problem = key is null ? null : KeyPlacementProblem(key, seq, Str(entry, "recorded_at")!);
+                if (problem is not null) Fail(problem, $"{kind} signed by {key!.KeyId}");
+                return problem is not null;
+            }
 
             /// <summary>
             /// v1.3.0: a record whose signature covers it as received, in a form the reference does not write, is refused
@@ -678,6 +765,14 @@ public static partial class OfflineVerifier
                     case "review":
                         Review(recordId);
                         break;
+                    case "key_succession":
+                        KeySuccession(recordId);
+                        break;
+                    case "archive":
+                        // v1.5.0: an archive record is signed by the NA, as its other records are.
+                        NASignature(keys => OutOfBandSignedBy(record, keys), "ArchiveRecord");
+                        Result.Archives++;
+                        break;
                     case "grant":
                         Grant(recordId);
                         break;
@@ -709,6 +804,49 @@ public static partial class OfflineVerifier
             }
 
             /// <summary>
+            /// A key succession (v1.5.0): signed by its outgoing key, an NA key, and by the new key
+            /// (<c>succession_invalid_new_key_signature</c>); given the NA's key history with its root key, signed by the
+            /// root key (<c>succession_invalid_root_signature</c>) and one of the history's successions
+            /// (<c>succession_not_in_history</c>). It was not issued after it takes effect, and the store recorded it at
+            /// least a minute before (<c>succession_backdated</c>).
+            /// </summary>
+            private void KeySuccession(string successionId)
+            {
+                const string model = "KeySuccessionRecord";
+                Result.KeySuccessions++;
+                var root = run._history?.RootPublicKey;
+                if (StrictRefusal(model, payload, run.SuccessionSigners(payload)) is { } refusal)
+                {
+                    Fail(refusal == "unknown_field" ? "invalid_signature" : refusal, kind);
+                    return;
+                }
+                var previousKey = Str(payload, "previous_public_key")!;
+                if (!run._allNaKeys.Contains(previousKey, StringComparer.Ordinal) || !SignedAsReceived(model, payload, [previousKey]))
+                {
+                    Fail("invalid_signature", kind);
+                    return;
+                }
+                if (root is not null && !SignedAsReceived(model, payload, [root]))
+                {
+                    Fail("succession_invalid_root_signature", successionId);
+                    return;
+                }
+                if (!SignedAsReceived(model, payload, [Str(payload, "new_public_key")!]))
+                {
+                    Fail("succession_invalid_new_key_signature", successionId);
+                    return;
+                }
+                if (run._successions is { } held && !held.Contains(Sha256Hex(ReceivedCanonical(model, payload))))
+                {
+                    Fail("succession_not_in_history", successionId);
+                    return;
+                }
+                TryReadTimestamp(Str(payload, "effective_at")!, out var effective);
+                TryReadTimestamp(Str(payload, "issued_at")!, out var issued);
+                if (issued > effective || recordedAt + SuccessionMinLead > effective) Fail("succession_backdated", successionId);
+            }
+
+            /// <summary>
             /// A remediation record (v1.4.0): signed by an executor key of its sovereign, as execution evidence is; one per
             /// judgement or decision (<c>duplicate_remediation</c>), of its subject's change, resource and the version that
             /// change made (<c>remediation_subject_mismatch</c>), after a forward rotation of the same resource
@@ -719,10 +857,10 @@ public static partial class OfflineVerifier
             private void Remediation(string remediationId)
             {
                 var key = run.FittingKey(kind, payload);
-                Signature(key is not null && OutOfBandSignedBy(payload, [key.PublicKey]), "RemediationRecord");
+                if (!Misplaced(key)) Signature(key is not null && OutOfBandSignedBy(payload, [key.PublicKey]), "RemediationRecord");
                 Result.Remediations++;
                 run._notDecisions.Add(remediationId);
-                var heldFromStart = run._contiguous && run._fromStart;
+                var heldFromStart = Chained && run._contiguous && run._fromStart;
                 var subjectId = Str(payload, "subject_id")!;
                 var resource = Str(payload, "resource_id");
                 var changeKind = Str(payload, "change_kind")!;
@@ -812,7 +950,7 @@ public static partial class OfflineVerifier
                 if (RemediationRules.ReviewHolderProblem(review) is not null) Fail("review_same_holder", review.DecidedBy);
                 if (!run._judgedRecords.TryGetValue(review.SubjectId, out var subject))
                 {
-                    if (run._contiguous && run._fromStart) Fail("review_subject_missing", review.SubjectId);
+                    if (Chained && run._contiguous && run._fromStart) Fail("review_subject_missing", review.SubjectId);
                 }
                 else if (subject.Digest != review.SubjectDigest)
                 {
@@ -831,7 +969,7 @@ public static partial class OfflineVerifier
             {
                 var model = PayloadModels[kind];
                 var key = run.FittingKey(kind, payload);
-                Signature(key is not null && OutOfBandSignedBy(payload, [key.PublicKey]), model);
+                if (!Misplaced(key)) Signature(key is not null && OutOfBandSignedBy(payload, [key.PublicKey]), model);
                 run._subjects[SubjectKey(kind, recordId)] = (Str(entry, "payload_digest")!, seq);
                 // v1.4.0: the version the change made, which a remediation of it disables.
                 var version = kind == "observation" ? Str(payload, "version_id")
@@ -851,7 +989,7 @@ public static partial class OfflineVerifier
                 var resource = Str(payload, "resource_id")!;
                 var position = PayloadInteger(entry, "observation_sequence");
                 var hasHead = run._observationHeads.TryGetValue(resource, out var head);
-                if ((hasHead || run._fromStart) && position != (hasHead ? head : 0) + 1) Fail("observation_chain_break", resource);
+                if (Chained && (hasHead || run._fromStart) && position != (hasHead ? head : 0) + 1) Fail("observation_chain_break", resource);
                 run._observationHeads[resource] = position is { } p && p != 0 ? p : head;
             }
 
@@ -876,15 +1014,23 @@ public static partial class OfflineVerifier
                     if (subject.Digest != Str(payload, "subject_digest") || subject.Sequence != subjectSequence)
                         Fail("judgement_subject_mismatch", subjectId);
                 }
-                else if (run._contiguous && run._firstSequence is { } first && subjectSequence >= first)
+                else if (Chained && run._contiguous && run._firstSequence is { } first && subjectSequence >= first)
                 {
                     Fail("judgement_subject_missing", subjectId);
+                }
+                else if (run._pack && Chained)
+                {
+                    // v1.5.0: a pack holds, or cites, the subject of every judgement in its range.
+                    Fail("cited_record_missing", $"{Str(payload, "subject_kind")} {subjectId}");
                 }
                 if (Str(payload, "matched_evidence_id") is { } match)
                 {
                     if (!run._matched.Add(match)) Fail("match_reused", match);
                     // v1.3.1: the NA matches a record it already holds, so a run from entry 1 holds it.
-                    if (run._contiguous && run._firstSequence == 1 && !run._matchable.Contains(match)) Fail("judgement_match_missing", match);
+                    if (Chained && run._contiguous && run._firstSequence == 1 && !run._matchable.Contains(match))
+                        Fail("judgement_match_missing", match);
+                    else if (run._pack && Chained && !run._matchable.Contains(match))
+                        Fail("cited_record_missing", $"matched record {match}");
                 }
             }
 
@@ -926,7 +1072,9 @@ public static partial class OfflineVerifier
                 var grantId = Str(payload, "grant_id")!;
                 if (!run._grantsHeld.TryGetValue(grantId, out var held))
                 {
-                    if (run._contiguous && run._fromStart) Fail("grant_missing", grantId);
+                    // A pack holds, or cites, the grant of every use and revocation in its range.
+                    if (run._pack && Chained) Fail("cited_record_missing", $"grant {grantId}");
+                    else if (Chained && run._contiguous && run._fromStart) Fail("grant_missing", grantId);
                 }
                 else if (Str(payload, "grant_digest") != held.Digest)
                 {
@@ -950,7 +1098,7 @@ public static partial class OfflineVerifier
             private void GrantUse(string useId)
             {
                 var key = run.FittingKey(kind, payload);
-                Signature(key is not null && OutOfBandSignedBy(payload, [key.PublicKey]), "GrantExecutionEvidence");
+                if (!Misplaced(key)) Signature(key is not null && OutOfBandSignedBy(payload, [key.PublicKey]), "GrantExecutionEvidence");
                 Result.GrantExecutions++;
                 var use = ReadPayload<GrantExecutionEvidence>(payload)!;
                 var grantId = use.GrantId;
@@ -958,11 +1106,12 @@ public static partial class OfflineVerifier
                 var isHeld = run._grantsHeld.TryGetValue(grantId, out var held);
                 var signer = run.KeyNamed(payload);
                 var hasHead = run._chainHeads.TryGetValue(grantId, out var head);
-                if ((hasHead || run._fromStart) && !GrantRules.ContinuesChain(use, hasHead ? head! : new UseChainHead(0, null)))
+                if (Chained && (hasHead || run._fromStart) && !GrantRules.ContinuesChain(use, hasHead ? head! : new UseChainHead(0, null)))
                     Fail("grant_use_chain_break", grantId);
                 if (!isHeld)
                 {
-                    if (run._contiguous && run._fromStart) Fail("grant_missing", grantId);
+                    if (run._pack && Chained) Fail("cited_record_missing", $"grant {grantId}");
+                    else if (Chained && run._contiguous && run._fromStart) Fail("grant_missing", grantId);
                 }
                 else if (!IsObject(payload, "signature", out var sig) || Str(sig, "key_id") != held.Grant.BearerKeyId
                          || use.ExecutorSovereignId != held.Grant.BearerSovereignId
@@ -981,8 +1130,12 @@ public static partial class OfflineVerifier
                 var tokenPlace = PayloadInteger(token, "use_sequence");
                 var named = tokenPlace is > 0 && run._useHeads.TryGetValue(UseKey(grantId, (int)tokenPlace), out var n) ? n : null;
                 // Every time given here was read before (the records' by their shapes, recorded_at by the export's
-                // parser), so the rules never throw for one they cannot read.
-                if (GrantRules.UseProblem(use, new UseCheck
+                // parser), so the rules never throw for one they cannot read. A cited use is checked for its token only.
+                if (!Chained)
+                {
+                    if (!TokenSignatureValid(token, tokenKeys)) Fail("grant_time_token_invalid", useId);
+                }
+                else if (GrantRules.UseProblem(use, new UseCheck
                 {
                     Grant = isHeld ? held.Grant : null,
                     Previous = run._lastAdmitted.GetValueOrDefault(grantId),
@@ -993,7 +1146,9 @@ public static partial class OfflineVerifier
                     RevokedAt = run._revoked.GetValueOrDefault(grantId),
                     RecordedAt = Str(entry, "recorded_at"),
                 }) is { } problem)
+                {
                     Fail(problem.Code, problem.Detail);
+                }
                 run._chainHeads[grantId] = new UseChainHead(use.UseSequence, received);
                 run._lastAdmitted[grantId] = GrantRules.NextPreviousUse(use);
                 if (run._admittedUses.TryGetValue(grantId, out var count)) run._admittedUses[grantId] = count + 1;
@@ -1002,7 +1157,7 @@ public static partial class OfflineVerifier
                 if (use.ResourceId is { } resourceId)
                 {
                     var hasResource = run._resourceHeads.TryGetValue(resourceId, out var resourceHead);
-                    if ((hasResource || run._fromStart) && position != (hasResource ? resourceHead.Sequence + 1 : 1))
+                    if (Chained && (hasResource || run._fromStart) && position != (hasResource ? resourceHead.Sequence + 1 : 1))
                         Fail("resource_chain_break", resourceId);
                     run._resourceHeads[resourceId] = (position ?? 0, received);
                 }
@@ -1037,7 +1192,7 @@ public static partial class OfflineVerifier
             {
                 // v1.3.0: only an executor key signs execution evidence.
                 var key = run.FittingKey(kind, payload);
-                Signature(key is not null && SignedAsReceived("ExecutionEvidence", payload, [key.PublicKey]), "ExecutionEvidence");
+                if (!Misplaced(key)) Signature(key is not null && SignedAsReceived("ExecutionEvidence", payload, [key.PublicKey]), "ExecutionEvidence");
                 Result.Executions++;
                 var decisionId = Str(payload, "decision_id")!;
                 var hasDecision = run._decisions.TryGetValue(decisionId, out var decision);
@@ -1052,16 +1207,21 @@ public static partial class OfflineVerifier
                              && Str(payload, "executed_capability") != Str(context, "requested_capability"))
                         Fail("evidence_capability_mismatch");
                 }
+                else if (run._pack && Chained)
+                {
+                    // v1.5.0: a pack holds, or cites, the decision every execution in its range rests on.
+                    Fail("cited_record_missing", $"decision {decisionId}");
+                }
                 // v1.3.0: execution evidence never rests on a judgement or a record of a change outside the governed path.
                 if (run._notDecisions.Contains(decisionId)) Fail("evidence_cites_judgement", decisionId);
                 var sequenceNo = PayloadInteger(payload, "sequence_no");
                 var prevEvidence = Str(payload, "prev_evidence_digest");
                 if (run._lastExecution.TryGetValue(decisionId, out var prior))
                 {
-                    if (sequenceNo != PayloadInteger(prior, "sequence_no") + 1 || prevEvidence != ExecutionDigestOf(prior))
+                    if (Chained && (sequenceNo != PayloadInteger(prior, "sequence_no") + 1 || prevEvidence != ExecutionDigestOf(prior)))
                         Fail("evidence_chain_break");
                 }
-                else if (hasDecision && (sequenceNo != 1 || prevEvidence is not null))
+                else if (Chained && hasDecision && (sequenceNo != 1 || prevEvidence is not null))
                 {
                     Fail("evidence_chain_break");
                 }
@@ -1079,7 +1239,7 @@ public static partial class OfflineVerifier
                     var resourceSequence = PayloadInteger(payload, "resource_sequence");
                     // v1.3.1: a run that starts neither at entry 1 nor right after the checkpoint takes the first record
                     // it holds of a resource as that chain's start.
-                    if ((hasHead || run._fromStart)
+                    if (Chained && (hasHead || run._fromStart)
                         && (resourceSequence != (hasHead ? head.Sequence + 1 : 1)
                             || Str(payload, "prev_resource_digest") != (hasHead ? head.Digest : null)))
                         Fail("resource_chain_break", resourceId);
@@ -1111,6 +1271,29 @@ public static partial class OfflineVerifier
                 if (authentic) run.SeedHeads(payload);
             }
         }
+    }
+
+    /// <summary>
+    /// Why a record at <paramref name="storeSequence"/>, recorded at <paramref name="recordedAt"/>, may not carry the
+    /// signature of <paramref name="key"/>, or null (v1.5.0): a key the store registered (by position, or by time for a
+    /// registry record backfilled at an upgrade or carried past retention) only after it is
+    /// <c>evidence_unknown_executor</c>, and one it retired before it <c>evidence_executor_key_retired</c>. A key given
+    /// without a registration position or time (<see cref="ExecutorKeyRecord.RegisteredSequence"/>,
+    /// <see cref="ExecutorKeyRecord.RegisteredAtTime"/>) is not placed: null.
+    /// </summary>
+    /// <param name="key">The executor or observer key, as an audit pack's registry records place it.</param>
+    /// <param name="storeSequence">The record's store position.</param>
+    /// <param name="recordedAt">The record's <c>recorded_at</c>.</param>
+    public static string? KeyPlacementProblem(ExecutorKeyRecord key, long storeSequence, string recordedAt)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        if (key.RegisteredSequence is null && key.RegisteredAtTime is null) return null;
+        var hasAt = TryReadTimestamp(recordedAt, out var at);
+        bool Before(long? sequence, string? time) =>
+            (sequence is { } s && s < storeSequence)
+            || (hasAt && time is not null && TryReadTimestamp(time, out var placed) && placed <= at);
+        if (!Before(key.RegisteredSequence, key.RegisteredAtTime)) return "evidence_unknown_executor";
+        return Before(key.RetiredSequence, key.RetiredAtTime) ? "evidence_executor_key_retired" : null;
     }
 
     /// <summary>

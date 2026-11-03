@@ -261,6 +261,29 @@ public static partial class OfflineVerifier
             return Micros(value.GetProperty("changed_not_before").GetString()!) <= Micros(value.GetProperty("changed_not_after").GetString()!);
         }
 
+        // v1.5.0: a key succession and an archive record, as the reference reads them in a store.
+        private static readonly Check Signatures = ListOf(Shape([("key_id", Text), ("sig", Text)]));
+
+        private static readonly Check KeySuccessionFields = Shape(
+        [
+            ("succession_id", Filled(Bounded(128))), ("sovereign_id", Bounded(256)),
+            ("key_sequence", v => v is { } e && PayloadInteger(e) >= 2), ("previous_key_id", Bounded(128)),
+            ("previous_public_key", Bounded(128)), ("previous_succession_digest", Absent(Sha256)), ("new_key_id", Bounded(128)),
+            ("new_public_key", Bounded(128)), ("effective_at", Utc), ("new_valid_to", Utc), ("issued_at", Utc),
+            ("signatures", Filled(Signatures)),
+        ], exact: true);
+
+        private static readonly Check ArchiveFields = Shape(
+        [
+            ("archive_id", Filled(Bounded(128))), ("pack_id", Bounded(128)), ("from_sequence", Positive), ("through_sequence", Positive),
+            ("through_entry_digest", Sha256), ("end_anchor_sequence", Positive), ("manifest_sha256", Sha256), ("location", Bounded(1024)),
+            ("archived_at", Utc), ("recorded_by", Absent(Text)), ("issuer_sovereign_id", Text), ("issued_by", Text),
+            ("signature", Optional(Signature)),
+        ], exact: true);
+
+        public static bool KeySuccession(JsonElement value) => KeySuccessionFields(value);
+        public static bool Archive(JsonElement value) => ArchiveFields(value);
+
         public static bool BreakGlass(JsonElement value) => BreakGlassFields(value);
         public static bool Judgement(JsonElement value) => JudgementFields(value);
         public static bool Quarantine(JsonElement value) => QuarantineFields(value);

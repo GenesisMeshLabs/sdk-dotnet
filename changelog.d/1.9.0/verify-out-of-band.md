@@ -8,5 +8,5 @@
   - a quarantine entry's record against its digest (`quarantine_digest_mismatch`);
   - execution evidence never rests on a judgement or a change record (`evidence_cites_judgement`).
 
-  The result counts them (`Observations`, `BreakGlass`, `Judgements`, `Quarantined`). Key succession and archive entries still fail as `unknown_entry_kind` (remediation, review and grant entries are verified too, from 1.9.0).
+  The result counts them (`Observations`, `BreakGlass`, `Judgements`, `Quarantined`). Remediation, review, key succession, archive and grant entries are verified too, from 1.9.0.
 - **Conformance:** the shared `out_of_band` suite's 37 `verify_export` vectors run.
