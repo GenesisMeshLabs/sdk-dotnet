@@ -1,0 +1,14 @@
+### Added
+
+- **Every entry kind of the store in an export** (protocol 1.5.0): `OfflineVerifier.VerifyEvidenceEvents` verifies `key_succession` and `archive` entries, as the TypeScript SDK's `verifyEvidenceEvents` does, with the reference's reason codes, and counts them (`KeySuccessions`, `Archives`). A kind from a later release still fails as `unknown_entry_kind`:
+  - a key succession is signed by its outgoing key, an NA key, and by its new key (`succession_invalid_new_key_signature`); given the NA's key history with its root key, by the root key (`succession_invalid_root_signature`), and it is one of that history's successions (`succession_not_in_history`). It was not issued after it takes effect, and the store recorded it at least a minute before (`succession_backdated`);
+  - an archive record is signed by the NA, under its keys or the key its history held when the entry was stored.
+- **The successions of a key history:** `NAKeyHistory.SuccessionDigests`, filled by `VerifyKeyHistory`, and `OfflineVerifier.SuccessionDigest`, as TypeScript's `successionDigest`. A history built by hand with a root key verifies a store's key succession entries only with them.
+- **Executor and observer keys placed by the store** (protocol 1.5.0): `ExecutorKeyRecord.RegisteredSequence`, `RegisteredAtTime`, `RetiredSequence` and `RetiredAtTime`, as an audit pack's registry records place a key. Given them, a record verifies only with a key registered before it (`evidence_unknown_executor`) and not retired before it (`evidence_executor_key_retired`); `OfflineVerifier.KeyPlacementProblem` is that rule. A placement time that cannot be read is refused (`ArgumentException`), so it never leaves a retired key unretired.
+- **A range of an audit pack** (protocol 1.5.0): `EvidenceVerifyOptions.Prior`, the pack's cited entries. They seed what the range rests on and are verified as records, not as a run; their failures fail the range, the detail prefixed `cited`. The range then holds every chain from its start, and a record it cites that neither holds is `cited_record_missing`.
+- **Conformance:** the `audit` suite's 13 `verify_export` and 2 `verify_range` vectors run, and the `field_registry` suite's 17 `entry_kind` vectors.
+
+### Differs from TypeScript
+
+- A placement time is read as the references read it, a fraction past six digits (.NET's `"o"` format) cut to microseconds; TypeScript throws for one.
+- `NAKeyHistory` takes its successions as digests (`SuccessionDigests`); TypeScript's takes the records.

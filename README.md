@@ -30,20 +30,21 @@ From 1.9 it also carries the NA's 1.4.0 remediation and reviews: the rules,
 the due queue, remediation records and reviews, cancelling a denied change by
 rotating forward and urgent changes (see
 [Remediation and reviews](#remediation-and-reviews)), and verifies their
-entries in an export. Not yet here: verifying the store's 1.5.0 entry kinds
-in an export (key successions, archives) and store anchors. Those live in the
-[TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript) and the
-[Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust). The embedded field
-registry lists their records.
+entries in an export. It verifies every entry kind of the store in an
+export, key successions and archive records included, and a range of an
+audit pack with its cited entries. Not yet here: store anchors, which live in
+the [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript) and
+the [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust).
 A boundary policy with the 1.4.0 sections (`remediation`, `review_required`,
 `emergency`) verifies here like any other.
 
 From 1.5 it reads the NA's key history (see
 [NA key history](#na-key-history)), so decisions and agreements signed before
-and after a key succession keep verifying. Audit packs, archives and their
-verification are not part of this SDK: they live in the core
-(`genesis-mesh audit pack`, `genesis-mesh audit verify`) and in the Rust
-SDK's standalone verifier `genesis-mesh-verify`.
+and after a key succession keep verifying. Audit packs and their
+verification are not part of this SDK yet: they live in the core
+(`genesis-mesh audit pack`, `genesis-mesh audit verify`), the TypeScript SDK
+(`verifyAuditPack`) and the Rust SDK's standalone verifier
+`genesis-mesh-verify`.
 
 From 1.9 a client can serve several NA instances with failover, retry
 idempotent requests, and sign with a key it does not hold (see
@@ -1374,25 +1375,39 @@ bool kept = OfflineVerifier.VerifyRetentionCheckpoint(checkpointJson, [naKey]);
     `grant_use_uploaded_late`), and taking the next place of its resource's
     chain; a grant's revocation once (`duplicate_grant_revocation`), of a
     grant held; and no grant use sharing another record's ID
-    (`duplicate_record`).
+    (`duplicate_record`);
+  - each key succession (1.9.0): signed by its outgoing key and its new key
+    (`succession_invalid_new_key_signature`) and, given the key history with
+    its root key, by the root key (`succession_invalid_root_signature`), one
+    of the history's successions (`succession_not_in_history`;
+    `NAKeyHistory.SuccessionDigests`, which `VerifyKeyHistory` fills), not
+    issued after it takes effect and recorded at least a minute before
+    (`succession_backdated`); each archive record signed by the NA;
+  - with executor and observer keys the store placed (`RegisteredSequence` or
+    `RegisteredAtTime`, as an audit pack's registry records place them), each
+    record signed by a key registered before it (`evidence_unknown_executor`)
+    and not retired before it (`evidence_executor_key_retired`).
 
   A bad entry is a failure, never an exception.
-- It verifies the kinds a governed store holds (decisions, justification
-  proofs, execution evidence, retention checkpoints), the records of changes
-  outside the governed path (observations, break-glass records, judgements,
-  quarantine and registry records), remediation and review records, and
-  pre-issued grants, their uses and revocations. Entries of the 1.5.0 kinds
-  (key successions, archives) fail as `unknown_entry_kind`; their envelopes
-  still chain. Verify a store
-  holding them with the TypeScript or Rust SDK, or `genesis-mesh audit
-  verify`. Anchors are not checked, nor where the store placed an executor
-  key.
+- It verifies every kind of the store (1.9.0): those a governed store holds
+  (decisions, justification proofs, execution evidence, retention
+  checkpoints), the records of changes outside the governed path
+  (observations, break-glass records, judgements, quarantine and registry
+  records), remediation and review records, key successions and archive
+  records, and pre-issued grants, their uses and revocations. A kind from a
+  later release fails as `unknown_entry_kind`; its envelope still chains.
+  Store anchors are not checked.
+- For a range of an audit pack, pass its cited entries as `Prior`: they seed
+  what the range rests on and are checked as records, not as a run (their
+  failures keep their reason, the detail prefixed `cited`); a record the range
+  cites that neither holds is `cited_record_missing`.
 - For an export that starts after a retention, pass `Checkpoint`, the
   NA-signed checkpoint as received: the run continues from its last removed
   entry, and each resource and observation chain from its head.
-- It runs the shared `field_registry` suite's `export` vectors and the
-  `out_of_band` and `remediation` suites' `verify_export` vectors, and gives
-  the reference's own verification of its export.
+- It runs the shared `field_registry` suite's `export` and `entry_kind`
+  vectors, the `out_of_band`, `remediation`, `grants` and `audit` suites'
+  `verify_export` vectors and the `audit` suite's `verify_range` vectors, and
+  gives the reference's own verification of its export.
 
 ### NA key history
 

@@ -113,6 +113,14 @@ public sealed class NAKeyHistory
     public TimeSpan VouchingGrace { get; }
 
     /// <summary>
+    /// The digests of the successions the history was built from (<see cref="OfflineVerifier.SuccessionDigest"/>, in
+    /// key sequence order): with a root key, a store's key succession entry must be one of them (v1.5.0,
+    /// <c>succession_not_in_history</c>). <see cref="OfflineVerifier.VerifyKeyHistory"/> fills it; a history built by
+    /// hand with a root key and none verifies no key succession entry.
+    /// </summary>
+    public IReadOnlyList<string> SuccessionDigests { get; init; } = [];
+
+    /// <summary>
     /// This history with a shorter grace (1.8.0): a negative grace is 0, and one longer than the current grace keeps
     /// it. Use it for the NA's unsigned <c>vouching_grace_seconds</c>, which may only shorten the grace.
     /// </summary>
@@ -120,7 +128,7 @@ public sealed class NAKeyHistory
     {
         if (grace < TimeSpan.Zero) grace = TimeSpan.Zero;
         if (grace > VouchingGrace) grace = VouchingGrace;
-        return new NAKeyHistory(SovereignId, RootPublicKey, Keys, grace);
+        return new NAKeyHistory(SovereignId, RootPublicKey, Keys, grace) { SuccessionDigests = SuccessionDigests };
     }
 
     /// <summary>
@@ -249,6 +257,7 @@ public static partial class OfflineVerifier
             new(1, null, Str(na, "public_key")!, null, null, ParseTimestamp(Str(na, "valid_to")!), false),
         };
         string? previousDigest = null;
+        var digests = new List<string>();
         if (successions is { ValueKind: JsonValueKind.Array } list)
         {
             foreach (var raw in list.EnumerateArray())
@@ -261,9 +270,10 @@ public static partial class OfflineVerifier
                 keys.Add(new NAKey(record.KeySequence, record.NewKeyId, record.NewPublicKey, record.EffectiveAt, null,
                     record.NewValidTo, true));
                 previousDigest = record.Digest;
+                digests.Add(record.Digest);
             }
         }
-        return new(true, null, null, new NAKeyHistory(sovereign, root, keys));
+        return new(true, null, null, new NAKeyHistory(sovereign, root, keys) { SuccessionDigests = digests });
     }
 
     private static readonly string[] GenesisStrings = ["network_name", "network_version", "root_public_key"];
@@ -382,6 +392,21 @@ public static partial class OfflineVerifier
             return null;
         return new Succession(keySequence, previousKeyId, previousKey, previousDigest, newKeyId, newKey, effective, validTo, issued,
             Sha256Hex(ReceivedCanonical("KeySuccessionRecord", obj)));
+    }
+
+    /// <summary>
+    /// The digest of a key succession (v1.5.0): SHA-256 hex of its signed form as received, every field but its
+    /// signatures. A history's <see cref="NAKeyHistory.SuccessionDigests"/> holds these.
+    /// </summary>
+    /// <param name="successionJson">The KeySuccessionRecord JSON, as received.</param>
+    /// <exception cref="StrictJsonException"><paramref name="successionJson"/> is not strict JSON.</exception>
+    /// <exception cref="ArgumentException"><paramref name="successionJson"/> is not a JSON object.</exception>
+    public static string SuccessionDigest(string successionJson)
+    {
+        using var doc = StrictJsonReader.Parse(successionJson);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            throw new ArgumentException("a key succession is a JSON object", nameof(successionJson));
+        return Sha256Hex(ReceivedCanonical("KeySuccessionRecord", doc.RootElement));
     }
 
     /// <summary>True when <paramref name="value"/> is a base64 Ed25519 public key (32 bytes).</summary>

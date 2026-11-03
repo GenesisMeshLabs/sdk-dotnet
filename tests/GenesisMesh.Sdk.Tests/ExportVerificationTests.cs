@@ -349,14 +349,51 @@ public class ExportVerificationTests
     }
 
     [Fact]
-    public void AKindThisSdkDoesNotVerify_StillChains()
+    public void AKeyIsPlacedByPositionOrTime_OrNotAtAll()
+    {
+        const string at = "2026-01-01T00:10:00Z";
+        static string? Problem(ExecutorKeyRecord key) => OfflineVerifier.KeyPlacementProblem(key, 5, at);
+        // Not placed: no registration position or time (a retirement alone places nothing).
+        Assert.Null(Problem(new ExecutorKeyRecord()));
+        Assert.Null(Problem(new ExecutorKeyRecord { RetiredSequence = 2 }));
+        // By position: registered before the record, and not retired before it.
+        Assert.Null(Problem(new ExecutorKeyRecord { RegisteredSequence = 4 }));
+        Assert.Equal("evidence_unknown_executor", Problem(new ExecutorKeyRecord { RegisteredSequence = 5 }));
+        Assert.Null(Problem(new ExecutorKeyRecord { RegisteredSequence = 4, RetiredSequence = 5 }));
+        Assert.Equal("evidence_executor_key_retired", Problem(new ExecutorKeyRecord { RegisteredSequence = 4, RetiredSequence = 4 }));
+        // By time: registered at or before the record's time; either placement is enough.
+        Assert.Null(Problem(new ExecutorKeyRecord { RegisteredAtTime = at }));
+        Assert.Equal("evidence_unknown_executor", Problem(new ExecutorKeyRecord { RegisteredAtTime = "2026-01-01T00:10:00.000001Z" }));
+        Assert.Null(Problem(new ExecutorKeyRecord { RegisteredSequence = 9, RegisteredAtTime = at }));
+        Assert.Equal("evidence_executor_key_retired", Problem(new ExecutorKeyRecord { RegisteredSequence = 1, RetiredAtTime = at }));
+        // Read as the references read a time: .NET's "o" format, seven fraction digits, is cut to microseconds.
+        var retired = new DateTimeOffset(2026, 1, 1, 0, 9, 0, TimeSpan.Zero).ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal("evidence_executor_key_retired", Problem(new ExecutorKeyRecord { RegisteredSequence = 1, RetiredAtTime = retired }));
+        Assert.Null(Problem(new ExecutorKeyRecord { RegisteredAtTime = "2026-01-01T00:10:00.0000009Z" }));
+        // A time that cannot be read is refused: it never places a key, nor leaves a retired one unretired.
+        Assert.Throws<ArgumentException>(() => Problem(new ExecutorKeyRecord { RegisteredAtTime = "yesterday" }));
+        Assert.Throws<ArgumentException>(() => Problem(new ExecutorKeyRecord { RegisteredSequence = 1, RetiredAtTime = "2026-01-01 00:09:00Z" }));
+        Assert.Throws<ArgumentException>(() => Problem(new ExecutorKeyRecord { RegisteredSequence = 9, RetiredSequence = 1, RetiredAtTime = "soon" }));
+        Assert.Throws<ArgumentException>(() =>
+            OfflineVerifier.KeyPlacementProblem(new ExecutorKeyRecord { RegisteredAtTime = at }, 5, "not a time"));
+        Assert.Throws<ArgumentNullException>(() => OfflineVerifier.KeyPlacementProblem(null!, 5, at));
+        Assert.Throws<ArgumentNullException>(() => OfflineVerifier.KeyPlacementProblem(new ExecutorKeyRecord(), 5, null!));
+        // VerifyEvidenceEvents refuses such a key before it verifies anything.
+        Assert.Throws<ArgumentException>(() => OfflineVerifier.VerifyEvidenceEvents([], new EvidenceVerifyOptions
+        {
+            ExecutorKeys = [new ExecutorKeyRecord { KeyId = "executor-b", RegisteredSequence = 1, RetiredAtTime = "soon" }],
+        }));
+    }
+
+    [Fact]
+    public void AKindFromALaterRelease_StillChains()
     {
         var events = Events();
-        // 1.9.0: archives come with the audit packs (a later step of this SDK).
-        events[2].Entry.EntryKind = "archive";
+        // 1.9.0: this SDK verifies every kind of the store; one from a later release is unknown.
+        events[2].Entry.EntryKind = "audit_note";
         var result = OfflineVerifier.VerifyEvidenceEvents(Relink(events), Options());
         var unknown = Assert.Single(result.Failures, f => f.Reason == "unknown_entry_kind");
-        Assert.Equal(((long?)3, "archive"), (unknown.StoreSequence, unknown.Detail));
+        Assert.Equal(((long?)3, "audit_note"), (unknown.StoreSequence, unknown.Detail));
         Assert.DoesNotContain("store_chain_break", Reasons(result));
     }
 
