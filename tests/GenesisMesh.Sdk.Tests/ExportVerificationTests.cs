@@ -349,14 +349,39 @@ public class ExportVerificationTests
     }
 
     [Fact]
-    public void AKindThisSdkDoesNotVerify_StillChains()
+    public void AKeyIsPlacedByPositionOrTime_OrNotAtAll()
+    {
+        const string at = "2026-01-01T00:10:00Z";
+        static string? Problem(ExecutorKeyRecord key) => OfflineVerifier.KeyPlacementProblem(key, 5, at);
+        // Not placed: no registration position or time (a retirement alone places nothing).
+        Assert.Null(Problem(new ExecutorKeyRecord()));
+        Assert.Null(Problem(new ExecutorKeyRecord { RetiredSequence = 2 }));
+        // By position: registered before the record, and not retired before it.
+        Assert.Null(Problem(new ExecutorKeyRecord { RegisteredSequence = 4 }));
+        Assert.Equal("evidence_unknown_executor", Problem(new ExecutorKeyRecord { RegisteredSequence = 5 }));
+        Assert.Null(Problem(new ExecutorKeyRecord { RegisteredSequence = 4, RetiredSequence = 5 }));
+        Assert.Equal("evidence_executor_key_retired", Problem(new ExecutorKeyRecord { RegisteredSequence = 4, RetiredSequence = 4 }));
+        // By time: registered at or before the record's time; either placement is enough.
+        Assert.Null(Problem(new ExecutorKeyRecord { RegisteredAtTime = at }));
+        Assert.Equal("evidence_unknown_executor", Problem(new ExecutorKeyRecord { RegisteredAtTime = "2026-01-01T00:10:00.000001Z" }));
+        Assert.Null(Problem(new ExecutorKeyRecord { RegisteredSequence = 9, RegisteredAtTime = at }));
+        Assert.Equal("evidence_executor_key_retired", Problem(new ExecutorKeyRecord { RegisteredSequence = 1, RetiredAtTime = at }));
+        // A time that cannot be read places nothing before the record.
+        Assert.Equal("evidence_unknown_executor", Problem(new ExecutorKeyRecord { RegisteredAtTime = "yesterday" }));
+        Assert.Equal("evidence_unknown_executor",
+            OfflineVerifier.KeyPlacementProblem(new ExecutorKeyRecord { RegisteredAtTime = at }, 5, "not a time"));
+        Assert.Throws<ArgumentNullException>(() => OfflineVerifier.KeyPlacementProblem(null!, 5, at));
+    }
+
+    [Fact]
+    public void AKindFromALaterRelease_StillChains()
     {
         var events = Events();
-        // 1.9.0: archives come with the audit packs (a later step of this SDK).
-        events[2].Entry.EntryKind = "archive";
+        // 1.9.0: this SDK verifies every kind of the store; one from a later release is unknown.
+        events[2].Entry.EntryKind = "audit_note";
         var result = OfflineVerifier.VerifyEvidenceEvents(Relink(events), Options());
         var unknown = Assert.Single(result.Failures, f => f.Reason == "unknown_entry_kind");
-        Assert.Equal(((long?)3, "archive"), (unknown.StoreSequence, unknown.Detail));
+        Assert.Equal(((long?)3, "audit_note"), (unknown.StoreSequence, unknown.Detail));
         Assert.DoesNotContain("store_chain_break", Reasons(result));
     }
 

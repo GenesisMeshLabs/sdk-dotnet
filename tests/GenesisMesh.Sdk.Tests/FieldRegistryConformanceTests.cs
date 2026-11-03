@@ -16,14 +16,13 @@ public class FieldRegistryConformanceTests
 {
     private static readonly string SuitePath = Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "field_registry.json");
     private static readonly string InteropPath = Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "interop.json");
-    private static readonly HashSet<string> KindsRun = new() { "unknown_fields", "verify_decision", "verify_agreement", "export" };
-
     /// <summary>
-    /// Entry kinds: the vectors expect every kind of the registry to be verified, and this SDK verifies the kinds a
-    /// governed store holds and the records of changes outside the governed path (1.9.0,
-    /// <see cref="OfflineVerifier.VerifiedEntryKinds"/>).
+    /// Every kind (1.9.0): the entry kinds too, as this SDK now verifies every kind of the registry
+    /// (<see cref="OfflineVerifier.VerifiedEntryKinds"/>).
     /// </summary>
-    private static readonly HashSet<string> KindsNotRun = new() { "entry_kind" };
+    private static readonly HashSet<string> KindsRun = new() { "unknown_fields", "verify_decision", "verify_agreement", "export", "entry_kind" };
+
+    private static readonly HashSet<string> KindsNotRun = new();
 
     private static JsonElement Suite() => JsonDocument.Parse(File.ReadAllText(SuitePath)).RootElement;
 
@@ -129,6 +128,10 @@ public class FieldRegistryConformanceTests
         var expected = v.GetProperty("expected");
         switch (v.GetProperty("kind").GetString())
         {
+            case "entry_kind":
+                Assert.Equal(expected.GetProperty("known").GetBoolean(),
+                    OfflineVerifier.VerifiedEntryKinds.Contains(v.GetProperty("entry_kind").GetString()));
+                break;
             case "unknown_fields":
                 var want = expected.GetProperty("unknown_fields").EnumerateArray().Select(e => e.GetString()!).ToList();
                 Assert.Equal(want, StrictFields.UnknownFields(v.GetProperty("model").GetString()!, v.GetProperty("record")));
