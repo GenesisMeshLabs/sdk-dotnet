@@ -150,6 +150,41 @@ public sealed class ArchiveRecord
     public JsonElement Signature { get; set; }
 }
 
+/// <summary><c>GET /admin/evidence/archives</c> (v1.5.0): the archive records and how far they cover the store.</summary>
+public sealed class ArchiveList
+{
+    /// <summary>The archive records, as the NA signed them.</summary>
+    [JsonPropertyName("archives")]
+    public List<ArchiveRecord> Archives { get; set; } = [];
+
+    /// <summary>How far an unbroken run of archive records covers the store, from entry 1; 0 for none.</summary>
+    [JsonPropertyName("archived_through_sequence")]
+    public long ArchivedThroughSequence { get; set; }
+
+    /// <summary>Whether retention removes only what archives cover (<c>NA_RETENTION_REQUIRE_ARCHIVE</c>).</summary>
+    [JsonPropertyName("require_archive")]
+    public bool RequireArchive { get; set; }
+}
+
+/// <summary>
+/// <c>POST /admin/evidence/archives</c> (v1.5.0): <c>recorded</c> (201), or <c>duplicate</c> (200) for a manifest already
+/// recorded.
+/// </summary>
+public sealed class ArchiveResult
+{
+    /// <summary><c>recorded</c> or <c>duplicate</c>.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    /// <summary>The archive record, as the NA signed it.</summary>
+    [JsonPropertyName("archive")]
+    public ArchiveRecord Archive { get; set; } = new();
+
+    /// <summary>How far an unbroken run of archive records covers the store now.</summary>
+    [JsonPropertyName("archived_through_sequence")]
+    public long ArchivedThroughSequence { get; set; }
+}
+
 /// <summary><c>POST /admin/evidence/audit-pack</c>: the signed manifest and every other file as text.</summary>
 public sealed class AuditPackResponse
 {

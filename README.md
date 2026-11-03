@@ -418,6 +418,37 @@ var checkpoint = await client.EvidenceStore.LatestCheckpoint();  // null before 
   records cover while the NA requires archives (its default). `HeldBack` says
   what stopped it short.
 
+#### Anchors, audit packs and archives
+
+An auditor keeps the NA's anchors, asks for audit packs and verifies them
+offline (1.9.0; see [Store anchors](#store-anchors) and
+[Audit packs](#audit-packs)):
+
+```csharp
+var anchored = await auditor.EvidenceStore.Anchor();       // the head signed now ("anchored"), or "unchanged"
+var held = await auditor.EvidenceStore.AllAnchors();       // every anchor, page by page: keep your copies
+var pack = await auditor.EvidenceStore.AuditPack(new AuditPackParams { Since = from, Until = until });
+var result = OfflineVerifier.VerifyAuditPack(OfflineVerifier.AuditPackFiles(pack),
+    new VerifyAuditPackOptions { RootPublicKey = rootPublicKey, HeldAnchors = held });
+// Once the pack is written to immutable storage and read back intact:
+var archive = await admin.EvidenceStore.RecordArchive(pack.Manifest, "s3://audit-archive/packs/" + packId);
+var archives = await auditor.EvidenceStore.Archives();     // ArchivedThroughSequence: how far they cover the store
+```
+
+- `Anchor`, `Anchors`, `AllAnchors`, `AuditPack` and `Archives` need the read
+  tier: an auditor's key is enough. `RecordArchive` is privileged.
+- `Anchor` and `RecordArchive` are retried and failed over (a replay answers
+  `unchanged` or `duplicate`). `AuditPack` is never replayed: the NA allows a
+  few packs an hour (`RateLimitException`), and a pack of a large range takes
+  time and tens of megabytes (raise `ClientOptions.Timeout`).
+- `AuditPack` refuses a range no anchor ends (`audit_pack_not_anchored`:
+  anchor the store first). `RecordArchive` takes the manifest as the NA signed
+  it and refuses a pack the NA did not build, that did not verify, or that
+  leaves a gap after the archives before it (`ConflictException`).
+- An NA that keeps no registry records (its out-of-band records off) places
+  no executor key in a pack: pass the keys you hold as
+  `VerifyAuditPackOptions.ExecutorKeys`.
+
 #### Changes outside the governed path
 
 From 1.9 the store also keeps changes made outside the governed path, when the

@@ -26,6 +26,9 @@ public sealed partial class EvidenceStoreClient
     /// <summary>The most changes the NA returns in one page.</summary>
     private const int MaxChangesPage = 10_000;
 
+    /// <summary>The most anchors the NA returns in one page.</summary>
+    private const int MaxAnchorPage = 1000;
+
     /// <summary>Refusals of a record whose predecessor is not stored: final once that predecessor is a dead letter.</summary>
     private static readonly HashSet<string> ChainGaps = new(StringComparer.Ordinal) { "evidence_chain_gap", "resource_chain_gap" };
 
@@ -528,6 +531,127 @@ public sealed partial class EvidenceStoreClient
         return latest?.Deserialize<RetentionCheckpoint>();
     }
 
+    // ── Anchors, audit packs and archives (1.9.0) ───────────────────────────
+
+    /// <summary>
+    /// One page of the NA's signed store anchors, in order (read tier; v1.2.0). Pass the page's
+    /// <see cref="AnchorPage.NextAfterAnchor"/> as the next <see cref="AnchorPageParams.AfterAnchor"/>, or use
+    /// <see cref="AllAnchors"/>.
+    /// GET /admin/evidence/anchors
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="AnchorPageParams.Limit"/> is not 1 to 1000, or <see cref="AnchorPageParams.AfterAnchor"/> is negative:
+    /// nothing is sent.
+    /// </exception>
+    public Task<AnchorPage> Anchors(AnchorPageParams? page = null, CancellationToken ct = default) =>
+        _t.AdminGetAsync<AnchorPage>("/admin/evidence/anchors", AnchorQuery(page?.AfterAnchor, page?.Limit), ct);
+
+    /// <summary>
+    /// Every store anchor after <paramref name="afterAnchor"/>, following the pages (read tier): the copies an auditor keeps
+    /// outside the operator's reach and verifies exports and audit packs against
+    /// (<see cref="OfflineVerifier.VerifyStoreAnchors"/>, <see cref="OfflineVerifier.VerifyAuditPack"/>).
+    /// </summary>
+    /// <param name="afterAnchor">Anchors after this <c>anchor_sequence</c>; 0 for all.</param>
+    /// <param name="ct">Cancels the reading.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="afterAnchor"/> is negative: nothing is sent.</exception>
+    /// <exception cref="InvalidOperationException">The NA's cursor did not advance.</exception>
+    public async Task<IReadOnlyList<StoreAnchor>> AllAnchors(long afterAnchor = 0, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(afterAnchor);
+        var anchors = new List<StoreAnchor>();
+        for (long? after = afterAnchor; after is { } cursor;)
+        {
+            var page = await _t.AdminGetAsync<AnchorPage>("/admin/evidence/anchors", AnchorQuery(cursor, MaxAnchorPage), ct)
+                .ConfigureAwait(false);
+            if (page.NextAfterAnchor is { } next && next <= cursor)
+                throw new InvalidOperationException("genesismesh: the anchor page cursor did not advance");
+            anchors.AddRange(page.Anchors);
+            after = page.NextAfterAnchor;
+        }
+        return anchors;
+    }
+
+    /// <summary>
+    /// Signs the store's current head now (read tier; v1.2.0): an auditor decides how long recent entries go unanchored.
+    /// The NA signs only a head not yet anchored, so the request is retried and failed over: a replay answers
+    /// <c>unchanged</c>.
+    /// POST /admin/evidence/anchors
+    /// </summary>
+    public Task<AnchorResult> Anchor(CancellationToken ct = default) =>
+        _t.AdminPostAsync<AnchorResult>("/admin/evidence/anchors", new Dictionary<string, object?>(), idempotent: true, ct);
+
+    /// <summary>
+    /// An audit pack (read tier; v1.5.0): one range of the store between two anchors, everything its records cite, the
+    /// NA's key history and the manifest it signs. <see cref="OfflineVerifier.AuditPackFiles"/> turns the answer into
+    /// the pack's files and <see cref="OfflineVerifier.VerifyAuditPack"/> verifies them offline, from the root key and
+    /// the anchors you hold. The answer can be tens of megabytes (up to 50,000 entries): raise
+    /// <see cref="ClientOptions.Timeout"/> for a large range. A pack is costly: the NA allows a few an hour
+    /// (<see cref="RateLimitException"/> beyond <c>NA_RATE_LIMIT_AUDIT_PACKS_PER_HOUR</c>), so the request is never
+    /// replayed.
+    /// POST /admin/evidence/audit-pack
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">A store position is below 1: nothing is sent.</exception>
+    /// <exception cref="ConflictException">
+    /// No anchor ends the range (<c>audit_pack_not_anchored</c>: <see cref="Anchor"/> first), or the range is too large
+    /// for one pack (<c>audit_pack_too_large</c>).
+    /// </exception>
+    public async Task<AuditPackResponse> AuditPack(AuditPackParams? range = null, CancellationToken ct = default)
+    {
+        var body = new Dictionary<string, object?>();
+        if (range?.FromSequence is { } from)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(from, 1L, nameof(range));
+            body["from_sequence"] = from;
+        }
+        if (range?.UntilSequence is { } until)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(until, 1L, nameof(range));
+            body["until_sequence"] = until;
+        }
+        if (range?.Since is { } since) body["since"] = Rfc3339(since);
+        if (range?.Until is { } untilTime) body["until"] = Rfc3339(untilTime);
+        return await _t.AdminPostAsync<AuditPackResponse>("/admin/evidence/audit-pack", body, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The archive records and how far they cover the store (read tier; v1.5.0).
+    /// GET /admin/evidence/archives
+    /// </summary>
+    public Task<ArchiveList> Archives(CancellationToken ct = default) =>
+        _t.AdminGetAsync<ArchiveList>("/admin/evidence/archives", null, ct);
+
+    /// <summary>
+    /// Records that a pack was written to immutable storage at <paramref name="location"/> and read back intact
+    /// (privileged; v1.5.0). The NA checks the manifest is its own, ends at its anchor of the last entry, verified when it
+    /// was built and continues the archives without a gap, then appends a signed archive record
+    /// (<see cref="OfflineVerifier.VerifyArchiveRecord(string, NAKeyHistory)"/>). The same manifest again answers
+    /// <c>duplicate</c>, so the request is retried and failed over.
+    /// POST /admin/evidence/archives
+    /// </summary>
+    /// <param name="manifest">The pack's manifest as the NA signed it: <see cref="AuditPackResponse.Manifest"/>, or <c>manifest.json</c> read back.</param>
+    /// <param name="location">Where the pack is kept, 1 to 1024 characters.</param>
+    /// <param name="ct">Cancels the request.</param>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="manifest"/> is not a JSON object, or <paramref name="location"/> is not 1 to 1024 characters:
+    /// nothing is sent.
+    /// </exception>
+    /// <exception cref="ValidationException">The manifest is not signed by this NA (<c>archive_manifest_invalid</c>).</exception>
+    /// <exception cref="ConflictException">
+    /// The pack is not one this NA built (<c>archive_pack_unknown</c>), did not verify (<c>archive_pack_unverified</c>),
+    /// does not end at the NA's anchor of its last entry (<c>archive_anchor_mismatch</c>), leaves a gap after the archives
+    /// before it (<c>archive_not_contiguous</c>), or another manifest with its pack ID is archived (<c>archive_conflict</c>).
+    /// </exception>
+    public async Task<ArchiveResult> RecordArchive(JsonElement manifest, string location, CancellationToken ct = default)
+    {
+        if (manifest.ValueKind != JsonValueKind.Object)
+            throw new ArgumentException("genesismesh: the manifest is a JSON object", nameof(manifest));
+        ArgumentNullException.ThrowIfNull(location);
+        if (location.Length is < 1 or > 1024)
+            throw new ArgumentException("genesismesh: the location is 1 to 1024 characters", nameof(location));
+        var body = new Dictionary<string, object?> { ["manifest"] = manifest, ["location"] = location };
+        return await _t.AdminPostAsync<ArchiveResult>("/admin/evidence/archives", body, idempotent: true, ct).ConfigureAwait(false);
+    }
+
     // ── Changes outside the governed path (1.9.0) ───────────────────────────
     // With the NA's out-of-band records off, these calls are refused with 404 out_of_band_disabled.
 
@@ -941,6 +1065,20 @@ public sealed partial class EvidenceStoreClient
     }
 
     /// <summary>The query of a page of changes; throws for a value out of range.</summary>
+    private static Dictionary<string, string>? AnchorQuery(long? afterAnchor, int? limit)
+    {
+        if (afterAnchor is { } a) ArgumentOutOfRangeException.ThrowIfNegative(a, nameof(afterAnchor));
+        if (limit is { } l)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(l, 1, nameof(limit));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(l, MaxAnchorPage, nameof(limit));
+        }
+        var query = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (afterAnchor is not null) query["after_anchor"] = afterAnchor.Value.ToString(CultureInfo.InvariantCulture);
+        if (limit is not null) query["limit"] = limit.Value.ToString(CultureInfo.InvariantCulture);
+        return query.Count == 0 ? null : query;
+    }
+
     private static Dictionary<string, string>? ChangesQuery(int? limit, long? afterSequence)
     {
         if (limit is { } l)
