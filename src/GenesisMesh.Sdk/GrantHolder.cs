@@ -724,7 +724,8 @@ public sealed class GrantHolder
         // Refused before anything runs: the NA would refuse such a use and never store it.
         if (EvidenceMetadata.MetadataProblem(ExecutionRecorder.Element(new Dictionary<string, object?> { ["request_parameters"] = parametersJson })) is { } secret)
             throw new GrantRefusedException("grant_use_secret_material", secret);
-        if (_resourcePrefix is not null && !(request.ResourceId ?? "").StartsWith(_resourcePrefix, StringComparison.Ordinal))
+        // A use without a resource is outside any prefix, the empty one included (unlike execution evidence).
+        if (_resourcePrefix is not null && (request.ResourceId is null || !request.ResourceId.StartsWith(_resourcePrefix, StringComparison.Ordinal)))
             throw new GrantRefusedException("grant_use_out_of_scope", $"the bearer key covers only resources starting with {_resourcePrefix}");
         if (!grant.Capabilities.Contains(request.Capability, StringComparer.Ordinal))
             throw new GrantRefusedException("grant_capability_mismatch", $"{request.Capability} is not one of the grant's capabilities");

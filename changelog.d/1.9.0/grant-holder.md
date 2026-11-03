@@ -12,5 +12,6 @@
 - A failed action's use is persisted with the state (TypeScript's holder moves its chain without persisting it).
 - On its first change the holder takes up a later use of its grant the record outbox holds (kept before a stop left the state unpersisted), so no place is signed twice.
 - `Sync` still uploads when the NA refuses a time token for a reason other than the grant's end (`GrantSyncResult.TimeTokenRefusal`, such as `time_token_request_stale`); `Act` then falls back, and the NA decides. TypeScript throws, and its sync uploads nothing.
+- Under an empty resource prefix, a request without a resource is refused (`grant_use_out_of_scope`), as the NA refuses such a use; TypeScript lets it run.
 - The action is a `Func<GrantAuthority, CancellationToken, Task<ActionReport<T>?>>`; the result holds either `UnderGrant` or `Fallback`, whose `Outcome` is the governed action's `GovernedOutcome<T>`.
 - `NAKeys` is a key history; a list of keys is `NAKeyHistory.ValidAlways(keys)`.

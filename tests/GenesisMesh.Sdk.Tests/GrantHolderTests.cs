@@ -57,6 +57,12 @@ public class GrantHolderTests
         public List<JsonNode> BreakGlass { get; } = [];
         public string? TokenRefusal;
         public int TokenRefusalStatus = 409;
+        /// <summary>A head digest the NA's next tokens name instead of the one asked for.</summary>
+        public string? TokenHeadOverride;
+        /// <summary>The evaluation route is out of reach while the others answer.</summary>
+        public bool EvaluationDown;
+        /// <summary>Refuse the next use for good without keeping it (no quarantine entry).</summary>
+        public string? RefuseNext;
         /// <summary>Refuse the next use for good: the NA quarantines it.</summary>
         public string? QuarantineNext;
         public List<string> RevokedGrants = [];
@@ -67,7 +73,8 @@ public class GrantHolderTests
         {
             var path = request.RequestUri!.AbsolutePath;
             lock (Requests) Requests.Add($"{request.Method.Method} {path}");
-            if (Offline) throw new HttpRequestException(HttpRequestError.ConnectionError, "connection refused");
+            if (Offline || (EvaluationDown && path.Contains("evaluate", StringComparison.Ordinal)))
+                throw new HttpRequestException(HttpRequestError.ConnectionError, "connection refused");
             var body = request.Content is null ? null : JsonNode.Parse(request.Content.ReadAsStringAsync().Result);
             switch (path)
             {
@@ -83,13 +90,19 @@ public class GrantHolderTests
                             ["grant_id"] = asked["grant_id"]!.GetValue<string>(),
                             ["use_sequence"] = asked["use_sequence"]!.GetValue<int>(),
                         };
-                        if (asked["use_head_digest"] is { } head) token["use_head_digest"] = head.GetValue<string>();
+                        if (TokenHeadOverride is { } other) token["use_head_digest"] = other;
+                        else if (asked["use_head_digest"] is { } head) token["use_head_digest"] = head.GetValue<string>();
                         token["issued_at"] = Canonical.Timestamp(Clock);
                         token["issuer_sovereign_id"] = "sovereign-c";
                         token["issued_by"] = "na-key";
                         return Reply(201, new JsonObject { ["time_token"] = JsonNode.Parse(NASigned(token).GetRawText()) });
                     }
                 case "/evidence/grant-executions":
+                    if (RefuseNext is { } refusal)
+                    {
+                        RefuseNext = null;
+                        return Refusal(422, refusal);
+                    }
                     if (QuarantineNext is { } code)
                     {
                         QuarantineNext = null;
@@ -673,6 +686,19 @@ public class GrantHolderTests
     }
 
     [Fact]
+    public async Task UnderAnEmptyResourcePrefixAUseWithoutAResourceIsStillRefused()
+    {
+        using var x = Make(resourcePrefix: "");
+        var rotate = Setup.Rotate();
+        Assert.Equal("grant_use_out_of_scope", (await Assert.ThrowsAsync<GrantRefusedException>(() => x.Holder.Act(new GrantActRequest
+        {
+            Capability = rotate.Capability,
+            RequestParameters = rotate.RequestParameters,
+        }, Report()))).Code);
+        Assert.Equal(GrantPaths.Grant, (await x.Holder.Act(rotate, Report())).Path);
+    }
+
+    [Fact]
     public async Task TwoUsesRunOneAfterTheOther_NeverAtOnePlaceInTheChain()
     {
         using var x = Make();
@@ -845,6 +871,191 @@ public class GrantHolderTests
         });
         var second = (await resumed.Act(Setup.Rotate(), Report())).UnderGrant!.Use;
         Assert.Equal((2, GrantRules.UseDigest(first.Use)), (second.UseSequence, second.PrevUseDigest));
+    }
+
+    // ── Tests for faults a fault run found untested ───────────────────────
+
+    [Fact]
+    public async Task ATimeTokenSignedByAnotherKeyIsRefused()
+    {
+        using var x = Make();
+        var token = JsonNode.Parse(x.TimeToken.GetRawText())!.AsObject();
+        token.Remove("signature");
+        token["signature"] = JsonNode.Parse((await OutOfBandRecords.Sign(JsonSerializer.SerializeToElement(token), Bearer, CancellationToken.None)).GetRawText());
+        var e = Assert.Throws<GrantRefusedException>(() => new GrantHolder(new GrantHolderOptions
+        {
+            Client = x.Client,
+            Signer = Bearer,
+            NAKeys = NAKeyHistory.ValidAlways([NAKey.Public]),
+            Grant = x.Grant,
+            TimeToken = JsonSerializer.SerializeToElement(token),
+        }));
+        Assert.Equal("grant_time_token_invalid", e.Code);
+    }
+
+    [Fact]
+    public async Task AFeedOfTheSameSequenceReplacesTheOneHeld()
+    {
+        using var x = Make();
+        Assert.True(await x.Holder.RefreshRevocationFeed());
+        Assert.True(await x.Holder.RefreshRevocationFeed());
+    }
+
+    [Fact]
+    public async Task ARefreshedFeedIsPersisted()
+    {
+        var saved = new List<GrantHolderState>();
+        using var x = Make(persist: (s, _) => { saved.Add(s); return Task.CompletedTask; });
+        Assert.True(await x.Holder.RefreshRevocationFeed());
+        Assert.Equal(1, saved[^1].RevocationFeed!.Sequence);
+    }
+
+    [Fact]
+    public async Task ATimeTokenNamingAnotherHeadIsRefused()
+    {
+        using var x = Make();
+        x.NA.TokenHeadOverride = new string('9', 64);
+        await Use(x);
+        Assert.Equal("grant_time_token_mismatch", (await Assert.ThrowsAsync<GrantRefusedException>(() => x.Holder.RefreshTimeToken())).Code);
+        Assert.Equal("token-0", x.Holder.State.TimeToken.GetProperty("time_token_id").GetString());
+    }
+
+    [Fact]
+    public async Task SyncReadsTheFeed_AndPersistsTheFeedAndTheToken()
+    {
+        var saved = new List<GrantHolderState>();
+        using var x = Make(persist: (s, _) => { saved.Add(s); return Task.CompletedTask; });
+        // A new holder writes null fields as nulls.
+        var fresh = JsonNode.Parse(JsonSerializer.Serialize(x.Holder.State, Auth.SerializerOptions))!.AsObject();
+        Assert.True(fresh.ContainsKey("head_digest") && fresh["head_digest"] is null);
+        var synced = await x.Holder.Sync();
+        Assert.True(synced.Reachable);
+        Assert.Equal(1, x.Holder.State.RevocationFeed!.Sequence);
+        Assert.Contains(saved, s => s.RevocationFeed is not null);
+        Assert.Equal(synced.TimeToken!.Value.GetRawText(), saved[^1].TimeToken.GetRawText());
+    }
+
+    [Fact]
+    public async Task ATokenRefusedForAnotherReasonIsNotKeptAsTheGrantsEnd()
+    {
+        using var x = Make();
+        (x.NA.TokenRefusal, x.NA.TokenRefusalStatus) = ("grant_expired", 422);
+        await x.Holder.Sync();
+        Assert.Null(x.Holder.State.Unusable);
+    }
+
+    [Fact]
+    public async Task AUseIsNeverDatedBeforeThePreviousUse()
+    {
+        using var x = Make();
+        x.NA.Offline = true;
+        x.Tick(600);
+        var first = await Use(x);
+        x.Tick(-300); // the clock went back, still after the token
+        var second = await Use(x);
+        Assert.Equal(first.Use.ExecutedAt, second.Use.ExecutedAt);
+    }
+
+    [Fact]
+    public async Task AUseAtTheGrantsEndIsStillWithinIt()
+    {
+        using var x = Make();
+        x.NA.Offline = true;
+        x.Tick(4 * 3600 - 600);
+        Assert.Equal(GrantPaths.Grant, (await x.Holder.Act(Setup.Rotate(), Report())).Path);
+    }
+
+    [Fact]
+    public async Task AGrantWhoseNAKeyNoLongerVouchesEndsAsIfExpired()
+    {
+        // The NA's key handed over an hour after the grant was issued, with no grace: past that, the grant ends.
+        var next = NewKey();
+        var history = new NAKeyHistory("sovereign-c", null,
+        [
+            new NAKey(1, "na-key", NAKey.Public, null, Start.AddHours(1), null, false),
+            new NAKey(2, "na-key-2", next.Public, Start.AddHours(1), null, null, false),
+        ], TimeSpan.Zero);
+        using var x = Make();
+        var clock = Start.AddSeconds(600);
+        var holder = new GrantHolder(new GrantHolderOptions
+        {
+            Client = x.Client,
+            Signer = Bearer,
+            NAKeys = history,
+            Grant = x.Grant,
+            TimeToken = x.TimeToken,
+            Now = () => clock,
+        });
+        x.NA.Offline = true;
+        clock = Start.AddHours(2);
+        Assert.Equal(GrantFallbackCodes.Expired, (await holder.Act(Setup.Rotate(), Report())).Fallback!.Unusable);
+    }
+
+    [Fact]
+    public async Task TheNAsAnswerThatTheGrantEndedIsTheFallbacksReason()
+    {
+        using var x = Make(g => g["max_uses_per_time_token"] = 1);
+        await Use(x);
+        x.NA.TokenRefusal = "grant_expired";
+        x.NA.EvaluationDown = true;
+        var result = (await x.Holder.Act(Setup.Rotate(), Report())).Fallback!;
+        Assert.Equal((GrantPaths.BreakGlass, GrantFallbackCodes.Expired), (result.Path, result.Unusable));
+    }
+
+    [Fact]
+    public async Task OnlyThisGrantsQuarantinedUsesLeaveTheBudget()
+    {
+        using var x = Make(g => g["max_uses"] = 1);
+        var other = JsonNode.Parse(JsonSerializer.Serialize((await Use(x)).Use, Auth.SerializerOptions))!.AsObject();
+        other["grant_id"] = "grant-2";
+        other["use_id"] = "00000000-0000-4000-8000-000000000999";
+        await x.Outbox.Add(EvidenceOutbox.RecordEntry(other.Deserialize<GrantExecutionEvidence>()!) with
+        {
+            State = OutboxStates.DeadLetter,
+            LastError = new SubmissionFailure { Status = 422, Code = "grant_use_outside_validity", Message = "refused", QuarantineId = "q-9" },
+        });
+        x.NA.Offline = true;
+        Assert.Equal(GrantFallbackCodes.BudgetExhausted, (await Fallback(x)).Unusable);
+    }
+
+    [Fact]
+    public async Task AUseRefusedWithoutAQuarantineEntryStillCounts()
+    {
+        using var x = Make(g => g["max_uses"] = 1);
+        x.NA.RefuseNext = "grant_use_invalid_signature";
+        var first = await Use(x);
+        Assert.Equal((OutboxStates.DeadLetter, (string?)null), (first.Queued!.State, first.Queued.LastError!.QuarantineId));
+        x.NA.Offline = true;
+        Assert.Equal(GrantFallbackCodes.BudgetExhausted, (await Fallback(x)).Unusable);
+    }
+
+    [Fact]
+    public async Task OnlyThisGrantsKeptUsesAreTakenUp_AndPersisted()
+    {
+        var saved = new List<GrantHolderState>();
+        using var x = Make(persist: (s, _) => { saved.Add(s); return Task.CompletedTask; });
+        x.NA.Offline = true;
+        var before = x.Holder.State;
+        var first = await Use(x);
+        var other = JsonNode.Parse(JsonSerializer.Serialize(first.Use, Auth.SerializerOptions))!.AsObject();
+        other["grant_id"] = "grant-2";
+        other["use_id"] = "00000000-0000-4000-8000-000000000998";
+        other["use_sequence"] = 5;
+        await x.Outbox.Add(EvidenceOutbox.RecordEntry(other.Deserialize<GrantExecutionEvidence>()!));
+        saved.Clear();
+        var resumed = new GrantHolder(new GrantHolderOptions
+        {
+            Client = x.Client,
+            Signer = Bearer,
+            NAKeys = NAKeyHistory.ValidAlways([NAKey.Public]),
+            State = before,
+            Now = () => Start.AddSeconds(700),
+            Persist = (s, _) => { saved.Add(s); return Task.CompletedTask; },
+        });
+        // A change refused after the take-up: the state taken up is persisted all the same.
+        await Assert.ThrowsAsync<GrantRefusedException>(() => resumed.Act(Setup.Rotate(400), Report()));
+        Assert.Equal(1, saved[^1].Uses);
+        Assert.Equal(2, (await resumed.Act(Setup.Rotate(), Report())).UnderGrant!.Use.UseSequence);
     }
 
     [Fact]
