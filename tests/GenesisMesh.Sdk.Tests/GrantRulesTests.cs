@@ -72,6 +72,41 @@ public class GrantRulesTests
         Assert.False(Read("0.1") == Read("0.10000000000000002"));
     }
 
+    [Fact]
+    public void ANumberIsAValueAsDotNetComparesValues()
+    {
+        Assert.True(GrantNumber.TryRead(Json("1"), out var one));
+        Assert.True(GrantNumber.TryRead(Json("1.0"), out var oneAgain));
+        Assert.True(GrantNumber.TryRead(Json("1.5"), out var half));
+        Assert.True(GrantNumber.TryRead(Json("18446744073709551615"), out var top));
+        Assert.Equal(1.0, one.Value);
+        Assert.Equal(1.5, half.Value);
+        Assert.Equal(18446744073709551615.0, top.Value);
+        Assert.True(one.Equals((object)oneAgain));
+        Assert.False(one.Equals((object)"1"));
+        Assert.Equal(one.GetHashCode(), oneAgain.GetHashCode());
+        Assert.Equal(half.GetHashCode(), half.GetHashCode());
+        Assert.True(one != half);
+        Assert.False(one != oneAgain);
+        Assert.True(one <= oneAgain && one <= half && !(half <= one));
+        Assert.True(half >= one && one >= oneAgain && !(one >= half));
+        Assert.Equal([one, half, top], new[] { top, one, half }.Order());
+    }
+
+    [Fact]
+    public void ATimeTokenThatCannotBeReadIsNoTimeToken()
+    {
+        var use = Record("signature-GrantExecutionEvidence-signer").Deserialize<GrantExecutionEvidence>()!;
+        var na = Key("signature-TimeToken-signer");
+        var token = JsonNode.Parse(use.TimeToken.GetRawText())!.AsObject();
+        token["use_sequence"] = "one";
+        use.TimeToken = JsonSerializer.SerializeToElement(token);
+        Assert.Equal("grant_time_token_invalid", GrantRules.UseProblem(use, new UseCheck { TokenKeys = [na] })?.Code);
+        use.TimeToken = Json("[]");
+        Assert.Equal("grant_time_token_invalid", GrantRules.UseProblem(use, new UseCheck { TokenKeys = [na] })?.Code);
+        Assert.Equal("", GrantRules.NextPreviousUse(use).TimeTokenIssuedAt);
+    }
+
     [Theory]
     [InlineData("true", "1", false)]
     [InlineData("\"1\"", "1", false)]
