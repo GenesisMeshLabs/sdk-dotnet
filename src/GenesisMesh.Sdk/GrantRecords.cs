@@ -11,7 +11,7 @@ public sealed record GrantUseInput
     /// <summary>The use's position in the grant's use chain: 1 for the first use.</summary>
     public required int UseSequence { get; init; }
 
-    /// <summary>The previous use; null for the first use, or give <see cref="PreviousDigest"/>.</summary>
+    /// <summary>The previous use; null for the first use, or give <see cref="PreviousDigest"/> instead (not both).</summary>
     public GrantExecutionEvidence? Previous { get; init; }
 
     /// <summary>The previous use's digest, when <see cref="Previous"/> is not held.</summary>
@@ -32,7 +32,7 @@ public sealed record GrantUseInput
     /// <summary>When the action ran; default now.</summary>
     public DateTimeOffset? ExecutedAt { get; init; }
 
-    /// <summary>The latest time token the holder saw, exactly as the NA signed it.</summary>
+    /// <summary>The latest time token the holder saw, exactly as the NA signed it (the use keeps a copy).</summary>
     public required JsonElement TimeToken { get; init; }
 
     /// <summary>A value of <see cref="GrantUseOutcomes"/>.</summary>
@@ -74,10 +74,13 @@ public static class GrantRecords
     /// <summary>The unsigned use for <paramref name="input"/>, executed by the grant's bearer sovereign.</summary>
     /// <param name="input">What the use records.</param>
     /// <exception cref="StrictJsonException">A parameter holds a value the NA would refuse as <c>invalid_json</c>.</exception>
+    /// <exception cref="ArgumentException">Both <see cref="GrantUseInput.Previous"/> and <see cref="GrantUseInput.PreviousDigest"/> are given.</exception>
     public static GrantExecutionEvidence UseRecord(GrantUseInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(input.Grant);
+        if (input.Previous is not null && input.PreviousDigest is not null)
+            throw new ArgumentException("give the previous use or its digest, not both", nameof(input));
         return new GrantExecutionEvidence
         {
             UseId = input.UseId ?? Guid.NewGuid().ToString(),
@@ -91,7 +94,7 @@ public static class GrantRecords
             ResourceId = input.ResourceId,
             ResourceAction = input.ResourceAction,
             ExecutedAt = Canonical.Timestamp(input.ExecutedAt ?? DateTimeOffset.UtcNow),
-            TimeToken = input.TimeToken,
+            TimeToken = input.TimeToken.ValueKind == JsonValueKind.Undefined ? default : input.TimeToken.Clone(),
             Outcome = input.Outcome,
             OutcomeDetail = input.OutcomeDetail,
             ExecutionParameters = ExecutionRecorder.Element(input.ExecutionParameters ?? new Dictionary<string, object?>()),
@@ -129,6 +132,7 @@ public static class GrantRecords
     /// <param name="ct">Cancels the signing.</param>
     /// <exception cref="StrictJsonException">The use holds a value the NA would refuse as <c>invalid_json</c>.</exception>
     /// <exception cref="GrantRecordException">The NA would refuse the use (<see cref="CheckUse"/>).</exception>
+    /// <exception cref="ArgumentException">Both <see cref="GrantUseInput.Previous"/> and <see cref="GrantUseInput.PreviousDigest"/> are given.</exception>
     public static async Task<GrantExecutionEvidence> SignUse(GrantUseInput input, ISigner signer, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(signer);
@@ -146,6 +150,7 @@ public static class GrantRecords
     /// <c>time_token_request_malformed</c>: the NA's model would not take it (a head digest given before the first use,
     /// or missing after it).
     /// </exception>
+    /// <exception cref="StrictJsonException">The request holds text the NA would refuse as <c>invalid_json</c> (a lone surrogate).</exception>
     public static async Task<TimeTokenRequest> SignTimeTokenRequest(TimeTokenRequestInput input, ISigner signer, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(input);

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -4944,14 +4945,14 @@ public static class GrantUseRejectionCodes
     /// (<see cref="GrantRules.ContinuesChain"/>; never a conflict or a chain mismatch) becomes the chain's head: the
     /// holder's later uses are judged on their own.
     /// </summary>
-    public static IReadOnlySet<string> Quarantined { get; } = new HashSet<string>(StringComparer.Ordinal)
+    public static IReadOnlySet<string> Quarantined { get; } = new[]
     {
         "grant_use_conflict", "grant_use_chain_mismatch", "grant_bearer_mismatch", "grant_bearer_key_retired",
         "grant_use_out_of_scope", "grant_mismatch", "grant_capability_mismatch", "grant_envelope_mismatch",
         "grant_budget_exhausted", "grant_time_token_invalid", "grant_time_token_mismatch", "grant_time_token_regressed",
         "grant_time_token_exhausted", "grant_use_before_time_token", "grant_use_out_of_order", "grant_use_outside_validity",
         "grant_use_uploaded_late", "grant_revoked",
-    };
+    }.ToFrozenSet(StringComparer.Ordinal);
 }
 
 /// <summary>
@@ -5019,14 +5020,17 @@ public sealed class CapabilityGrant
 
     /// <summary>The closed parameter envelope, as received: parameter name to envelope parameter (<see cref="GrantRules.Parameter"/>).</summary>
     [JsonPropertyName("parameter_envelope")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public JsonElement ParameterEnvelope { get; set; }
 
     /// <summary>The checks of the basis at issue, as gate results.</summary>
     [JsonPropertyName("basis_checks")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public JsonElement BasisChecks { get; set; }
 
     /// <summary>The policy versions the grant was checked against, and how each gate was decided over its envelope.</summary>
     [JsonPropertyName("policy_binding")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public JsonElement PolicyBinding { get; set; }
 
     /// <summary>When the NA issued it.</summary>
@@ -5153,6 +5157,7 @@ public sealed class GrantExecutionEvidence
 
     /// <summary>The request's parameters: inside the grant's envelope.</summary>
     [JsonPropertyName("request_parameters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public JsonElement RequestParameters { get; set; }
 
     /// <summary>The resource: an identifier, never a value; absent for none.</summary>
@@ -5171,6 +5176,7 @@ public sealed class GrantExecutionEvidence
 
     /// <summary>The latest time token the holder saw, exactly as the NA signed it (<see cref="GenesisMesh.TimeToken"/>).</summary>
     [JsonPropertyName("time_token")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public JsonElement TimeToken { get; set; }
 
     /// <summary>A value of <see cref="GrantUseOutcomes"/>.</summary>
@@ -5184,6 +5190,7 @@ public sealed class GrantExecutionEvidence
 
     /// <summary>Metadata of the action: identifiers and versions only.</summary>
     [JsonPropertyName("execution_parameters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public JsonElement ExecutionParameters { get; set; }
 
     /// <summary>The bearer key's signature, <c>{"key_id", "sig"}</c>, over the use without it.</summary>

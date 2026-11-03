@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GenesisMesh;
@@ -345,5 +346,145 @@ public class GrantRulesTests
         Assert.Null(GrantRules.UseSecretProblem(use));
         use.ExecutionParameters = Json("""{"password": "x"}""");
         Assert.NotNull(GrantRules.UseSecretProblem(use));
+    }
+
+    // ── What a caller gives ─────────────────────────────────────────────────
+
+    private static (GrantExecutionEvidence Use, UseCheck Check) UseVector(string id)
+    {
+        var input = Suite.GetProperty("vectors").EnumerateArray().Single(v => v.GetProperty("id").GetString() == id).GetProperty("input");
+        static string? Str(JsonElement o, string name) => o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        var previous = input.GetProperty("previous");
+        var head = input.GetProperty("token_head");
+        return (input.GetProperty("use").Deserialize<GrantExecutionEvidence>()!, new UseCheck
+        {
+            Grant = input.GetProperty("grant").Deserialize<CapabilityGrant>(),
+            Previous = previous.ValueKind == JsonValueKind.Object ? new PreviousUse(Str(previous, "executed_at")!, Str(previous, "time_token_issued_at")!) : null,
+            Admitted = input.GetProperty("admitted").GetInt32(),
+            TokenHead = head.ValueKind == JsonValueKind.Object ? new TokenHead(Str(head, "digest")!, Str(head, "executed_at")!) : null,
+            TokenKeys = [.. input.GetProperty("na_public_keys").EnumerateArray().Select(k => k.GetString()!)],
+            RecordedAt = Str(input, "recorded_at"),
+        });
+    }
+
+    /// <summary>2026-06-01 08:mm:ss UTC plus <paramref name="ticks"/>, in .NET's round-trip format (seven digits of a second).</summary>
+    private static string RoundTrip(int minute, int second = 0, int ticks = 0) =>
+        new DateTimeOffset(2026, 6, 1, 8, minute, second, TimeSpan.Zero).AddTicks(ticks).ToString("o", CultureInfo.InvariantCulture);
+
+    [Fact]
+    public void ACallersTimeIsReadAsTheReferencesReadIt()
+    {
+        // The use ran at 08:05:00, its time token was issued at 08:00:00. Digits past the sixth are dropped, not rounded.
+        var (use, check) = UseVector("use-admitted");
+        string? Code(UseCheck c) => GrantRules.UseProblem(use, c)?.Code;
+        Assert.Null(Code(check));
+        Assert.Equal("2026-06-01T08:05:00.0000000+00:00", RoundTrip(5));
+        Assert.Equal("grant_revoked", Code(check with { RevokedAt = RoundTrip(5) }));
+        Assert.Equal("grant_revoked", Code(check with { RevokedAt = RoundTrip(5, ticks: 9) }));
+        Assert.Null(Code(check with { RevokedAt = RoundTrip(5, ticks: 10) }));
+        Assert.Equal("grant_use_uploaded_late", Code(check with { RecordedAt = RoundTrip(5).Replace("06-01", "06-03", StringComparison.Ordinal) }));
+        Assert.Equal("grant_use_in_future", Code(check with { RecordedAt = RoundTrip(0, ticks: -1) }));
+        Assert.Equal("grant_use_out_of_order", Code(check with { Previous = new PreviousUse(RoundTrip(5, ticks: 10), RoundTrip(0)) }));
+        Assert.Null(Code(check with { Previous = new PreviousUse(RoundTrip(5, ticks: 9), RoundTrip(0)) }));
+        // The use the token names ran at most 300 s after the token (08:06): 08:11:00.0000009 is within, 08:11:00.000001 is not.
+        var (later, named) = UseVector("use-token-head-later");
+        Assert.Null(GrantRules.UseProblem(later, named with { TokenHead = named.TokenHead! with { ExecutedAt = RoundTrip(11, ticks: 9) } }));
+        Assert.Equal("grant_time_token_mismatch",
+            GrantRules.UseProblem(later, named with { TokenHead = named.TokenHead! with { ExecutedAt = RoundTrip(11, ticks: 10) } })?.Code);
+    }
+
+    [Fact]
+    public void ACallersTimeThatIsNoTimeIsRefused()
+    {
+        // Skipping the rule it is for would let the use through.
+        var (use, check) = UseVector("use-admitted");
+        Assert.Contains("RevokedAt", Assert.Throws<ArgumentException>(() => GrantRules.UseProblem(use, check with { RevokedAt = "yesterday" })).Message);
+        Assert.Contains("RecordedAt", Assert.Throws<ArgumentException>(() => GrantRules.UseProblem(use, check with { RecordedAt = "" })).Message);
+        Assert.Contains("Previous.ExecutedAt", Assert.Throws<ArgumentException>(
+            () => GrantRules.UseProblem(use, check with { Previous = new PreviousUse("2026-06-01", "2026-06-01T08:00:00Z") })).Message);
+        Assert.Contains("Previous.TimeTokenIssuedAt", Assert.Throws<ArgumentException>(
+            () => GrantRules.UseProblem(use, check with { Previous = new PreviousUse("2026-06-01T08:00:00Z", null!) })).Message);
+        Assert.Contains("TokenHead.ExecutedAt", Assert.Throws<ArgumentException>(
+            () => GrantRules.UseProblem(use, check with { TokenHead = new TokenHead(new string('a', 64), "08:00") })).Message);
+    }
+
+    [Fact]
+    public void ARepeatedNameIsReadAsItsLastValue()
+    {
+        // JsonDocument keeps both; JSON.parse and Python's json keep the last, as a grant read by JsonSerializer does here.
+        var envelope = Json("""{"a": {"one_of": [1]}, "a": {"one_of": [2]}}""");
+        Assert.Null(GrantRules.EnvelopeProblem(envelope, Json("""{"a": 2}""")));
+        Assert.Equal("request_parameters.a is not one of its values", GrantRules.EnvelopeProblem(envelope, Json("""{"a": 1}""")));
+        Assert.Null(GrantRules.EnvelopeShapeProblem(Json("""{"a": {"one_of": []}, "a": {"one_of": [2]}}""")));
+        Assert.Equal("a: invalid envelope parameter: one_of is a list of 1 to 256 scalars",
+            GrantRules.EnvelopeShapeProblem(Json("""{"a": {"one_of": [2]}, "a": {"one_of": []}}""")));
+        Assert.Null(GrantRules.Parameter(Json("""{"one_of": [1], "z": 1, "z": 2}"""), out var problem));
+        Assert.Equal("invalid envelope parameter: unknown field z", problem);
+        var (use, check) = UseVector("use-admitted");
+        var grant = JsonSerializer.Serialize(check.Grant).Replace("\"parameter_envelope\":{", "\"parameter_envelope\":{\"lifetime_days\":{\"one_of\":[1]},", StringComparison.Ordinal);
+        Assert.Null(GrantRules.UseProblem(use, check with { Grant = JsonSerializer.Deserialize<CapabilityGrant>(grant) }));
+    }
+
+    [Fact]
+    public async Task ATypedRecordWithoutAFieldIsDigestedAsReceived()
+    {
+        var grantJson = Record("signature-CapabilityGrant-signer").GetRawText();
+        foreach (var field in new[] { "parameter_envelope", "basis_checks", "policy_binding" })
+        {
+            var changed = Changed(grantJson, g => g.Remove(field));
+            Assert.Equal(GrantRules.RecordDigest("CapabilityGrant", changed), GrantRules.GrantDigest(JsonSerializer.Deserialize<CapabilityGrant>(changed)!));
+        }
+        var useJson = Record("signature-GrantExecutionEvidence-signer").GetRawText();
+        foreach (var field in new[] { "request_parameters", "execution_parameters", "time_token" })
+        {
+            var changed = Changed(useJson, u => u.Remove(field));
+            Assert.Equal(GrantRules.RecordDigest("GrantExecutionEvidence", changed),
+                GrantRules.UseDigest(JsonSerializer.Deserialize<GrantExecutionEvidence>(changed)!));
+        }
+        Assert.Matches("^[0-9a-f]{64}$", GrantRules.UseDigest(new GrantExecutionEvidence()));
+        // A use of such a grant names it by that digest.
+        var withoutChecks = Changed(grantJson, g => g.Remove("basis_checks"));
+        var use = await GrantRecords.SignUse(First() with { Grant = JsonSerializer.Deserialize<CapabilityGrant>(withoutChecks)! }, Bearer);
+        Assert.Equal(GrantRules.RecordDigest("CapabilityGrant", withoutChecks), use.GrantDigest);
+    }
+
+    [Fact]
+    public async Task AUseKeepsItsOwnTimeToken()
+    {
+        GrantExecutionEvidence use;
+        using (var doc = JsonDocument.Parse(Record("canonical-TimeToken-first").GetRawText()))
+        {
+            use = await GrantRecords.SignUse(First() with { TimeToken = doc.RootElement }, Bearer);
+        }
+        Assert.Equal(Record("canonical-TimeToken-first").GetProperty("issued_at").GetString(), GrantRules.NextPreviousUse(use).TimeTokenIssuedAt);
+        Assert.Matches("^[0-9a-f]{64}$", GrantRules.UseDigest(use));
+        Assert.True(OfflineVerifier.VerifyGrantUse(JsonSerializer.Serialize(use), Key("signature-GrantExecutionEvidence-signer")));
+        // None given: refused as the NA refuses a use without one.
+        Assert.Equal("grant_use_malformed",
+            (await Assert.ThrowsAsync<GrantRecordException>(() => GrantRecords.SignUse(First() with { TimeToken = default }, Bearer))).Code);
+        // The previous use or its digest, not both.
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => GrantRecords.SignUse(First() with { UseSequence = 2, Previous = use, PreviousDigest = new string('f', 64) }, Bearer));
+    }
+
+    [Fact]
+    public void WhatIsNotOneIsRefused()
+    {
+        Assert.Throws<ArgumentNullException>(() => OfflineVerifier.VerifyTimeToken("{}", (IReadOnlyList<string>)null!));
+        Assert.Throws<ArgumentNullException>(() => OfflineVerifier.VerifyGrantRevocation("{}", (IReadOnlyList<string>)null!));
+        Assert.Throws<ArgumentException>(() => GrantRules.RecordDigest("ExecutionEvidence", "{}"));
+        // The quarantine codes are the rule's, not a caller's to change.
+        Assert.Throws<NotSupportedException>(() => ((ICollection<string>)GrantUseRejectionCodes.Quarantined).Add("grant_not_found"));
+    }
+
+    [Fact]
+    public void TheDefaultNumberIsTheIntegerZero()
+    {
+        Assert.True(GrantNumber.TryRead(Json("0"), out var zero));
+        GrantNumber none = default;
+        Assert.True(none.IsIntegral);
+        Assert.Equal(zero, none);
+        Assert.Equal("0", none.ToString());
+        Assert.True(GrantRules.InRange(Json("0"), new NumericRange("number", none, none, false, false)));
     }
 }

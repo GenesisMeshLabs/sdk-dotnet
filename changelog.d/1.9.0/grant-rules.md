@@ -6,7 +6,7 @@
   - `GrantRules`: `Parameter`, `EnvelopeShapeProblem`, `ParameterValueProblem`, `EnvelopeProblem`, `ScalarEquals`, `InRange`, `UseProblem` (with `UseCheck`, `PreviousUse`, `TokenHead`, `UseProblem`), `ContinuesChain` (`UseChainHead`), `NextPreviousUse`, `UseSecretProblem`, `GrantDigest`, `UseDigest` and `RecordDigest`;
   - `OfflineVerifier.VerifyTimeToken`, `VerifyGrantRevocation`, `VerifyGrantUse`, `VerifyTimeTokenRequest` and `TokenSignatureValid`, and `VerifyCapabilityGrant` under a list of NA keys;
   - `GrantRecords.UseRecord`, `CheckUse`, `SignUse` and `SignTimeTokenRequest` (`GrantUseInput`, `TimeTokenRequestInput`), which sign as the reference signs and refuse first what the NA would refuse (`GrantRecordException`).
-- **Conformance:** the `grants` suite's `envelope_parameter`, `envelope` and `use` vectors run (53).
+- **Conformance:** the `grants` suite's `envelope_parameter`, `envelope` and `use` vectors run (53), and 1,453 cases the Python reference judged: envelope parameters, envelope problems, use problems at microsecond boundaries, the five records verified with their digests, and the secret guard.
 
 ### Changed
 
@@ -14,5 +14,7 @@
 
 ### Differs from TypeScript
 
-- `GrantRules.Parameter` returns the problem (`invalid envelope parameter: ...`) instead of throwing it: the rules call nothing that throws.
+- `GrantRules.Parameter` returns the problem (`invalid envelope parameter: ...`) instead of throwing it, so the envelope rules call nothing that throws.
 - A use's `time_token` is kept as received (`JsonElement`), so its signature verifies as the NA signed it.
+- `GrantRules.UseProblem` throws `ArgumentException` for a time in its `UseCheck` that is not a timestamp. TypeScript skips the rule that time is for, so an unreadable revocation time lets the use through.
+- `GrantUseInput` takes the previous use or its digest, not both (`ArgumentException`).

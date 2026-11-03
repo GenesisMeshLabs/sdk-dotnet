@@ -25,24 +25,30 @@ public readonly struct GrantNumber : IEquatable<GrantNumber>, IComparable<GrantN
 {
     private static readonly BigInteger MinInteger = -BigInteger.Pow(2, 63);
     private static readonly BigInteger MaxInteger = BigInteger.Pow(2, 64) - 1;
-    private readonly BigInteger? _integer;
-    private readonly double _value;
+    private readonly BigInteger _integer;
+    private readonly double _fraction;
+    private readonly bool _isFraction;
 
-    private GrantNumber(BigInteger? integer, double value)
+    private GrantNumber(BigInteger integer)
     {
         _integer = integer;
-        _value = value;
+    }
+
+    private GrantNumber(double fraction)
+    {
+        _fraction = fraction;
+        _isFraction = true;
     }
 
     /// <summary>The number as an integer, when it is integral.</summary>
-    public BigInteger? IntegralValue => _integer;
+    public BigInteger? IntegralValue => _isFraction ? null : _integer;
 
-    /// <summary>True when the number is integral.</summary>
-    public bool IsIntegral => _integer is not null;
+    /// <summary>True when the number is integral; <c>default(GrantNumber)</c> is the integer 0.</summary>
+    public bool IsIntegral => !_isFraction;
 
     /// <summary>The number as a double (an integer beyond 2^53 rounded to the nearest, as JavaScript and Python round it).</summary>
     // From its digits: a BigInteger cast truncates (2^64 - 1 becomes 2^64 - 2048).
-    public double Value => _integer is { } i ? double.Parse(i.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture) : _value;
+    public double Value => _isFraction ? _fraction : double.Parse(_integer.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Reads a JSON number as the reference reads it: an integer literal exactly, any other number as a double, and an
@@ -65,18 +71,18 @@ public readonly struct GrantNumber : IEquatable<GrantNumber>, IComparable<GrantN
             if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) || !double.IsFinite(d)) return false;
             if (!double.IsInteger(d))
             {
-                number = new GrantNumber(null, d);
+                number = new GrantNumber(d);
                 return true;
             }
             integer = new BigInteger(d);
         }
         if (integer < MinInteger || integer > MaxInteger) return false;
-        number = new GrantNumber(integer, 0);
+        number = new GrantNumber(integer);
         return true;
     }
 
     /// <summary>The number in JSON: an integer's digits, any other number as the reference prints a float.</summary>
-    public override string ToString() => _integer is { } i ? i.ToString(CultureInfo.InvariantCulture) : Canonical.FloatRepr(_value);
+    public override string ToString() => _isFraction ? Canonical.FloatRepr(_fraction) : _integer.ToString(CultureInfo.InvariantCulture);
 
     internal JsonElement Element()
     {
@@ -88,10 +94,10 @@ public readonly struct GrantNumber : IEquatable<GrantNumber>, IComparable<GrantN
     /// <param name="other">The number to compare with.</param>
     public int CompareTo(GrantNumber other)
     {
-        if (_integer is { } a && other._integer is { } b) return a.CompareTo(b);
-        if (_integer is null && other._integer is null) return _value.CompareTo(other._value);
+        if (!_isFraction && !other._isFraction) return _integer.CompareTo(other._integer);
+        if (_isFraction && other._isFraction) return _fraction.CompareTo(other._fraction);
         // An integer against a number with a fraction: by its floor, which the fraction exceeds.
-        var (integer, fraction, sign) = _integer is { } i ? (i, other._value, 1) : (other._integer!.Value, _value, -1);
+        var (integer, fraction, sign) = _isFraction ? (other._integer, _fraction, -1) : (_integer, other._fraction, 1);
         return sign * (integer <= new BigInteger(Math.Floor(fraction)) ? -1 : 1);
     }
 
@@ -103,7 +109,7 @@ public readonly struct GrantNumber : IEquatable<GrantNumber>, IComparable<GrantN
     public override bool Equals(object? obj) => obj is GrantNumber n && Equals(n);
 
     /// <inheritdoc/>
-    public override int GetHashCode() => _integer is { } i ? i.GetHashCode() : _value.GetHashCode();
+    public override int GetHashCode() => _isFraction ? _fraction.GetHashCode() : _integer.GetHashCode();
 
     /// <summary>True when the numbers are equal, exactly.</summary>
     public static bool operator ==(GrantNumber left, GrantNumber right) => left.Equals(right);
@@ -233,6 +239,7 @@ public static partial class GrantRules
 
     private static readonly string[] ParameterFields = ["required", "one_of", "subset_of", "number_range"];
     private static readonly string[] RangeFields = ["number_type", "minimum", "maximum", "exclusive_minimum", "exclusive_maximum"];
+    private static readonly string[] RecordModels = ["CapabilityGrant", "GrantExecutionEvidence", "GrantRevocationRecord", "TimeToken", "TimeTokenRequest"];
 
     // ── Numbers and scalars ─────────────────────────────────────────────────
 
@@ -304,7 +311,7 @@ public static partial class GrantRules
     private static (EnvelopeParameter? Parameter, string? Problem) ReadParameter(JsonElement raw)
     {
         if (raw.ValueKind != JsonValueKind.Object) return (null, "an envelope parameter is an object");
-        var unknown = raw.EnumerateObject().Select(p => p.Name).Where(k => !ParameterFields.Contains(k)).Order(Canonical.CodePointComparer.Instance).ToList();
+        var unknown = Members(raw).Keys.Where(k => !ParameterFields.Contains(k)).Order(Canonical.CodePointComparer.Instance).ToList();
         if (unknown.Count > 0) return (null, "unknown field " + string.Join(", ", unknown));
         JsonElement? Given(string name) => raw.TryGetProperty(name, out var v) && v.ValueKind != JsonValueKind.Null ? v : null;
         var required = true;
@@ -395,12 +402,12 @@ public static partial class GrantRules
     public static string? EnvelopeShapeProblem(JsonElement envelope)
     {
         if (envelope.ValueKind != JsonValueKind.Object) return "parameter_envelope is an object of parameter names";
-        var names = envelope.EnumerateObject().ToList();
+        var names = Members(envelope);
         if (names.Count > GrantLimits.MaxEnvelopeParameters) return $"at most {GrantLimits.MaxEnvelopeParameters} envelope parameters";
-        foreach (var p in names)
+        foreach (var (name, value) in names)
         {
-            if (!ParameterName().IsMatch(p.Name)) return "envelope parameter names match [A-Za-z0-9_-]{1,64}";
-            if (Parameter(p.Value, out var problem) is null) return $"{p.Name}: {problem}";
+            if (!ParameterName().IsMatch(name)) return "envelope parameter names match [A-Za-z0-9_-]{1,64}";
+            if (Parameter(value, out var problem) is null) return $"{name}: {problem}";
         }
         return null;
     }
@@ -439,8 +446,8 @@ public static partial class GrantRules
     public static string? EnvelopeProblem(JsonElement envelope, JsonElement parameters)
     {
         if (parameters.ValueKind != JsonValueKind.Object) return "request_parameters is not an object";
-        var named = envelope.ValueKind == JsonValueKind.Object ? envelope.EnumerateObject().ToDictionary(p => p.Name, p => p.Value) : [];
-        var outside = parameters.EnumerateObject().Select(p => p.Name).Where(k => !named.ContainsKey(k)).Order(Canonical.CodePointComparer.Instance).ToList();
+        var named = Members(envelope);
+        var outside = Members(parameters).Keys.Where(k => !named.ContainsKey(k)).Order(Canonical.CodePointComparer.Instance).ToList();
         if (outside.Count > 0) return $"request_parameters.{outside[0]} is not in the envelope";
         foreach (var name in named.Keys.Order(Canonical.CodePointComparer.Instance))
         {
@@ -453,6 +460,17 @@ public static partial class GrantRules
             if (ParameterValueProblem(name, value, spec) is { } problem) return problem;
         }
         return null;
+    }
+
+    /// <summary>An object's members by name, a repeated name's last value winning (as JSON.parse and Python's json read them); none for another value.</summary>
+    private static Dictionary<string, JsonElement> Members(JsonElement value)
+    {
+        var members = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var p in value.EnumerateObject()) members[p.Name] = p.Value;
+        }
+        return members;
     }
 
     // ── Digests ─────────────────────────────────────────────────────────────
@@ -468,8 +486,10 @@ public static partial class GrantRules
     /// </param>
     /// <param name="recordJson">The record, as received.</param>
     /// <exception cref="StrictJsonException"><paramref name="recordJson"/> is not strict JSON.</exception>
+    /// <exception cref="ArgumentException"><paramref name="model"/> is not one of the five.</exception>
     public static string RecordDigest(string model, string recordJson)
     {
+        if (!RecordModels.Contains(model)) throw new ArgumentException($"not a grant record model: {model}", nameof(model));
         using var doc = StrictJsonReader.Parse(recordJson);
         return OfflineVerifier.GrantRecordDigest(model, doc.RootElement);
     }
@@ -537,8 +557,24 @@ public static partial class GrantRules
         }
     }
 
-    /// <summary>A time's instant in microseconds; null for one it cannot read (a comparison with it is false).</summary>
-    private static long? Micros(string? value) => value is null ? null : OfflineVerifier.TimestampMicros(value);
+    /// <summary>A record's time in microseconds; null for one it cannot read (a comparison with it is false).</summary>
+    private static long? Micros(string? value) => value is null ? null : OfflineVerifier.TimestampMicros(SixDigits(value));
+
+    /// <summary>A time the caller gives, in microseconds.</summary>
+    /// <exception cref="ArgumentException">It is not a timestamp.</exception>
+    private static long CallerMicros(string? value, string field) =>
+        (value is null ? null : OfflineVerifier.TimestampMicros(SixDigits(value)))
+        ?? throw new ArgumentException($"check.{field} is not a timestamp: {value ?? "null"}");
+
+    /// <summary>
+    /// A time with the digits past the sixth of its fraction dropped, as TypeScript and Python read one (.NET's round-trip
+    /// format, <c>"o"</c>, writes seven).
+    /// </summary>
+    private static string SixDigits(string value) =>
+        LongFraction().Match(value) is { Success: true } m ? value.Remove(m.Index + 7, m.Length - 7) : value;
+
+    [GeneratedRegex(@"\.[0-9]{7,}", RegexOptions.CultureInvariant)]
+    private static partial Regex LongFraction();
 
     /// <summary>A time as the reference prints it.</summary>
     private static string Iso(long? micros) => micros is { } m && m >= 0 && m <= DateTime.MaxValue.Ticks / 10
@@ -555,12 +591,19 @@ public static partial class GrantRules
     /// </summary>
     /// <param name="use">The use.</param>
     /// <param name="check">What the caller holds of its grant and chain.</param>
+    /// <exception cref="ArgumentException">A time in <paramref name="check"/> is not a timestamp.</exception>
     public static UseProblem? UseProblem(GrantExecutionEvidence use, UseCheck check)
     {
         ArgumentNullException.ThrowIfNull(use);
         ArgumentNullException.ThrowIfNull(check);
         var grant = check.Grant;
         var previous = check.Previous;
+        // The caller's times first: one it gives must be readable (an unread time would skip its rule).
+        var previousTokenIssued = previous is null ? null : (long?)CallerMicros(previous.TimeTokenIssuedAt, "Previous.TimeTokenIssuedAt");
+        var previousExecuted = previous is null ? null : (long?)CallerMicros(previous.ExecutedAt, "Previous.ExecutedAt");
+        var headExecuted = check.TokenHead is { } h ? (long?)CallerMicros(h.ExecutedAt, "TokenHead.ExecutedAt") : null;
+        var recorded = check.RecordedAt is { } r ? (long?)CallerMicros(r, "RecordedAt") : null;
+        var revoked = check.RevokedAt is { } v ? (long?)CallerMicros(v, "RevokedAt") : null;
         var token = Token(use.TimeToken);
         var executed = Micros(use.ExecutedAt);
         var tokenIssued = Micros(token?.IssuedAt);
@@ -578,9 +621,9 @@ public static partial class GrantRules
             return new("grant_time_token_invalid", "the time token is not the NA's for this grant");
         if (token.UseSequence >= use.UseSequence)
             return new("grant_time_token_mismatch", $"the time token was issued after use {token.UseSequence}, not before use {use.UseSequence}");
-        if (check.TokenHead is { } head && (head.Digest != token.UseHeadDigest || Micros(head.ExecutedAt) > tokenIssued + SkewMicros))
+        if (check.TokenHead is { } head && (head.Digest != token.UseHeadDigest || headExecuted > tokenIssued + SkewMicros))
             return new("grant_time_token_mismatch", $"use {token.UseSequence} is not the one the time token names");
-        if (previous is not null && tokenIssued < Micros(previous.TimeTokenIssuedAt))
+        if (previous is not null && tokenIssued < previousTokenIssued)
             return new("grant_time_token_regressed", "the time token is older than the previous use's");
         if (grant is not null && use.UseSequence - token.UseSequence > grant.MaxUsesPerTimeToken)
             return new("grant_time_token_exhausted",
@@ -588,22 +631,21 @@ public static partial class GrantRules
         if (executed < tokenIssued - SkewMicros)
             return new("grant_use_before_time_token",
                 $"executed at {Iso(executed)}, more than {GrantLimits.ClockSkewSeconds} s before the time token's {Iso(tokenIssued)}");
-        if (previous is not null && executed < Micros(previous.ExecutedAt))
+        if (previous is not null && executed < previousExecuted)
             return new("grant_use_out_of_order", $"executed at {Iso(executed)}, before the previous use");
         if (grant is not null && (executed < Micros(grant.ValidFrom) || executed > Micros(grant.ValidUntil)))
             return new("grant_use_outside_validity",
                 $"executed at {Iso(executed)}, outside [{Iso(Micros(grant.ValidFrom))}, {Iso(Micros(grant.ValidUntil))}]");
-        if (check.RecordedAt is not null)
+        if (recorded is not null)
         {
-            var recorded = Micros(check.RecordedAt);
             if (executed > recorded + SkewMicros)
                 return new("grant_use_in_future", $"executed at {Iso(executed)}, after it was recorded at {Iso(recorded)}");
             if (grant is not null && Micros(grant.ValidUntil) - Micros(grant.ValidFrom) is { } validity && recorded - executed > validity)
                 return new("grant_use_uploaded_late",
                     $"recorded at {Iso(recorded)}, longer after it was executed than the grant's validity ({validity / MicrosPerSecond} s)");
         }
-        if (check.RevokedAt is not null && executed >= Micros(check.RevokedAt))
-            return new("grant_revoked", $"the grant was revoked at {Iso(Micros(check.RevokedAt))}");
+        if (revoked is not null && executed >= revoked)
+            return new("grant_revoked", $"the grant was revoked at {Iso(revoked)}");
         return null;
     }
 }
@@ -679,8 +721,11 @@ public static partial class OfflineVerifier
     /// <param name="tokenJson">The time token, as received.</param>
     /// <param name="naPublicKeys">The NA's public keys, valid at every time.</param>
     /// <exception cref="StrictJsonException"><paramref name="tokenJson"/> is not strict JSON.</exception>
-    public static bool VerifyTimeToken(string tokenJson, IReadOnlyList<string> naPublicKeys) =>
-        NASignedGrantRecord("TimeToken", tokenJson, Shapes.TimeToken, "issued_at", _ => naPublicKeys);
+    public static bool VerifyTimeToken(string tokenJson, IReadOnlyList<string> naPublicKeys)
+    {
+        ArgumentNullException.ThrowIfNull(naPublicKeys);
+        return NASignedGrantRecord("TimeToken", tokenJson, Shapes.TimeToken, "issued_at", _ => naPublicKeys);
+    }
 
     /// <summary>As <see cref="VerifyTimeToken(string, IReadOnlyList{string})"/>, signed by the key the NA's history held at its <c>issued_at</c>.</summary>
     /// <param name="tokenJson">The time token, as received.</param>
@@ -696,8 +741,11 @@ public static partial class OfflineVerifier
     /// <param name="revocationJson">The revocation, as received.</param>
     /// <param name="naPublicKeys">The NA's public keys, valid at every time.</param>
     /// <exception cref="StrictJsonException"><paramref name="revocationJson"/> is not strict JSON.</exception>
-    public static bool VerifyGrantRevocation(string revocationJson, IReadOnlyList<string> naPublicKeys) =>
-        NASignedGrantRecord("GrantRevocationRecord", revocationJson, Shapes.GrantRevocation, "revoked_at", _ => naPublicKeys);
+    public static bool VerifyGrantRevocation(string revocationJson, IReadOnlyList<string> naPublicKeys)
+    {
+        ArgumentNullException.ThrowIfNull(naPublicKeys);
+        return NASignedGrantRecord("GrantRevocationRecord", revocationJson, Shapes.GrantRevocation, "revoked_at", _ => naPublicKeys);
+    }
 
     /// <summary>As <see cref="VerifyGrantRevocation(string, IReadOnlyList{string})"/>, signed by the key the NA's history held at its <c>revoked_at</c>.</summary>
     /// <param name="revocationJson">The revocation, as received.</param>
