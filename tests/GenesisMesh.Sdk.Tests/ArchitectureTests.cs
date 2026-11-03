@@ -41,6 +41,7 @@ public partial class ArchitectureTests
         ("ClientOptions.cs", "transport"),
         ("Execution.cs", "execution"),
         ("OutOfBand.cs", "execution"),
+        ("GrantRecords.cs", "execution"),
         ("Outbox.cs", "outbox"),
         ("Clients/", "clients"),
         ("GenesisMeshClient.cs", "client"),

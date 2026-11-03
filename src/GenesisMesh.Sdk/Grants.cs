@@ -743,6 +743,12 @@ public static partial class OfflineVerifier
         return rawToken.ValueKind == JsonValueKind.Object && SignedAsReceived("TimeToken", rawToken, keys);
     }
 
+    /// <summary>A grant use as the reference's model reads it.</summary>
+    internal static bool ValidGrantUse(JsonElement record) => Shapes.GrantUse(record);
+
+    /// <summary>A time token request as the reference's model reads it.</summary>
+    internal static bool ValidTimeTokenRequest(JsonElement record) => Shapes.TimeTokenRequest(record);
+
     /// <summary>SHA-256 of a grant record's signed form as received, unknown fields set aside.</summary>
     internal static string GrantRecordDigest(string model, JsonElement record) =>
         Sha256Hex(ReceivedCanonical(model, StrictFields.WithoutUnknownFields(model, record)));
