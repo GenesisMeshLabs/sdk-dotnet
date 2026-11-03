@@ -16,6 +16,10 @@ is refused, so every decision comes from the evaluate route.
 (observations, break-glass records, judgements). It adds a second privileged
 key, "ops2", and names the holders of both privileged keys, so a holder change
 can be proposed by one holder and approved by the other.
+
+``--remediation on`` (with ``--out-of-band on``) records remediations and
+reviews of the changes judged after the fact: the due queue, notices, review
+requests and decisions, and remediation records.
 """
 import argparse
 import json
@@ -38,7 +42,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--policy-enforcement", choices=("optional", "required"), default="optional")
     parser.add_argument("--out-of-band", choices=("off", "on"), default="off")
+    parser.add_argument("--remediation", choices=("off", "on"), default="off")
     options = parser.parse_args()
+    if options.remediation == "on" and options.out_of_band != "on":
+        parser.error("--remediation on needs --out-of-band on")
     root = generate_keypair()
     operator = generate_keypair()
     controller = generate_keypair()
@@ -64,6 +71,7 @@ def main() -> None:
         db_path=str(Path(tmp) / "na.db"),
         operator_public_keys=keys, operator_key_tiers=tiers, operator_key_holders=holders, evidence_store="on",
         boundary_policy_enforcement=options.policy_enforcement, evidence_out_of_band=options.out_of_band,
+        evidence_remediation=options.remediation,
     )
     service.rate_limiter.allow = lambda *args, **kwargs: True
 

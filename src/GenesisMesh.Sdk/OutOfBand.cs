@@ -271,10 +271,52 @@ public sealed class BreakGlassInput
 
 /// <summary>
 /// What <see cref="ExecutionRecorder.SignRemediation"/> records (1.9.0): what a controller did about a change whose
-/// remediation the NA made due. The subject, change and resource come from the change's remediation state.
+/// remediation the NA made due. The subject, change and resource come from the change's remediation state
+/// (<see cref="For"/>).
 /// </summary>
-public sealed class RemediationInput
+public sealed record RemediationInput
 {
+    /// <summary>
+    /// The subject, change and resource of a remediation state from the due queue, with the steps carried out; add the
+    /// versions and detail with <c>with</c>. A decision never executed (<c>fallback</c> <c>not_executed</c>) names
+    /// itself as its change (<c>execution</c>); give its resource as <paramref name="resourceId"/> when the state has
+    /// none.
+    /// </summary>
+    /// <param name="state">The remediation state.</param>
+    /// <param name="steps">A value of <see cref="RemediationSteps"/>.</param>
+    /// <param name="resourceId">The resource, for a decision never executed whose state names none.</param>
+    /// <exception cref="OutOfBandRecordException">
+    /// <c>remediation_subject_not_found</c>: the state names no change yet (its execution evidence is not stored).
+    /// </exception>
+    public static RemediationInput For(RemediationStatus state, string steps, string? resourceId = null)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        // An empty value names nothing, as TypeScript reads it.
+        var resource = !string.IsNullOrEmpty(state.ResourceId) ? state.ResourceId : resourceId;
+        if (state.SubjectKind == RemediationSubjectKinds.Decision && state.Fallback == RemediationFallbacks.NotExecuted && !string.IsNullOrEmpty(resource))
+            return new()
+            {
+                SubjectKind = state.SubjectKind,
+                SubjectId = state.SubjectId,
+                ChangeKind = ChangeKinds.Execution,
+                ChangeId = state.SubjectId,
+                ResourceId = resource,
+                Steps = steps,
+            };
+        if (string.IsNullOrEmpty(state.ChangeKind) || string.IsNullOrEmpty(state.ChangeId) || string.IsNullOrEmpty(state.ResourceId))
+            throw new OutOfBandRecordException("remediation_subject_not_found",
+                $"the remediation of {state.SubjectId} names no change yet (its execution evidence is not stored)");
+        return new()
+        {
+            SubjectKind = state.SubjectKind,
+            SubjectId = state.SubjectId,
+            ChangeKind = state.ChangeKind,
+            ChangeId = state.ChangeId,
+            ResourceId = state.ResourceId,
+            Steps = steps,
+        };
+    }
+
     /// <summary>A value of <see cref="RemediationSubjectKinds"/>. Required.</summary>
     public string SubjectKind { get; init; } = "";
 

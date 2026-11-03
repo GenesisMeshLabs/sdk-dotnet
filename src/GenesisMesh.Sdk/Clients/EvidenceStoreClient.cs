@@ -731,6 +731,215 @@ public sealed partial class EvidenceStoreClient
             $"/admin/operator-keys/holder-changes/{Transport.LastPathSegment(proposalId, nameof(proposalId))}/approve",
             new Dictionary<string, object?>(), ct).ConfigureAwait(false);
 
+    // ── Remediation and reviews (1.9.0; protocol 1.4.0) ──────────────────────
+
+    /// <summary>
+    /// Submits one signed remediation record (<see cref="ExecutionRecorder.SignRemediation"/>), with the NA's remediation
+    /// records on (otherwise 404 <c>remediation_disabled</c>, or <c>out_of_band_disabled</c> with its out-of-band records
+    /// off too). The executor key's signature authenticates it:
+    /// <c>recorded</c> with the subject's state (<see cref="RecordSubmission.Remediation"/>), or <c>duplicate</c> for the
+    /// same record again, so it is safe to retry. The NA admits it only once it holds the forward rotation's execution
+    /// evidence it names (<c>remediation_rotation_missing</c> is transient). An authentic record refused for good is kept
+    /// as a quarantine entry (<c>details.quarantine_id</c>).
+    /// POST /evidence/remediations
+    /// </summary>
+    /// <exception cref="ValidationException">
+    /// The NA refused the record, with its code: for example <c>remediation_malformed</c>,
+    /// <c>remediation_invalid_signature</c>, <c>remediation_unknown_key</c>, <c>remediation_out_of_scope</c> or
+    /// <c>remediation_steps_mismatch</c> (it does not carry out the plan the NA stated).
+    /// </exception>
+    /// <exception cref="ConflictException">
+    /// <c>remediation_already_recorded</c> or <c>remediation_not_due</c> (<see cref="RemediationRules.NextState"/>), or
+    /// another record with this ID is stored.
+    /// </exception>
+    public async Task<RecordSubmission> SubmitRemediation(RemediationRecord record, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return await _t.PublicPostAsync<RecordSubmission>("/evidence/remediations",
+            new Dictionary<string, object?> { ["record"] = record }, idempotent: true, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// One page of the due queue (read tier): the remediation states in <see cref="RemediationQueueParams.State"/>
+    /// (default: the open ones), oldest first. Pass <see cref="RemediationQueuePage.NextAfter"/> as the next
+    /// <see cref="RemediationQueueParams.After"/>, or use <see cref="AllRemediations"/>.
+    /// GET /admin/evidence/remediations
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="RemediationQueueParams.Limit"/> is not 1 to 500: nothing is sent.</exception>
+    /// <exception cref="BadRequestException">The NA refused the query (<c>invalid_remediation_query</c>): an unknown state or cursor.</exception>
+    /// <exception cref="NotFoundException">The NA's remediation records are off (<c>remediation_disabled</c>).</exception>
+    public async Task<RemediationQueuePage> Remediations(RemediationQueueParams? page = null, CancellationToken ct = default) =>
+        await _t.AdminGetAsync<RemediationQueuePage>("/admin/evidence/remediations", QueueQuery(page?.State, page?.Limit, page?.After), ct)
+            .ConfigureAwait(false);
+
+    /// <summary>Every remediation state in <paramref name="state"/> (default: the open ones), following the pages (read tier).</summary>
+    /// <param name="state">As <see cref="RemediationQueueParams.State"/>.</param>
+    /// <param name="limit">States a page, 1 to 500; null for the NA's default (100).</param>
+    /// <param name="ct">Cancels the reading.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="limit"/> is not 1 to 500: nothing is sent.</exception>
+    /// <exception cref="InvalidOperationException">The NA's cursor did not advance.</exception>
+    public IAsyncEnumerable<RemediationStatus> AllRemediations(string? state = null, int? limit = null, CancellationToken ct = default)
+    {
+        QueueQuery(state, limit, null);
+        return RemediationsFrom(state, limit, ct);
+    }
+
+    private async IAsyncEnumerable<RemediationStatus> RemediationsFrom(string? state, int? limit, [EnumeratorCancellation] CancellationToken ct)
+    {
+        string? after = null;
+        while (true)
+        {
+            var page = await _t.AdminGetAsync<RemediationQueuePage>("/admin/evidence/remediations", QueueQuery(state, limit, after), ct)
+                .ConfigureAwait(false);
+            foreach (var status in page.Remediations) yield return status;
+            if (page.NextAfter is not { } next) yield break;
+            if (next == after) throw new InvalidOperationException("genesismesh: the remediation queue cursor did not advance");
+            after = next;
+        }
+    }
+
+    /// <summary>The query of a page of the due queue; throws for a limit out of range.</summary>
+    private static Dictionary<string, string>? QueueQuery(string? state, int? limit, string? after)
+    {
+        if (limit is { } l)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(l, 1, nameof(limit));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(l, MaxRemediationPage, nameof(limit));
+        }
+        var query = new Dictionary<string, string>();
+        if (state is not null) query["state"] = state;
+        if (limit is { } n) query["limit"] = n.ToString(CultureInfo.InvariantCulture);
+        if (after is not null) query["after"] = after;
+        return query.Count == 0 ? null : query;
+    }
+
+    /// <summary>A time as the NA writes one, in the RFC 3339 grammar a review takes: UTC, microseconds when not zero, <c>Z</c>.</summary>
+    private static string Rfc3339(DateTimeOffset value)
+    {
+        var utc = value.UtcDateTime;
+        var micros = utc.Ticks % TimeSpan.TicksPerSecond / 10;
+        var seconds = utc.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture);
+        return micros == 0 ? seconds + "Z" : seconds + "." + micros.ToString("D6", CultureInfo.InvariantCulture) + "Z";
+    }
+
+    /// <summary>The NA's largest page of the due queue.</summary>
+    private const int MaxRemediationPage = 500;
+
+    /// <summary>
+    /// One judgement's or decision's remediation state, with its newest reviews and stored records (read tier).
+    /// GET /admin/evidence/remediations/&lt;subject_id&gt;
+    /// </summary>
+    /// <exception cref="NotFoundException">
+    /// No remediation or review for this subject (<c>remediation_not_found</c>), or the records are off
+    /// (<c>remediation_disabled</c>).
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="subjectId"/> is not one path segment (see <see cref="JudgeObservation"/>): nothing is sent.
+    /// </exception>
+    public async Task<RemediationDetail> Remediation(string subjectId, CancellationToken ct = default) =>
+        await _t.AdminGetAsync<RemediationDetail>(
+            $"/admin/evidence/remediations/{Transport.LastPathSegment(subjectId, nameof(subjectId))}", null, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Records that the controller told the change's actor (standard tier): an audit event and, on the first notice,
+    /// <see cref="RemediationStatus.NotifiedAt"/>. Send the notice before <see cref="RemediationStatus.RemediationDueAt"/>.
+    /// Not retried: each call is another notice.
+    /// POST /admin/evidence/remediations/&lt;subject_id&gt;/notified
+    /// </summary>
+    /// <param name="subjectId">The judgement or decision.</param>
+    /// <param name="channel">How the actor was told, such as <c>email</c>: 1 to 64 characters; null for none.</param>
+    /// <param name="ct">Cancels the request.</param>
+    /// <exception cref="BadRequestException">The channel is not 1 to 64 characters (<c>invalid_notice</c>).</exception>
+    /// <exception cref="NotFoundException">No remediation or review for this subject (<c>remediation_not_found</c>).</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="subjectId"/> is not one path segment (see <see cref="JudgeObservation"/>): nothing is sent.
+    /// </exception>
+    public async Task<RemediationStatus> MarkNotified(string subjectId, string? channel = null, CancellationToken ct = default) =>
+        await _t.AdminPostAsync<RemediationStatus>(
+            $"/admin/evidence/remediations/{Transport.LastPathSegment(subjectId, nameof(subjectId))}/notified",
+            channel is null ? new Dictionary<string, object?>() : new Dictionary<string, object?> { ["channel"] = channel }, ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// Asks a second holder to review a judged change or a decision (standard tier). The NA keeps this signed request
+    /// and embeds it in the review, so the subject and justification verify offline
+    /// (<see cref="RemediationRules.ReviewApprovalProblem"/>). The client's operator key needs a named holder in the
+    /// store, and may not be the change's actor. Returns the subject's state, its <see cref="RemediationStatus.ReviewId"/>
+    /// the review opened. Not retried: a second request finds the review pending.
+    /// POST /admin/evidence/reviews
+    /// </summary>
+    /// <exception cref="ConflictException">
+    /// <c>review_needs_named_holder</c>, <c>review_already_pending</c>, <c>review_after_remediation</c>,
+    /// <c>review_requested_by_actor</c>, <c>illegal_transition</c> (a decision the NA denied) or <c>review_conflict</c>
+    /// (the subject changed meanwhile).
+    /// </exception>
+    /// <exception cref="BadRequestException">
+    /// The request is not one the NA takes (<c>invalid_review</c>), or would not verify offline
+    /// (<c>review_approval_invalid</c>).
+    /// </exception>
+    /// <exception cref="NotFoundException">The subject is not stored (<c>review_subject_not_found</c>).</exception>
+    public async Task<RemediationStatus> RequestReview(ReviewRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var body = new Dictionary<string, object?>
+        {
+            ["subject_kind"] = request.SubjectKind,
+            ["subject_id"] = request.SubjectId,
+            ["justification"] = request.Justification,
+        };
+        return await _t.AdminPostAsync<RemediationStatus>("/admin/evidence/reviews", body, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A review: pending, or decided with the record the NA signed and stored (read tier).
+    /// GET /admin/evidence/reviews/&lt;review_id&gt;
+    /// </summary>
+    /// <exception cref="NotFoundException">No such review (<c>review_not_found</c>).</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="reviewId"/> is not one path segment (see <see cref="JudgeObservation"/>): nothing is sent.
+    /// </exception>
+    public async Task<ReviewDetail> Review(string reviewId, CancellationToken ct = default) =>
+        await _t.AdminGetAsync<ReviewDetail>($"/admin/evidence/reviews/{Transport.LastPathSegment(reviewId, nameof(reviewId))}", null, ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// Decides a review (privileged tier): uphold the change, deny it (remediation becomes due), or waive the
+    /// remediation until a time. Use a client whose operator key is privileged and of another holder than the
+    /// requester's and the change's actor's. The request is signed as sent, without a query, and the NA embeds it in the
+    /// <see cref="ReviewRecord"/> it signs, so the approval verifies offline. A waiver's end is sent as the NA writes a
+    /// time. Not retried: sent again, it would find the review decided.
+    /// POST /admin/evidence/reviews/&lt;review_id&gt;/decide
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="reviewId"/> is not one path segment (see <see cref="JudgeObservation"/>), or a waiver's end is
+    /// given for another verdict or missing for a waiver: nothing is sent.
+    /// </exception>
+    /// <exception cref="ConflictException">
+    /// <c>review_already_decided</c>, <c>review_same_holder_as_requester</c>, <c>review_same_holder_as_actor</c>,
+    /// <c>review_needs_named_holder</c>, <c>review_waiver_after_remediation</c>, <c>illegal_transition</c> or
+    /// <c>review_conflict</c>.
+    /// </exception>
+    /// <exception cref="ValidationException">
+    /// <c>review_waiver_too_long</c>: past the NA's longest waiver; <c>review_waiver_beyond_lifetime</c>: past an
+    /// emergency change's lifetime.
+    /// </exception>
+    /// <exception cref="BadRequestException">
+    /// The decision is not one the NA takes (<c>invalid_review</c>), or would not verify offline
+    /// (<c>review_approval_invalid</c>).
+    /// </exception>
+    /// <exception cref="NotFoundException">No such review (<c>review_not_found</c>).</exception>
+    public async Task<ReviewDecided> DecideReview(string reviewId, ReviewDecision decision, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        var path = $"/admin/evidence/reviews/{Transport.LastPathSegment(reviewId, nameof(reviewId))}/decide";
+        if ((decision.Verdict == ReviewVerdicts.WaiveUntil) != decision.WaiveUntil.HasValue)
+            throw new ArgumentException("genesismesh: a waiver's end is given exactly for a waiver", nameof(decision));
+        var body = new Dictionary<string, object?> { ["verdict"] = decision.Verdict };
+        if (decision.WaiveUntil is { } until) body["waive_until"] = Rfc3339(until);
+        if (decision.Note is not null) body["note"] = decision.Note;
+        return await _t.AdminPostAsync<ReviewDecided>(path, body, ct).ConfigureAwait(false);
+    }
+
     /// <summary>The query of a page of changes; throws for a value out of range.</summary>
     private static Dictionary<string, string>? ChangesQuery(int? limit, long? afterSequence)
     {

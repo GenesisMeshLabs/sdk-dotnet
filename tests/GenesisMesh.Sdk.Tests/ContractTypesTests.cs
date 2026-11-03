@@ -32,11 +32,12 @@ public class ContractTypesTests
     internal static Dictionary<string, bool> JsonFields(Type type)
     {
         var fields = new Dictionary<string, bool>();
-        foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        // A property a derived model hides (new) is the one the serializer reads: the most derived comes first.
+        foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance).OrderByDescending(p => Depth(p.DeclaringType!)))
         {
             var name = prop.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name;
             var ignore = prop.GetCustomAttribute<JsonIgnoreAttribute>();
-            if (name is null || ignore?.Condition == JsonIgnoreCondition.Always) continue;
+            if (name is null || ignore?.Condition == JsonIgnoreCondition.Always || fields.ContainsKey(name)) continue;
             fields[name] = ignore is null;
         }
         return fields;
@@ -78,11 +79,12 @@ public class ContractTypesTests
         }
         if (!type.IsClass || type.Namespace != "GenesisMesh" || raw is not JsonObject obj) return;
         var declared = new Dictionary<string, (Type Type, bool Required)>();
-        foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        // A property a derived model hides (new) is the one the serializer reads: the most derived comes first.
+        foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance).OrderByDescending(p => Depth(p.DeclaringType!)))
         {
             var name = prop.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name;
             var ignore = prop.GetCustomAttribute<JsonIgnoreAttribute>();
-            if (name is null || ignore?.Condition == JsonIgnoreCondition.Always) continue;
+            if (name is null || ignore?.Condition == JsonIgnoreCondition.Always || declared.ContainsKey(name)) continue;
             declared[name] = (prop.PropertyType, ignore is null || ignore.Condition == JsonIgnoreCondition.Never);
         }
         foreach (var (key, value) in obj)
@@ -91,6 +93,13 @@ public class ContractTypesTests
             else problems.Add($"{path}.{key}: not modeled");
         }
         problems.AddRange(declared.Where(f => f.Value.Required && !obj.ContainsKey(f.Key)).Select(f => $"{path}.{f.Key}: declared but not sent"));
+    }
+
+    private static int Depth(Type type)
+    {
+        var depth = 0;
+        for (var t = type.BaseType; t is not null; t = t.BaseType) depth++;
+        return depth;
     }
 
     public static TheoryData<string, Type> Models => new()
