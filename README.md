@@ -1014,7 +1014,42 @@ var events = OfflineVerifier.ParseExportLines(exportText);       // gm.evidence.
 bool observed = OfflineVerifier.VerifyOutOfBandRecord(observationJson, new[] { observerPublicKey });
 bool judged = OfflineVerifier.VerifyOutOfBandRecord(judgementJson, history);   // the key valid at judged_at
 string signedForm = OfflineVerifier.OutOfBandCanonical(recordJson);            // OutOfBandDigest: its SHA-256
+
+// 1.9.0: an NA record's signature alone, under the NA's keys or its key history.
+bool decided = OfflineVerifier.VerifyDecisionSignature(decisionJson, new[] { naPublicKey });
+bool published = OfflineVerifier.VerifyPolicySignature(policyJson, history);
+bool issued = OfflineVerifier.VerifyAttestationSignature(attestationJson, history, DateTimeOffset.UtcNow);
+bool recognised = OfflineVerifier.VerifyTreatySignature(treatyJson, history);
+bool revoking = OfflineVerifier.VerifyRevocationFeedSignature(feedJson, history);
+string? signer = OfflineVerifier.RevocationFeedSigner(feedJson, history);  // the key valid at issued_at that signed it
 ```
+
+The signature verifiers are the TypeScript SDK's `verifyDecisionSignature`,
+`verifyPolicySignature`, `verifyAttestationSignature`,
+`verifyTreatySignature`, `verifyRevocationFeedSignature` and
+`revocationFeedSigner`:
+- **What they check:** a signature over the record as received. The record
+  must have no field this SDK does not know and be in canonical form as this
+  SDK checks it: its timestamps as the reference writes them, and every field
+  the reference always writes. The TypeScript SDK checks unknown fields only,
+  and not for a treaty.
+- **With a key history:** the key valid at the record's time
+  (`NAKeyHistory.RecordTimeFields`; a revocation feed's `issued_at`).
+- **With a time to judge at:** an attestation, a treaty or a revocation feed
+  must still vouch then ([the vouching horizon](#the-vouching-horizon-180)).
+- **For the reason:** `VerifyBoundaryDecision` also checks a decision's
+  expiry and bindings, and `NARecordRefusal` gives the reference's reason
+  for an attestation, a treaty or a feed.
+- **What no SDK checks:** the reference also holds the whole record to its
+  model, and to what the model writes back. An NA-signed record that only
+  that refuses still verifies here, for example one with:
+  - an invalid `status`;
+  - an integer written as `1.0` or `"1"` (TypeScript refuses `1.0`, since it
+    writes the number back as `1`);
+  - a timestamp written as a number;
+  - a revocation feed's attestation IDs out of order.
+- **Typed records:** a record this SDK read into its model, written back
+  with `Auth.SerializerOptions`, keeps the form the NA signed.
 
 An accepted DENY has `Accepted` true and `Authorized` false: the decision
 verified, and it denies. Revocation is not checked offline. `Canonical.FromJson`
