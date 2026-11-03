@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GenesisMesh;
@@ -289,6 +290,7 @@ public class RemediationTests
     [InlineData("rotation-same-version", "the forward rotation issues another version than the one disabled")]
     [InlineData("disable-with-new-version", "only a forward rotation names rotation evidence or a new version")]
     [InlineData("detail-too-long", "the record does not match the RemediationRecord model (a field missing, empty, too long or of another type)")]
+    [InlineData("alert-disables", "an alerted remediation disables nothing")]
     [InlineData("empty-subject", "the record does not match the RemediationRecord model (a field missing, empty, too long or of another type)")]
     public async Task AMalformedRemediationIsRefusedBeforeItIsSigned(string change, string detail)
     {
@@ -299,6 +301,7 @@ public class RemediationTests
             "rotation-same-version" => Rotation(f => f["DisabledVersionId"] = "v3"),
             "disable-with-new-version" => Rotation(f => { f["Steps"] = RemediationSteps.Disable; f["RotationEvidenceId"] = null; }),
             "detail-too-long" => Rotation(f => f["Detail"] = new string('é', 1025)),
+            "alert-disables" => Rotation(f => { f["Steps"] = RemediationSteps.None; f["RotationEvidenceId"] = f["VersionId"] = null; }),
             _ => new RemediationInput { SubjectKind = "judgement", ChangeKind = "observation", ChangeId = "c", ResourceId = "r", Steps = "disable" },
         };
         var e = await Assert.ThrowsAsync<OutOfBandRecordException>(() => Recorder().SignRemediation(input));
@@ -543,5 +546,423 @@ public class RemediationTests
         var input = Vector("emergency-map-active").GetProperty("input");
         Assert.NotEmpty(RemediationRules.EmergencyMap(Policies(input), input.GetProperty("at").GetString()!));
         Assert.Empty(RemediationRules.EmergencyMap(Policies(input), "not a time"));
+        // Before its validity, as after it.
+        Assert.Empty(RemediationRules.EmergencyMap(Policies(input), "2025-12-31T23:59:59Z"));
     }
+
+    // ── Guidance ───────────────────────────────────────────────────────────
+
+    private static BoundaryPolicy Guided(string remediation)
+    {
+        var policy = Policies(Vector("plan-versioned-rotation").GetProperty("input"))[0];
+        policy.Remediation = JsonDocument.Parse(remediation).RootElement;
+        return policy;
+    }
+
+    private static PolicyGateEvaluation Gate(string gate, bool passed, string mode = "enforce") => new()
+    {
+        PolicyId = "secret-lifetime",
+        PolicyVersion = 1,
+        GateId = gate,
+        GateType = "max_value.v1",
+        Mode = mode,
+        Passed = passed,
+        Outcome = passed ? "pass" : "fail",
+    };
+
+    private const string TwoGates = """{"max-lifetime": {"mode": "cancel", "grace_seconds": 600}, "owner": {"mode": "alert_only", "grace_seconds": 60}}""";
+
+    [Fact]
+    public void OnlyAFailingEnforcedGateGivesItsGuidance()
+    {
+        // The gate passed, or only observed: no gate's guidance, no "*", so the defaults.
+        Assert.Equal(new RemediationGuidance(RemediationModes.AlertOnly, 86400, GuidanceSources.Default),
+            RemediationRules.Guidance([Guided(TwoGates)], [Gate("max-lifetime", passed: true)]));
+        Assert.Equal(new RemediationGuidance(RemediationModes.AlertOnly, 86400, GuidanceSources.Default),
+            RemediationRules.Guidance([Guided(TwoGates)], [Gate("max-lifetime", passed: false, mode: "observe")]));
+        Assert.Equal(new RemediationGuidance(RemediationModes.Cancel, 600, GuidanceSources.Gate),
+            RemediationRules.Guidance([Guided(TwoGates)], [Gate("max-lifetime", passed: false)]));
+    }
+
+    [Fact]
+    public void TheGraceIsTheShortestOfTheWinningMode()
+    {
+        // cancel wins; the alert's shorter grace does not apply.
+        Assert.Equal(new RemediationGuidance(RemediationModes.Cancel, 600, GuidanceSources.Gate),
+            RemediationRules.Guidance([Guided(TwoGates)], [Gate("max-lifetime", false), Gate("owner", false)]));
+        Assert.Equal(new RemediationGuidance(RemediationModes.AlertOnly, 60, GuidanceSources.Gate),
+            RemediationRules.Guidance([Guided(TwoGates)], [Gate("owner", false)]));
+    }
+
+    [Fact]
+    public void AnIndeterminateJudgementFallsBackOnlyFromACancel()
+    {
+        var change = new ChangeFacts("rotate", "v2", true);
+        Assert.Equal(new RemediationPlan(RemediationModes.AlertOnly, RemediationSteps.None, null, 60, GuidanceSources.Gate),
+            RemediationRules.Plan("indeterminate", [Guided(TwoGates)], [Gate("owner", false)], change));
+        Assert.Equal(new RemediationPlan(RemediationModes.AlertOnly, RemediationSteps.None, RemediationFallbacks.Indeterminate, 600, GuidanceSources.Gate),
+            RemediationRules.Plan("indeterminate", [Guided(TwoGates)], [Gate("max-lifetime", false)], change));
+    }
+
+    // ── Embedded requests, signed for real ─────────────────────────────────
+
+    private const string Audience = "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=";
+    private const string ReviewId = "00000000-0000-4000-8000-000000000051";
+    private const string DecidePath = "/admin/evidence/reviews/" + ReviewId + "/decide";
+    private const string RequestPath = "/admin/evidence/reviews";
+
+    /// <summary>An operator's request signed with the zero seed, as the NA keeps it in a review.</summary>
+    private static async Task<AdminApproval> Signed(string path, Dictionary<string, object?> body, string timestamp, string method = "POST",
+        Dictionary<string, IReadOnlyList<string>>? query = null, string keyId = "operator-2")
+    {
+        var payload = Auth.AdminSigningPayload(new AdminRequest(method, path, Audience, body, query), keyId, timestamp, "nonce-1");
+        var signature = await new SeedSigner(TestHelpers.ZeroSeedB64, keyId).SignAsync(payload);
+        return new AdminApproval
+        {
+            KeyId = keyId,
+            PublicKey = ZeroKey,
+            Method = method,
+            Path = path,
+            Query = query?.ToDictionary(q => q.Key, q => (IList<string>)q.Value.ToList()) ?? new Dictionary<string, IList<string>>(),
+            Audience = Audience,
+            Body = JsonSerializer.SerializeToElement(body),
+            Timestamp = timestamp,
+            Nonce = "nonce-1",
+            AdminSignature = Convert.ToBase64String(signature),
+        };
+    }
+
+    private static readonly Dictionary<string, object?> RequestBody = new()
+    {
+        ["subject_kind"] = "judgement",
+        ["subject_id"] = "judgement-1",
+        ["justification"] = "Planned with the vendor",
+    };
+
+    private static ReviewRecord Review(AdminApproval approval, AdminApproval? request = null, string verdict = "deny") => new()
+    {
+        ReviewId = ReviewId,
+        SubjectKind = "judgement",
+        SubjectId = "judgement-1",
+        SubjectDigest = new string('a', 64),
+        OpenedFor = request is null ? ReviewOpenedFor.FlaggedForReview : ReviewOpenedFor.Requested,
+        RequestedBy = request is null ? null : "operator-1",
+        RequesterHolder = request is null ? null : "holder-1",
+        Justification = request is null ? null : "Planned with the vendor",
+        RequestApproval = request,
+        RequestedAt = "2026-01-01T00:08:00Z",
+        Verdict = verdict,
+        DecidedBy = "operator-2",
+        DeciderHolder = "holder-2",
+        Approval = approval,
+        DecidedAt = "2026-01-01T00:09:00Z",
+        IssuerSovereignId = "sovereign-c",
+        IssuedBy = "na-key",
+    };
+
+    private static Dictionary<string, object?> Deny(params (string Key, object? Value)[] more)
+    {
+        var body = new Dictionary<string, object?> { ["verdict"] = "deny" };
+        foreach (var (key, value) in more) body[key] = value;
+        return body;
+    }
+
+    [Fact]
+    public async Task TheDecidersRequestMustBeExactlyTheDecision()
+    {
+        Assert.Null(RemediationRules.ReviewApprovalProblem(Review(await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z")), [Audience]));
+        Assert.Equal("the decider's request carries fields the review does not record",
+            RemediationRules.ReviewApprovalProblem(Review(await Signed(DecidePath, Deny(("reason", "x")), "2026-01-01T00:09:00Z")), [Audience]));
+        Assert.Equal("the decider's request is for another Network Authority",
+            RemediationRules.ReviewApprovalProblem(Review(await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z")), [ZeroKey]));
+    }
+
+    [Fact]
+    public async Task TheMethodIsSignedUpperCaseButMustBePost()
+    {
+        // The operator signs the method upper-cased, so the request verifies; a review still takes POST only.
+        var lower = await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z", method: "post");
+        Assert.True(RemediationRules.AdminApprovalValid(lower));
+        Assert.Equal($"the decider's request is post {DecidePath}, not POST {DecidePath}",
+            RemediationRules.ReviewApprovalProblem(Review(lower), [Audience]));
+    }
+
+    [Fact]
+    public async Task ARequestWithAQueryIsNotTheDecision()
+    {
+        var queried = await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z", query: new() { ["x"] = ["1"] });
+        Assert.True(RemediationRules.AdminApprovalValid(queried));
+        queried.Query["x"] = ["2"];
+        Assert.False(RemediationRules.AdminApprovalValid(queried));
+        queried.Query["x"] = ["1"];
+        Assert.Equal($"the decider's request is POST {DecidePath}, not POST {DecidePath}",
+            RemediationRules.ReviewApprovalProblem(Review(queried), [Audience]));
+    }
+
+    [Fact]
+    public async Task TheRequestersRequestNamesExactlyTheSubjectAndJustification()
+    {
+        var decided = await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z");
+        var request = await Signed(RequestPath, RequestBody, "2026-01-01T00:08:00Z", keyId: "operator-1");
+        Assert.Null(RemediationRules.ReviewApprovalProblem(Review(decided, request), [Audience]));
+        var partial = await Signed(RequestPath, RequestBody.Where(p => p.Key != "justification").ToDictionary(), "2026-01-01T00:08:00Z", keyId: "operator-1");
+        Assert.Equal("the requester's request names another subject or justification",
+            RemediationRules.ReviewApprovalProblem(Review(decided, partial), [Audience]));
+        var stale = await Signed(RequestPath, RequestBody, "2026-01-01T00:02:59Z", keyId: "operator-1");
+        Assert.Equal("the requester's request was signed more than 300s from when it was recorded",
+            RemediationRules.ReviewApprovalProblem(Review(decided, stale), [Audience]));
+    }
+
+    [Theory]
+    [InlineData("2026-10-12t09:00:00Z")]
+    [InlineData("2026-10-12T09:00:00z")]
+    public void ALowerCaseLetterIsNoRfc3339Time(string value) => Assert.Null(RemediationRules.Rfc3339(value));
+
+    [Theory]
+    [InlineData("2026-04-01T00:09:00Z", null)]
+    [InlineData("2026-04-01T00:09:00.000001Z", "a waiver ends after it is decided and within the longest waiver")]
+    [InlineData("2026-01-01T00:09:00Z", "a waiver ends after it is decided and within the longest waiver")]
+    public async Task AWaiverRunsAtMost90Days(string waiveUntil, string? problem)
+    {
+        var review = Review(await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z"), verdict: ReviewVerdicts.WaiveUntil);
+        review.WaiveUntil = waiveUntil;
+        Assert.Equal(problem, RemediationRules.ReviewRecordProblem(review));
+    }
+
+    /// <summary>The review vector's record changed by <paramref name="change"/>, then signed with the zero seed as the NA.</summary>
+    private static async Task<string> SignedReview(Action<JsonObject> change)
+    {
+        var record = JsonNode.Parse(Vector("signature-review-na-key").GetProperty("record").GetRawText())!.AsObject();
+        record.Remove("signature");
+        change(record);
+        var sig = await new SeedSigner(TestHelpers.ZeroSeedB64, "na-key").SignAsync(Encoding.UTF8.GetBytes(OfflineVerifier.OutOfBandCanonical(record.ToJsonString())));
+        record["signature"] = new JsonObject { ["key_id"] = "na-key", ["sig"] = Convert.ToBase64String(sig) };
+        return record.ToJsonString();
+    }
+
+    [Fact]
+    public async Task AnEmbeddedRequestHasItsFieldsAndNoOther()
+    {
+        Assert.True(OfflineVerifier.VerifyReviewRecord(await SignedReview(_ => { }), [ZeroKey]));
+        Assert.False(OfflineVerifier.VerifyReviewRecord(await SignedReview(r => r["approval"]!["extra"] = 1), [ZeroKey]));
+        Assert.False(OfflineVerifier.VerifyReviewRecord(await SignedReview(r => r["request_approval"]!["extra"] = 1), [ZeroKey]));
+    }
+
+    [Theory]
+    [InlineData("1", "1", "the forward rotation issues another version than the one disabled")]
+    [InlineData("true", "true", "the forward rotation issues another version than the one disabled")]
+    [InlineData("\"v2\"", "\"v2\"", "the forward rotation issues another version than the one disabled")]
+    [InlineData("1", "\"1\"", "record does not match the RemediationRecord model")]
+    [InlineData("{}", "{}", "record does not match the RemediationRecord model")]
+    [InlineData("1.0", "1", "the forward rotation issues another version than the one disabled")]
+    public void VersionsCompareAsTypeScriptComparesThem(string version, string disabled, string problem)
+    {
+        // A record of the wrong shape names the steps problem first, as TypeScript's === would find it.
+        var record = JsonNode.Parse(Vector("canonical-remediation").GetProperty("record").GetRawText())!.AsObject();
+        record["version_id"] = JsonNode.Parse(version);
+        record["disabled_version_id"] = JsonNode.Parse(disabled);
+        Assert.Equal(problem, RemediationRules.FormProblem(record.ToJsonString()));
+    }
+
+    [Fact]
+    public void AnActionOfAnotherTypeIsReadAsWritten() =>
+        Assert.Equal(new ChangeFacts("5", null, true), RemediationRules.FactsOf(ChangeKinds.Execution, JsonDocument.Parse("""{"resource_action": 5}""").RootElement));
+
+    [Fact]
+    public async Task ARequestWhosePathIsNoPathIsInvalid()
+    {
+        var approval = await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z");
+        approval.Path = DecidePath[1..];
+        Assert.False(RemediationRules.AdminApprovalValid(approval));
+    }
+
+    [Theory]
+    [InlineData("secret.*", "justification", "invalid_emergency")]
+    [InlineData("secret.rotate", "why not", "invalid_emergency")]
+    [InlineData("secret.rotate", "", "invalid_emergency")]
+    [InlineData("secret.rotate", "justification", null)]
+    public void AnEmergencySectionIsCheckedAsTheNAChecksIt(string standsFor, string parameter, string? code)
+    {
+        var intent = new BoundaryPolicyIntent
+        {
+            PolicyId = "p",
+            Gates = [new GateSpec { GateId = "g", GateType = "required_parameter.v1", Config = new Dictionary<string, object?> { ["path"] = "request_parameters." + parameter } }],
+            Selector = new PolicySelector { Capabilities = ["secret.emergency-rotate"] },
+            Emergency = new EmergencyCapability { StandsFor = standsFor, JustificationParameter = parameter, MaxLifetimeSeconds = 3600 },
+        };
+        Assert.Equal(code, RemediationRules.PolicySectionIssues(intent).SingleOrDefault()?.Code);
+    }
+
+    // ── Cases the reference decided (testdata/remediation) ─────────────────
+
+    private static readonly string CasesPath = Path.Combine(AppContext.BaseDirectory, "testdata", "remediation", "reference_cases.json");
+
+    private static JsonElement Case(string name) => JsonDocument.Parse(File.ReadAllText(CasesPath)).RootElement.GetProperty(name);
+
+    [Theory]
+    [InlineData("query two values kept in order")]
+    [InlineData("body absent")]
+    [InlineData("path without slash")]
+    public void AnApprovalIsValidAsTheReferenceSays(string name) =>
+        Assert.Equal(Case(name).GetProperty("valid").GetBoolean(),
+            RemediationRules.AdminApprovalValid(Case(name).GetProperty("approval").Deserialize<AdminApproval>()!));
+
+    [Theory]
+    [InlineData("decision for another review")]
+    [InlineData("decision method post")]
+    [InlineData("decision signed 400 s after it was recorded")]
+    [InlineData("decision signed 200 s after it was recorded")]
+    [InlineData("decision with an extra field")]
+    [InlineData("request signed an hour before it was recorded")]
+    [InlineData("request for another subject kind")]
+    [InlineData("request on the decision route")]
+    [InlineData("request with a fourth field")]
+    [InlineData("waiver signed, none recorded")]
+    public void AReviewIsProvedAsTheReferenceSays(string name)
+    {
+        var c = Case(name);
+        var problem = RemediationRules.ReviewApprovalProblem(c.GetProperty("record").Deserialize<ReviewRecord>()!,
+            c.GetProperty("audiences").EnumerateArray().Select(a => a.GetString()!).ToList());
+        Assert.Equal(Str(c, "problem"), problem);
+        Assert.Equal(c.GetProperty("valid").GetBoolean(), problem is null);
+    }
+
+    [Theory]
+    [InlineData("verify short subject digest")]
+    [InlineData("verify no issuer")]
+    [InlineData("verify resigned unchanged")]
+    public void AReviewVerifiesAsTheReferenceReadsIt(string name)
+    {
+        var c = Case(name);
+        Assert.Equal(c.GetProperty("valid").GetBoolean(),
+            OfflineVerifier.VerifyReviewRecord(c.GetProperty("record").GetRawText(), [c.GetProperty("public_key").GetString()!]));
+    }
+
+    [Theory]
+    [InlineData("bad parameter stops there")]
+    [InlineData("a max_value gate does not require it")]
+    public void APolicysSectionsHaveTheReferencesIssues(string name) =>
+        Assert.Equal(Case(name).GetProperty("codes").EnumerateArray().Select(x => x.GetString()!),
+            RemediationRules.PolicySectionIssues(Case(name).GetProperty("record").Deserialize<BoundaryPolicy>()!).Select(i => i.Code).Distinct()
+                .Order(StringComparer.Ordinal));
+
+    [Theory]
+    [InlineData("two emergency versions")]
+    [InlineData("two capabilities")]
+    public void AnEmergencyMapIsTheReferences(string name)
+    {
+        var c = Case(name);
+        Assert.Equal(c.GetProperty("map").EnumerateObject().Select(p => (p.Name, p.Value.GetString()!)),
+            RemediationRules.EmergencyMap(c.GetProperty("policies").Deserialize<List<BoundaryPolicy>>()!, c.GetProperty("at").GetString()!)
+                .Select(p => (p.Key, p.Value)).OrderBy(p => p.Key, StringComparer.Ordinal));
+    }
+
+    // ── The admission order, around the key ────────────────────────────────
+
+    [Fact]
+    public void AKeyOfAnotherSovereignIsUnknownWhateverItsSignature()
+    {
+        var key = Key(Vector("check-accepted"))!;
+        key.ExecutorSovereignId = "sovereign-a";
+        key.PublicKey = Vector("check-observer-key").GetProperty("key").GetProperty("public_key").GetString()!;  // did not sign it
+        Assert.Equal("remediation_unknown_key",
+            RemediationRules.RecordProblem(Vector("check-accepted").GetProperty("record").GetRawText(), key)?.Code);
+    }
+
+    [Fact]
+    public void ScopeComesBeforeSecretMaterial()
+    {
+        var v = Vector("check-secret-version");
+        var record = v.GetProperty("record").GetRawText();
+        var key = Key(v)!;
+        Assert.Equal("remediation_secret_material", RemediationRules.RecordProblem(record, key)?.Code);
+        key.RetiredAt = "2026-01-01T00:00:00Z";
+        Assert.Equal("remediation_key_retired", RemediationRules.RecordProblem(record, key)?.Code);
+        key.RetiredAt = null;
+        key.ResourcePrefix = "kv:other/";
+        Assert.Equal("remediation_out_of_scope", RemediationRules.RecordProblem(record, key)?.Code);
+    }
+
+    // ── The review's fixes ─────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("secret.*")]
+    [InlineData("*")]
+    [InlineData("secret*rotate")]
+    [InlineData("secret.*.rotate")]
+    [InlineData("secret.rotate*")]
+    [InlineData("   ")]
+    public void StandsForIsAnExactCapability(string standsFor)
+    {
+        var node = JsonNode.Parse(Vector("validation-emergency-valid").GetProperty("record").GetRawText())!.AsObject();
+        Assert.Empty(RemediationRules.PolicySectionIssues(node.Deserialize<BoundaryPolicy>()!));
+        node["emergency"]!["stands_for"] = standsFor;
+        Assert.Equal(["invalid_emergency"], RemediationRules.PolicySectionIssues(node.Deserialize<BoundaryPolicy>()!).Select(i => i.Code));
+    }
+
+    [Theory]
+    [InlineData("not a time")]
+    [InlineData("2026-01-01 00:09:00Z")]
+    [InlineData("")]
+    public async Task ARecordedTimeThatCannotBeReadRefusesTheApproval(string decidedAt)
+    {
+        var review = Review(await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z"));
+        review.DecidedAt = decidedAt;
+        Assert.Equal("the decider's request was signed more than 300s from when it was recorded",
+            RemediationRules.ReviewApprovalProblem(review, [Audience]));
+    }
+
+    [Fact]
+    public async Task ARecordedTimeWithAFinerFractionIsCut()
+    {
+        var review = Review(await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z"));
+        review.DecidedAt = "2026-01-01T00:14:00.0000009Z";
+        Assert.Null(RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        review.DecidedAt = "2026-01-01T00:14:00.0000019Z";
+        Assert.NotNull(RemediationRules.ReviewApprovalProblem(review, [Audience]));
+    }
+
+    [Theory]
+    [InlineData("600.0", 600)]
+    [InlineData("600", 600)]
+    [InlineData("600.5", 86400)]
+    [InlineData("\"600\"", 86400)]
+    [InlineData("-1", 86400)]
+    public void AGraceIsAWholeNumberOfSeconds(string grace, int expected)
+    {
+        // An entry the reference's model would not take gives no guidance; its grace never becomes the default's.
+        var policy = Guided("""{"max-lifetime": {"mode": "cancel", "grace_seconds": """ + grace + "}}");
+        var guidance = RemediationRules.Guidance([policy], [Gate("max-lifetime", false)]);
+        Assert.Equal(expected, guidance.GraceSeconds);
+        Assert.Equal(expected == 600 ? RemediationModes.Cancel : RemediationModes.AlertOnly, guidance.Mode);
+    }
+
+    [Fact]
+    public void AnEntryWithAModeTheNADoesNotKnowGivesNoGuidance()
+    {
+        var policy = Guided("""{"max-lifetime": {"mode": "cancel", "grace_seconds": 600}, "owner": {"mode": "pause", "grace_seconds": 5}}""");
+        Assert.Equal(new RemediationGuidance(RemediationModes.Cancel, 600, GuidanceSources.Gate),
+            RemediationRules.Guidance([policy], [Gate("max-lifetime", false), Gate("owner", false)]));
+        // Alone, it gives none: the defaults apply.
+        Assert.Equal(new RemediationGuidance(RemediationModes.AlertOnly, 86400, GuidanceSources.Default),
+            RemediationRules.Guidance([policy], [Gate("owner", false)]));
+    }
+
+    [Fact]
+    public void ANAOpenedReviewNamesNoRequesterAndARequestedOneItsRequest()
+    {
+        ReviewRecord Changed(Action<JsonObject> change)
+        {
+            var node = JsonNode.Parse(Vector("review-approval-valid").GetProperty("record").GetRawText())!.AsObject();
+            change(node);
+            return node.Deserialize<ReviewRecord>()!;
+        }
+        Assert.Null(RemediationRules.ReviewRecordProblem(Changed(_ => { })));
+        Assert.Equal("a review the NA opened has no requester", RemediationRules.ReviewRecordProblem(Changed(r => r["opened_for"] = "review_required")));
+        Assert.Equal("a requested review names its requester, holder, justification and request",
+            RemediationRules.ReviewRecordProblem(Changed(r => r.Remove("request_approval"))));
+    }
+
+    [Fact]
+    public void AnOffsetOf60MinutesIsNoRfc3339Time() => Assert.Null(RemediationRules.Rfc3339("2026-10-12T09:00:00+01:60"));
 }

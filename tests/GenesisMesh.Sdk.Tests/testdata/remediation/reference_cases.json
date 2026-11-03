@@ -1,0 +1,1010 @@
+{
+ "decision for another review": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168c",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "judgement",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor"
+    },
+    "timestamp": "2026-01-01T00:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "YkqRFdcCMmLfS18Uqd27KopPYYGaoVYo7swu2f8z0iPPRUWhv1jzPtoQPIQGuqznhq7TE7hHQGMVB6XZlX9MCA=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000099/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny"
+    },
+    "timestamp": "2026-01-01T00:09:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "95CA6WwaqIELugmvhdJ+yk0kVXWYgI7NG8oMsi0qiwyBamG49LPsxbKPfmaELBL3SrD6aGOLnylN5LRwkq8uAQ=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issuer_sovereign_id": "sovereign-c",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "MPK158+OcNPtH1fAU4Ix/hCoFQnxunkyNHDXOWAdgYyxlW1Z8w3zm3lqF267Lry9VTJU3jDka74sdxmZkTFHDw=="
+   }
+  },
+  "audiences": [
+   "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0="
+  ],
+  "valid": false,
+  "problem": "the decider's request is POST /admin/evidence/reviews/00000000-0000-4000-8000-000000000099/decide, not POST /admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide"
+ },
+ "decision method post": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168c",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "judgement",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor"
+    },
+    "timestamp": "2026-01-01T00:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "YkqRFdcCMmLfS18Uqd27KopPYYGaoVYo7swu2f8z0iPPRUWhv1jzPtoQPIQGuqznhq7TE7hHQGMVB6XZlX9MCA=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "post",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny"
+    },
+    "timestamp": "2026-01-01T00:09:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "jvvm8V+Pi0KKeTzEJF8BAtolbNafAi28jZqfes8Jtc5EGRvsS7xMXH25F4KEBHqgc5h0ySijVpHNoQB6jMszBA=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issuer_sovereign_id": "sovereign-c",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "MPK158+OcNPtH1fAU4Ix/hCoFQnxunkyNHDXOWAdgYyxlW1Z8w3zm3lqF267Lry9VTJU3jDka74sdxmZkTFHDw=="
+   }
+  },
+  "audiences": [
+   "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0="
+  ],
+  "valid": false,
+  "problem": "the decider's request is post /admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide, not POST /admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide"
+ },
+ "decision signed 400 s after it was recorded": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168c",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "judgement",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor"
+    },
+    "timestamp": "2026-01-01T00:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "YkqRFdcCMmLfS18Uqd27KopPYYGaoVYo7swu2f8z0iPPRUWhv1jzPtoQPIQGuqznhq7TE7hHQGMVB6XZlX9MCA=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny"
+    },
+    "timestamp": "2026-01-01T00:15:40Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "Pmrby0BYE3nKRR6xB+rF/VZSBmmdowF8wxPpLgyndCe/U5fKrkJeiofWbIkguLQv6UirmwlbZg5+9KwKhiTYCA=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issuer_sovereign_id": "sovereign-c",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "MPK158+OcNPtH1fAU4Ix/hCoFQnxunkyNHDXOWAdgYyxlW1Z8w3zm3lqF267Lry9VTJU3jDka74sdxmZkTFHDw=="
+   }
+  },
+  "audiences": [
+   "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0="
+  ],
+  "valid": false,
+  "problem": "the decider's request was signed more than 300s from when it was recorded"
+ },
+ "decision signed 200 s after it was recorded": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168c",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "judgement",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor"
+    },
+    "timestamp": "2026-01-01T00:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "YkqRFdcCMmLfS18Uqd27KopPYYGaoVYo7swu2f8z0iPPRUWhv1jzPtoQPIQGuqznhq7TE7hHQGMVB6XZlX9MCA=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny"
+    },
+    "timestamp": "2026-01-01T00:12:20Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "Ju3MfExPmIyMDXZzcrSaYT9KU7+Q105Sd8r/jYOvhPYv3HdS9nKDuQH4pNbqn9pKoVF2NG8d++31nlKK3mphCQ=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issuer_sovereign_id": "sovereign-c",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "MPK158+OcNPtH1fAU4Ix/hCoFQnxunkyNHDXOWAdgYyxlW1Z8w3zm3lqF267Lry9VTJU3jDka74sdxmZkTFHDw=="
+   }
+  },
+  "audiences": [
+   "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0="
+  ],
+  "valid": true,
+  "problem": null
+ },
+ "decision with an extra field": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168c",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "judgement",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor"
+    },
+    "timestamp": "2026-01-01T00:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "YkqRFdcCMmLfS18Uqd27KopPYYGaoVYo7swu2f8z0iPPRUWhv1jzPtoQPIQGuqznhq7TE7hHQGMVB6XZlX9MCA=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny",
+     "reason": "x"
+    },
+    "timestamp": "2026-01-01T00:09:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "lr9AOstdMDcj3UHeMzRp0k1XpUEUm473M8WfM7qRDlosHGoRETWwKWMMWzWyNXVWENTRp/GcbY5xxPluLwTMBw=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issuer_sovereign_id": "sovereign-c",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "MPK158+OcNPtH1fAU4Ix/hCoFQnxunkyNHDXOWAdgYyxlW1Z8w3zm3lqF267Lry9VTJU3jDka74sdxmZkTFHDw=="
+   }
+  },
+  "audiences": [
+   "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0="
+  ],
+  "valid": false,
+  "problem": "the decider's request carries fields the review does not record"
+ },
+ "request signed an hour before it was recorded": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168c",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "judgement",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor"
+    },
+    "timestamp": "2025-12-31T23:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "QGLTNXFUcusn8Mkuw3clqkiGIXbJ++O6CsIZ2/Q/hkTuclrMCWDBjO0/6TZs1fZnAcJjP7nBh5wa3rLuGnoDBA=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny"
+    },
+    "timestamp": "2026-01-01T00:09:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "jvvm8V+Pi0KKeTzEJF8BAtolbNafAi28jZqfes8Jtc5EGRvsS7xMXH25F4KEBHqgc5h0ySijVpHNoQB6jMszBA=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issuer_sovereign_id": "sovereign-c",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "MPK158+OcNPtH1fAU4Ix/hCoFQnxunkyNHDXOWAdgYyxlW1Z8w3zm3lqF267Lry9VTJU3jDka74sdxmZkTFHDw=="
+   }
+  },
+  "audiences": [
+   "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0="
+  ],
+  "valid": false,
+  "problem": "the requester's request was signed more than 300s from when it was recorded"
+ },
+ "request for another subject kind": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168c",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "decision",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor"
+    },
+    "timestamp": "2026-01-01T00:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "i4fKlwA98bIDzYlFzb8NWPYRzt7Sjg0C/S0mNXCybvIuDE7HRFjROvUXjsEAuvB3Jg3eBJIM49sD+y0Kmr6sDw=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny"
+    },
+    "timestamp": "2026-01-01T00:09:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "jvvm8V+Pi0KKeTzEJF8BAtolbNafAi28jZqfes8Jtc5EGRvsS7xMXH25F4KEBHqgc5h0ySijVpHNoQB6jMszBA=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issuer_sovereign_id": "sovereign-c",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "MPK158+OcNPtH1fAU4Ix/hCoFQnxunkyNHDXOWAdgYyxlW1Z8w3zm3lqF267Lry9VTJU3jDka74sdxmZkTFHDw=="
+   }
+  },
+  "audiences": [
+   "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0="
+  ],
+  "valid": false,
+  "problem": "the requester's request names another subject or justification"
+ },
+ "request on the decision route": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168c",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "judgement",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor"
+    },
+    "timestamp": "2026-01-01T00:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "sD/6Mibn79MpLIgl+rC4iOkuxkZp69oWeIsjpxbeSly47k3MLG2Ebbr29d9tSAwN+9x6g37dTGi2rI3thUyDDQ=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny"
+    },
+    "timestamp": "2026-01-01T00:09:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "jvvm8V+Pi0KKeTzEJF8BAtolbNafAi28jZqfes8Jtc5EGRvsS7xMXH25F4KEBHqgc5h0ySijVpHNoQB6jMszBA=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issuer_sovereign_id": "sovereign-c",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "MPK158+OcNPtH1fAU4Ix/hCoFQnxunkyNHDXOWAdgYyxlW1Z8w3zm3lqF267Lry9VTJU3jDka74sdxmZkTFHDw=="
+   }
+  },
+  "audiences": [
+   "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0="
+  ],
+  "valid": false,
+  "problem": "the requester's request is POST /admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide, not POST /admin/evidence/reviews"
+ },
+ "request with a fourth field": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168c",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "judgement",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor",
+     "note": "x"
+    },
+    "timestamp": "2026-01-01T00:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "gpOTELp596kt+FtlzabAeeRodycfDMo1A3C3Iye4CCGxfYlRoY8EK58MGN0iVibqvfU93f08It68LMNqzgdWCA=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny"
+    },
+    "timestamp": "2026-01-01T00:09:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "jvvm8V+Pi0KKeTzEJF8BAtolbNafAi28jZqfes8Jtc5EGRvsS7xMXH25F4KEBHqgc5h0ySijVpHNoQB6jMszBA=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issuer_sovereign_id": "sovereign-c",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "MPK158+OcNPtH1fAU4Ix/hCoFQnxunkyNHDXOWAdgYyxlW1Z8w3zm3lqF267Lry9VTJU3jDka74sdxmZkTFHDw=="
+   }
+  },
+  "audiences": [
+   "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0="
+  ],
+  "valid": false,
+  "problem": "the requester's request names another subject or justification"
+ },
+ "waiver signed, none recorded": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168c",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "judgement",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor"
+    },
+    "timestamp": "2026-01-01T00:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "YkqRFdcCMmLfS18Uqd27KopPYYGaoVYo7swu2f8z0iPPRUWhv1jzPtoQPIQGuqznhq7TE7hHQGMVB6XZlX9MCA=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny",
+     "waive_until": "2026-01-02T00:09:00Z"
+    },
+    "timestamp": "2026-01-01T00:09:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "1FMZrX8axygGyfVLz3l/A5Mb9VEp0JqwYLHWCqJkK7w4N8kE99Y+w/dfIuyztNpGKlw8Nb5qknMhQNPeCeZEAw=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issuer_sovereign_id": "sovereign-c",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "MPK158+OcNPtH1fAU4Ix/hCoFQnxunkyNHDXOWAdgYyxlW1Z8w3zm3lqF267Lry9VTJU3jDka74sdxmZkTFHDw=="
+   }
+  },
+  "audiences": [
+   "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0="
+  ],
+  "valid": false,
+  "problem": "the decider's request gives another waiver time (an RFC 3339 timestamp)"
+ },
+ "query two values kept in order": {
+  "approval": {
+   "key_id": "operator-2",
+   "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+   "method": "POST",
+   "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+   "query": {
+    "b": [
+     "2",
+     "1"
+    ],
+    "a": [
+     "x"
+    ]
+   },
+   "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+   "body": {
+    "verdict": "deny"
+   },
+   "timestamp": "2026-01-01T00:09:00Z",
+   "nonce": "00000000-0000-4000-8000-000000000251",
+   "admin_signature": "u/0ZLhIdhw+pQjnMzffH7e5YiuvIO1M8GmQwzlNxaJ8yO1Bt87nmTNTzboT6+qroRcyirxO8pmHfZ7C2HIoMDQ=="
+  },
+  "valid": true
+ },
+ "body absent": {
+  "approval": {
+   "key_id": "operator-2",
+   "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+   "method": "POST",
+   "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+   "query": {},
+   "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+   "timestamp": "2026-01-01T00:09:00Z",
+   "nonce": "00000000-0000-4000-8000-000000000251",
+   "admin_signature": "kEughNUzrcuoI4hv5msQshb9ltRoU9RmQm9f/7il6NzB+j7J+s2b5lhlVg2gocqdR6AfJ6xE+1629rkItxu4DA=="
+  },
+  "valid": true
+ },
+ "path without slash": {
+  "approval": {
+   "key_id": "operator-2",
+   "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+   "method": "POST",
+   "path": "admin/x",
+   "query": {},
+   "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+   "body": {
+    "verdict": "deny"
+   },
+   "timestamp": "2026-01-01T00:09:00Z",
+   "nonce": "00000000-0000-4000-8000-000000000251",
+   "admin_signature": "Gg/NU571ZQRYlyUtpMP4uEpisrNKPrRKRVMH3XWBQ7QnUcybKIP6itOciKJwovBNgXaglqALnLGyFX+ol87WDg=="
+  },
+  "valid": false
+ },
+ "bad parameter stops there": {
+  "record": {
+   "policy_id": "secret-lifetime",
+   "version": 1,
+   "description": "cap secret lifetimes",
+   "valid_from": "2026-01-01T00:00:00Z",
+   "valid_until": "2027-01-01T00:00:00Z",
+   "selector": {
+    "capabilities": [
+     "secret.rotate.emergency"
+    ]
+   },
+   "gates": [],
+   "issued_at": "2026-01-01T00:00:00Z",
+   "issued_by": "na-key",
+   "issuer_sovereign_id": "sovereign-c",
+   "emergency": {
+    "stands_for": "secret.rotate",
+    "justification_parameter": "bad param",
+    "max_lifetime_seconds": 86400
+   }
+  },
+  "codes": [
+   "invalid_emergency"
+  ]
+ },
+ "a max_value gate does not require it": {
+  "record": {
+   "policy_id": "secret-lifetime",
+   "version": 1,
+   "description": "cap secret lifetimes",
+   "valid_from": "2026-01-01T00:00:00Z",
+   "valid_until": "2027-01-01T00:00:00Z",
+   "selector": {
+    "capabilities": [
+     "secret.rotate.emergency"
+    ]
+   },
+   "gates": [
+    {
+     "gate_id": "justified",
+     "gate_type": "max_value.v1",
+     "order": 0,
+     "config": {
+      "path": "request_parameters.justification"
+     }
+    }
+   ],
+   "issued_at": "2026-01-01T00:00:00Z",
+   "issued_by": "na-key",
+   "issuer_sovereign_id": "sovereign-c",
+   "emergency": {
+    "stands_for": "secret.rotate",
+    "justification_parameter": "justification",
+    "max_lifetime_seconds": 86400
+   }
+  },
+  "codes": [
+   "emergency_justification_not_required"
+  ]
+ },
+ "two emergency versions": {
+  "policies": [
+   {
+    "policy_id": "secret-emergency",
+    "version": 1,
+    "description": "cap secret lifetimes",
+    "valid_from": "2026-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "selector": {
+     "capabilities": [
+      "secret.rotate.emergency"
+     ]
+    },
+    "gates": [
+     {
+      "gate_id": "justified",
+      "gate_type": "required_parameter.v1",
+      "order": 0,
+      "config": {
+       "path": "request_parameters.justification"
+      }
+     }
+    ],
+    "issued_at": "2026-01-01T00:00:00Z",
+    "issued_by": "na-key",
+    "issuer_sovereign_id": "sovereign-c",
+    "emergency": {
+     "stands_for": "secret.rotate",
+     "justification_parameter": "justification",
+     "max_lifetime_seconds": 86400
+    }
+   },
+   {
+    "policy_id": "secret-emergency",
+    "version": 2,
+    "description": "cap secret lifetimes",
+    "valid_from": "2026-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "selector": {
+     "capabilities": [
+      "secret.rotate.emergency"
+     ]
+    },
+    "gates": [
+     {
+      "gate_id": "justified",
+      "gate_type": "required_parameter.v1",
+      "order": 0,
+      "config": {
+       "path": "request_parameters.justification"
+      }
+     }
+    ],
+    "issued_at": "2026-01-01T00:00:00Z",
+    "issued_by": "na-key",
+    "issuer_sovereign_id": "sovereign-c",
+    "emergency": {
+     "stands_for": "secret.rotate",
+     "justification_parameter": "justification",
+     "max_lifetime_seconds": 86400
+    }
+   }
+  ],
+  "at": "2026-01-01T00:00:00Z",
+  "map": {
+   "secret.rotate.emergency": "secret.rotate"
+  }
+ },
+ "two capabilities": {
+  "policies": [
+   {
+    "policy_id": "secret-emergency",
+    "version": 1,
+    "description": "cap secret lifetimes",
+    "valid_from": "2026-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "selector": {
+     "capabilities": [
+      "secret.rotate.emergency",
+      "secret.other"
+     ]
+    },
+    "gates": [
+     {
+      "gate_id": "justified",
+      "gate_type": "required_parameter.v1",
+      "order": 0,
+      "config": {
+       "path": "request_parameters.justification"
+      }
+     }
+    ],
+    "issued_at": "2026-01-01T00:00:00Z",
+    "issued_by": "na-key",
+    "issuer_sovereign_id": "sovereign-c",
+    "emergency": {
+     "stands_for": "secret.rotate",
+     "justification_parameter": "justification",
+     "max_lifetime_seconds": 86400
+    }
+   }
+  ],
+  "at": "2026-01-01T00:00:00Z",
+  "map": {}
+ },
+ "verify short subject digest": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "judgement",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor"
+    },
+    "timestamp": "2026-01-01T00:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "YkqRFdcCMmLfS18Uqd27KopPYYGaoVYo7swu2f8z0iPPRUWhv1jzPtoQPIQGuqznhq7TE7hHQGMVB6XZlX9MCA=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny"
+    },
+    "timestamp": "2026-01-01T00:09:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "jvvm8V+Pi0KKeTzEJF8BAtolbNafAi28jZqfes8Jtc5EGRvsS7xMXH25F4KEBHqgc5h0ySijVpHNoQB6jMszBA=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issuer_sovereign_id": "sovereign-c",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "EQepq0bfbsDI5TCLP/pq/pud/RMwGOuokr4794E78hZCqkEvVcb37WIDi9vNdgFtUxR9qYVXZDZgE6irENEJAA=="
+   }
+  },
+  "public_key": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+  "valid": false
+ },
+ "verify no issuer": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168c",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "judgement",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor"
+    },
+    "timestamp": "2026-01-01T00:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "YkqRFdcCMmLfS18Uqd27KopPYYGaoVYo7swu2f8z0iPPRUWhv1jzPtoQPIQGuqznhq7TE7hHQGMVB6XZlX9MCA=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny"
+    },
+    "timestamp": "2026-01-01T00:09:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "jvvm8V+Pi0KKeTzEJF8BAtolbNafAi28jZqfes8Jtc5EGRvsS7xMXH25F4KEBHqgc5h0ySijVpHNoQB6jMszBA=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "ZThWDuKk14EzCCI8Wuuac+g0FOS2VjtBlbG645HbWeVjHGMF252p2uj6vSHSyZKNZ4I1vQCs48OUmFhx+H7UAA=="
+   }
+  },
+  "public_key": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+  "valid": false
+ },
+ "verify resigned unchanged": {
+  "record": {
+   "review_id": "00000000-0000-4000-8000-000000000051",
+   "subject_kind": "judgement",
+   "subject_id": "00000000-0000-4000-8000-000000000021",
+   "subject_digest": "31a73f80541ef48e64f96edf5788a2e2c5d1bef199811edde7c2995364f4168c",
+   "resource_id": "kv:vault/api-key",
+   "capability": "secret.rotate",
+   "opened_for": "requested",
+   "requested_by": "operator-1",
+   "requester_holder": "holder-1",
+   "justification": "The change was planned with the vendor",
+   "request_approval": {
+    "key_id": "operator-1",
+    "public_key": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "subject_kind": "judgement",
+     "subject_id": "00000000-0000-4000-8000-000000000021",
+     "justification": "The change was planned with the vendor"
+    },
+    "timestamp": "2026-01-01T00:08:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000151",
+    "admin_signature": "YkqRFdcCMmLfS18Uqd27KopPYYGaoVYo7swu2f8z0iPPRUWhv1jzPtoQPIQGuqznhq7TE7hHQGMVB6XZlX9MCA=="
+   },
+   "requested_at": "2026-01-01T00:08:00Z",
+   "actor": "principal-7f3a",
+   "verdict": "deny",
+   "decided_by": "operator-2",
+   "decider_holder": "holder-2",
+   "approval": {
+    "key_id": "operator-2",
+    "public_key": "zRSzf5VulTGU/3+3Oz2B3MVh1hp1OAlLfD4aZD7l86o=",
+    "method": "POST",
+    "path": "/admin/evidence/reviews/00000000-0000-4000-8000-000000000051/decide",
+    "query": {},
+    "audience": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "body": {
+     "verdict": "deny"
+    },
+    "timestamp": "2026-01-01T00:09:00Z",
+    "nonce": "00000000-0000-4000-8000-000000000251",
+    "admin_signature": "jvvm8V+Pi0KKeTzEJF8BAtolbNafAi28jZqfes8Jtc5EGRvsS7xMXH25F4KEBHqgc5h0ySijVpHNoQB6jMszBA=="
+   },
+   "decided_at": "2026-01-01T00:09:00Z",
+   "issuer_sovereign_id": "sovereign-c",
+   "issued_by": "na-key",
+   "signature": {
+    "key_id": "na-key",
+    "sig": "MPK158+OcNPtH1fAU4Ix/hCoFQnxunkyNHDXOWAdgYyxlW1Z8w3zm3lqF267Lry9VTJU3jDka74sdxmZkTFHDw=="
+   }
+  },
+  "public_key": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+  "valid": true
+ }
+}

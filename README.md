@@ -571,14 +571,17 @@ take the reference's codes:
 var plan = RemediationRules.Plan(judgement.Verdict, policies, gateEvaluations,
     RemediationRules.FactsOf(ChangeKinds.Observation, observationPayload));
 var due = RemediationRules.DueAt(judgement.JudgedAt, plan.GraceSeconds);
-if (plan.Steps == RemediationSteps.RotateForwardThenDisable) { /* rotate under a governed decision, then disable */ }
 
-// The record of what was done, signed by the executor key.
+// Once the plan is carried out, the record of what was done, signed by the executor key.
+var rotated = plan.Steps == RemediationSteps.RotateForwardThenDisable;   // rotated under a governed decision, then disabled
 var record = await executor.SignRemediation(new RemediationInput
 {
     SubjectKind = RemediationSubjectKinds.Judgement, SubjectId = judgement.JudgementId,
     ChangeKind = ChangeKinds.Observation, ChangeId = observation.ObservationId, ResourceId = observation.ResourceId,
-    Steps = plan.Steps, RotationEvidenceId = rotation.EvidenceId, VersionId = "v3", DisabledVersionId = "v2",
+    Steps = plan.Steps,
+    RotationEvidenceId = rotated ? rotation.EvidenceId : null,
+    VersionId = rotated ? newVersionId : null,
+    DisabledVersionId = plan.Steps == RemediationSteps.None ? null : deniedVersionId,
 });
 var mismatch = RemediationRules.StepsProblem(plan.Mode, plan.Steps, record);   // null: it carries out the plan
 
@@ -636,6 +639,13 @@ var problem = RemediationRules.ReviewApprovalProblem(review, naPublicKeys);
   - A due time refuses a date that does not exist, such as February 29 of a
     common year, as the reference does. TypeScript's date reading moves it to
     the next month.
+  - `ReviewApprovalProblem` refuses a review whose recorded time it cannot
+    read; TypeScript skips the 300-second bound then.
+  - `PolicySectionIssues` refuses a `stands_for` with a `*` anywhere, or a
+    blank one, as the reference does; TypeScript checks only for a final
+    `.*`.
+  - A guidance entry's grace may be written as `600.0`, as the reference
+    reads it; an entry its model would not take gives no guidance.
 
 ### Governed actions
 

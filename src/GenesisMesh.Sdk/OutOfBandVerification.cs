@@ -133,9 +133,6 @@ public static partial class OfflineVerifier
     /// <summary>Why a review record's fields do not fit together, or null (the reference model's rule).</summary>
     internal static string? ReviewConsistencyProblem(JsonElement record) => Shapes.ReviewProblem(record);
 
-    /// <summary>True when an admin approval has the shape the reference reads: its fields and no other.</summary>
-    internal static bool ValidAdminApproval(JsonElement approval) => Shapes.AdminApproval(approval);
-
     /// <summary>A timestamp in the shape the records' times take, in microseconds; null for anything else.</summary>
     internal static long? TimestampMicros(string value) => TryReadTimestamp(value, out var micros) ? micros : null;
 
@@ -307,8 +304,6 @@ public static partial class OfflineVerifier
 
         /// <summary>The longest a waiver may run, whatever the NA's configuration: 90 days, in microseconds.</summary>
         private const long MaxWaiverMicros = 90L * 24 * 3600 * 1_000_000;
-
-        public static bool AdminApproval(JsonElement value) => AdminApprovalFields(value);
 
         /// <summary>A remediation record in the shape the reference reads, its steps consistent.</summary>
         public static bool Remediation(JsonElement value) => RemediationFields(value) && StepsProblem(value) is null;

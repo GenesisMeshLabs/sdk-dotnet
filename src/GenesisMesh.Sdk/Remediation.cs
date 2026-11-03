@@ -170,7 +170,7 @@ public static partial class RemediationRules
         defaults ??= new RemediationDefaults();
         var byKey = new Dictionary<(string, int), BoundaryPolicy>();
         foreach (var p in policies) byKey[(p.PolicyId, p.Version)] = p;
-        var found = new List<(string? Mode, int? Grace)>();
+        var found = new List<(string Mode, int Grace)>();
         foreach (var e in evaluations)
         {
             if (e.Mode != "enforce" || e.Passed) continue;
@@ -178,7 +178,7 @@ public static partial class RemediationRules
             var entry = remediation.TryGetProperty(e.GateId, out var own) && own.ValueKind != JsonValueKind.Null
                 ? own
                 : remediation.TryGetProperty("*", out var any) && any.ValueKind != JsonValueKind.Null ? any : (JsonElement?)null;
-            if (entry is { } g) found.Add(Entry(g));
+            if (entry is { } g && Entry(g) is { } guidance) found.Add(guidance);
         }
         var source = GuidanceSources.Gate;
         if (found.Count == 0)
@@ -186,13 +186,13 @@ public static partial class RemediationRules
             source = GuidanceSources.Policy;
             found = byKey.Values
                 .OrderBy(p => p.PolicyId, Canonical.CodePointComparer.Instance).ThenBy(p => p.Version)
-                .Select(p => Guided(p) is { } r && r.TryGetProperty("*", out var g) && g.ValueKind != JsonValueKind.Null ? Entry(g) : ((string?, int?)?)null)
-                .OfType<(string?, int?)>()
+                .Select(p => Guided(p) is { } r && r.TryGetProperty("*", out var g) ? Entry(g) : null)
+                .OfType<(string, int)>()
                 .ToList();
         }
         if (found.Count == 0) return new(defaults.Mode, defaults.GraceSeconds, GuidanceSources.Default);
         var mode = found.Any(g => g.Mode == RemediationModes.Cancel) ? RemediationModes.Cancel : RemediationModes.AlertOnly;
-        var grace = found.Where(g => g.Mode == mode && g.Grace is not null).Select(g => g.Grace!.Value).DefaultIfEmpty(defaults.GraceSeconds).Min();
+        var grace = found.Where(g => g.Mode == mode).Min(g => g.Grace);
         return new(mode, grace, source);
     }
 
@@ -200,11 +200,20 @@ public static partial class RemediationRules
     private static JsonElement? Guided(BoundaryPolicy policy) =>
         policy.Remediation.ValueKind == JsonValueKind.Object && policy.Remediation.EnumerateObject().Any() ? policy.Remediation : null;
 
-    private static (string? Mode, int? Grace) Entry(JsonElement guidance) =>
-        guidance.ValueKind != JsonValueKind.Object
-            ? (null, null)
-            : (guidance.TryGetProperty("mode", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null,
-               guidance.TryGetProperty("grace_seconds", out var g) && g.ValueKind == JsonValueKind.Number && g.TryGetInt32(out var s) ? s : null);
+    /// <summary>
+    /// One gate's guidance as the reference's model reads it: a mode it knows and a whole number of seconds (written as
+    /// <c>600</c> or <c>600.0</c>); null for anything else, which a policy the NA signed never holds.
+    /// </summary>
+    private static (string Mode, int Grace)? Entry(JsonElement guidance)
+    {
+        if (guidance.ValueKind != JsonValueKind.Object
+            || !guidance.TryGetProperty("mode", out var m) || m.ValueKind != JsonValueKind.String
+            || m.GetString() is not (RemediationModes.Cancel or RemediationModes.AlertOnly)
+            || !guidance.TryGetProperty("grace_seconds", out var g) || g.ValueKind != JsonValueKind.Number || !g.TryGetDouble(out var seconds)
+            || seconds != Math.Floor(seconds) || seconds < 0 || seconds > int.MaxValue)
+            return null;
+        return (m.GetString()!, (int)seconds);
+    }
 
     /// <summary>
     /// How a change is cancelled, from what its record says: a created resource nothing reads yet is disabled; a rotated
@@ -297,7 +306,10 @@ public static partial class RemediationRules
     // ── Due times ───────────────────────────────────────────────────────────
 
     /// <summary><c>remediation_due_at</c>: a judgement's (or review's) time plus the grace, as the reference prints a time.</summary>
-    /// <param name="at">The judgement's or review's time (ISO 8601; a fraction finer than microseconds is cut).</param>
+    /// <param name="at">
+    /// The judgement's or review's time: <c>YYYY-MM-DDTHH:MM:SS</c>, an optional fraction (one finer than microseconds is
+    /// cut), and <c>Z</c>, an offset <c>+HH:MM</c>, or none (UTC), as the NA writes its times.
+    /// </param>
     /// <param name="graceSeconds">The plan's grace.</param>
     /// <exception cref="ArgumentException"><paramref name="at"/> is not a timestamp.</exception>
     public static string DueAt(string at, int graceSeconds) => Print(Micros(at, nameof(at)) + graceSeconds * MicrosPerSecond);
@@ -306,7 +318,7 @@ public static partial class RemediationRules
     /// When a remediation a review denied is due: the grace from the decision, never later than it was already due (a
     /// review holds a remediation, it does not extend it).
     /// </summary>
-    /// <param name="currentDue">When it was due; null when it was not due yet.</param>
+    /// <param name="currentDue">When it was due; null when it was not due yet. Read as <see cref="DueAt"/> reads a time.</param>
     /// <param name="decidedAt">When the review was decided.</param>
     /// <param name="graceSeconds">The plan's grace.</param>
     /// <exception cref="ArgumentException">A time is not a timestamp.</exception>
@@ -317,7 +329,7 @@ public static partial class RemediationRules
     }
 
     /// <summary>When a remediation is due once a waiver ends: its grace again, from the waiver's end.</summary>
-    /// <param name="waivedUntil">When the waiver ends.</param>
+    /// <param name="waivedUntil">When the waiver ends, read as <see cref="DueAt"/> reads a time.</param>
     /// <param name="graceSeconds">The plan's grace.</param>
     /// <exception cref="ArgumentException"><paramref name="waivedUntil"/> is not a timestamp.</exception>
     public static string DueAfterWaiver(string waivedUntil, int graceSeconds) =>
@@ -325,8 +337,12 @@ public static partial class RemediationRules
 
     /// <summary>A time's instant; a fraction finer than microseconds is cut, as the reference and TypeScript read it.</summary>
     private static long Micros(string value, string name) =>
-        OfflineVerifier.TimestampMicros(FinerFraction().Replace(value ?? throw new ArgumentNullException(name), "$1", 1))
-            ?? throw new ArgumentException($"genesismesh: {name} is not an ISO 8601 timestamp: {value}", name);
+        RecordedMicros(value ?? throw new ArgumentNullException(name))
+            ?? throw new ArgumentException($"genesismesh: {name} is not a timestamp (YYYY-MM-DDTHH:MM:SS, a fraction, Z or an offset): {value}", name);
+
+    /// <summary>A recorded time's instant, a fraction finer than microseconds cut; null when it is not a timestamp.</summary>
+    private static long? RecordedMicros(string? value) =>
+        value is null ? null : OfflineVerifier.TimestampMicros(FinerFraction().Replace(value, "$1", 1));
 
     [GeneratedRegex(@"(T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6})[0-9]+", RegexOptions.CultureInvariant)]
     private static partial Regex FinerFraction();
@@ -565,9 +581,9 @@ public static partial class RemediationRules
         if (approval.Method != "POST" || approval.Path != path || approval.Query?.Count > 0)
             return $"the {who}'s request is {approval.Method} {approval.Path}, not POST {path}";
         if (!audiences.Contains(approval.Audience, StringComparer.Ordinal)) return $"the {who}'s request is for another Network Authority";
-        // A recorded time that is not one compares as NaN does in TypeScript: no farther than the bound.
-        if (Instant(approval.Timestamp) is not { } signedAt
-            || (OfflineVerifier.TimestampMicros(at) is { } recordedAt && Math.Abs(signedAt - recordedAt) > ApprovalMaxAgeMicros))
+        // A recorded time this SDK cannot read refuses it, where TypeScript skips the bound.
+        if (Instant(approval.Timestamp) is not { } signedAt || RecordedMicros(at) is not { } recordedAt
+            || Math.Abs(signedAt - recordedAt) > ApprovalMaxAgeMicros)
             return $"the {who}'s request was signed more than 300s from when it was recorded";
         return null;
     }
@@ -577,8 +593,8 @@ public static partial class RemediationRules
     /// keys (the audience): the decider signed <c>POST /admin/evidence/reviews/&lt;review_id&gt;/decide</c>, without a
     /// query, as <c>decided_by</c>, with exactly the verdict, waiver end and note the review records, within 300
     /// seconds of <c>decided_at</c>; a requester signed <c>POST /admin/evidence/reviews</c> with exactly the subject and
-    /// justification it records, within 300 seconds of <c>requested_at</c>. Whether each public key is the operator
-    /// key's is for the holder registry to say.
+    /// justification it records, within 300 seconds of <c>requested_at</c>. A recorded time this SDK cannot read
+    /// refuses the review. Whether each public key is the operator key's is for the holder registry to say.
     /// </summary>
     /// <param name="review">The review record.</param>
     /// <param name="naPublicKeys">The NA's public keys: the audiences the requests may name.</param>
@@ -653,8 +669,8 @@ public static partial class RemediationRules
     /// <summary>
     /// The issues the NA finds in a policy's 1.4.0 sections (the codes of <c>validate_boundary_policy</c>): remediation
     /// guidance names a gate of the policy or <c>"*"</c> (<c>invalid_remediation</c>); an emergency policy selects one
-    /// exact capability, other than the exact one it stands for, with a valid justification parameter
-    /// (<c>invalid_emergency</c>), required by an enforce-mode <c>required_parameter.v1</c> gate
+    /// exact capability, other than the one it stands for, which is exact too (no <c>*</c>, not blank), with a valid
+    /// justification parameter (<c>invalid_emergency</c>), required by an enforce-mode <c>required_parameter.v1</c> gate
     /// (<c>emergency_justification_not_required</c>). The NA checks the rest of a policy
     /// (<c>PoliciesClient.Validate</c>).
     /// </summary>
@@ -693,7 +709,7 @@ public static partial class RemediationRules
             issues.Add(new PolicyIssue { Code = "invalid_emergency", Message = "an emergency policy selects exactly one capability by its exact ID" });
         else if (capabilities[0] == standsFor)
             issues.Add(new PolicyIssue { Code = "invalid_emergency", Message = "the emergency capability must differ from the capability it stands for" });
-        if (standsFor.EndsWith(".*", StringComparison.Ordinal))
+        if (standsFor.Contains('*') || string.IsNullOrWhiteSpace(standsFor))
             issues.Add(new PolicyIssue { Code = "invalid_emergency", Message = "stands_for is an exact capability ID" });
         var parameter = Text(emergency, "justification_parameter") ?? "";
         if (!Parameter().IsMatch(parameter))

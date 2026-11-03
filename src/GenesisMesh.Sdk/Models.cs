@@ -3905,7 +3905,7 @@ public static class ReviewVerdicts
 }
 
 /// <summary>Why a review was opened (<see cref="ReviewRecord.OpenedFor"/>).</summary>
-public static class ReviewReasons
+public static class ReviewOpenedFor
 {
     /// <summary>An operator asked for it.</summary>
     public const string Requested = "requested";
@@ -4137,7 +4137,7 @@ public sealed class ReviewRecord
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Capability { get; set; }
 
-    /// <summary>A value of <see cref="ReviewReasons"/>.</summary>
+    /// <summary>A value of <see cref="ReviewOpenedFor"/>.</summary>
     [JsonPropertyName("opened_for")]
     public string OpenedFor { get; set; } = "";
 
