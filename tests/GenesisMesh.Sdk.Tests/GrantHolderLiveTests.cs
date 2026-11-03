@@ -96,7 +96,11 @@ public class GrantHolderLiveTests
         using var device = Device();
         using var holder = new GrantHolder(new GrantHolderOptions
         {
-            Client = device, Signer = bearer, NAKeys = NAKeyHistory.ValidAlways([naKey]), Grant = issued.Grant, TimeToken = issued.TimeToken,
+            Client = device,
+            Signer = bearer,
+            NAKeys = NAKeyHistory.ValidAlways([naKey]),
+            Grant = issued.Grant,
+            TimeToken = issued.TimeToken,
         });
         GrantActRequest Rotate(int lifetime, BoundaryPolicy expected) => new()
         {
@@ -168,7 +172,11 @@ public class GrantHolderLiveTests
         using var second = Device();
         using var shortHolder = new GrantHolder(new GrantHolderOptions
         {
-            Client = second, Signer = bearer, NAKeys = NAKeyHistory.ValidAlways([naKey]), Grant = shortGrant.Grant, TimeToken = shortGrant.TimeToken,
+            Client = second,
+            Signer = bearer,
+            NAKeys = NAKeyHistory.ValidAlways([naKey]),
+            Grant = shortGrant.Grant,
+            TimeToken = shortGrant.TimeToken,
         });
         var ends = OfflineVerifier.ParseTimestamp(shortGrant.Grant.ValidUntil);
         await Task.Delay(ends - DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(500) is { Ticks: > 0 } wait ? wait : TimeSpan.Zero);

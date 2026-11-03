@@ -97,7 +97,10 @@ public class GrantHolderTests
                     Uses.Add(body!["evidence"]!.DeepClone());
                     return Reply(201, new JsonObject
                     {
-                        ["status"] = "recorded", ["entry"] = new JsonObject(), ["entry_digest"] = "d", ["payload"] = body["evidence"]!.DeepClone(),
+                        ["status"] = "recorded",
+                        ["entry"] = new JsonObject(),
+                        ["entry_digest"] = "d",
+                        ["payload"] = body["evidence"]!.DeepClone(),
                         ["resource_sequence"] = Uses.Count,
                     });
                 case "/evidence/break-glass":
@@ -107,9 +110,14 @@ public class GrantHolderTests
                     {
                         var feed = new JsonObject
                         {
-                            ["feed_id"] = $"feed-{FeedSequence}", ["issuer_sovereign_id"] = "sovereign-c", ["sequence"] = FeedSequence,
-                            ["issued_at"] = Canonical.Timestamp(Clock), ["revoked_attestation_ids"] = new JsonArray(), ["revocation_reasons"] = new JsonObject(),
-                            ["issued_by"] = "na-key", ["revoked_grant_ids"] = new JsonArray([.. RevokedGrants.Select(g => (JsonNode)g)]),
+                            ["feed_id"] = $"feed-{FeedSequence}",
+                            ["issuer_sovereign_id"] = "sovereign-c",
+                            ["sequence"] = FeedSequence,
+                            ["issued_at"] = Canonical.Timestamp(Clock),
+                            ["revoked_attestation_ids"] = new JsonArray(),
+                            ["revocation_reasons"] = new JsonObject(),
+                            ["issued_by"] = "na-key",
+                            ["revoked_grant_ids"] = new JsonArray([.. RevokedGrants.Select(g => (JsonNode)g)]),
                         };
                         return Reply(200, SignedFeed(feed));
                     }
@@ -167,27 +175,48 @@ public class GrantHolderTests
     {
         var grant = new JsonObject
         {
-            ["grant_id"] = "grant-1", ["bearer_key_id"] = "device-key", ["bearer_public_key"] = BearerKey.Public, ["bearer_sovereign_id"] = "site-7",
-            ["capabilities"] = new JsonArray("secret.rotate"), ["basis_kind"] = "attestation", ["basis_id"] = "attestation-1",
-            ["basis_digest"] = new string('e', 64), ["requester_sovereign_id"] = "vendor", ["provider_sovereign_id"] = "sovereign-c",
-            ["valid_from"] = At(0), ["valid_until"] = At(4 * 3600), ["max_uses"] = 3, ["max_uses_per_time_token"] = 2,
+            ["grant_id"] = "grant-1",
+            ["bearer_key_id"] = "device-key",
+            ["bearer_public_key"] = BearerKey.Public,
+            ["bearer_sovereign_id"] = "site-7",
+            ["capabilities"] = new JsonArray("secret.rotate"),
+            ["basis_kind"] = "attestation",
+            ["basis_id"] = "attestation-1",
+            ["basis_digest"] = new string('e', 64),
+            ["requester_sovereign_id"] = "vendor",
+            ["provider_sovereign_id"] = "sovereign-c",
+            ["valid_from"] = At(0),
+            ["valid_until"] = At(4 * 3600),
+            ["max_uses"] = 3,
+            ["max_uses_per_time_token"] = 2,
             ["parameter_envelope"] = new JsonObject
             {
                 ["lifetime_days"] = new JsonObject
                 {
-                    ["required"] = true, ["one_of"] = null, ["subset_of"] = null,
+                    ["required"] = true,
+                    ["one_of"] = null,
+                    ["subset_of"] = null,
                     ["number_range"] = new JsonObject
                     {
-                        ["number_type"] = "integer", ["minimum"] = 1, ["maximum"] = 60, ["exclusive_minimum"] = false, ["exclusive_maximum"] = false,
+                        ["number_type"] = "integer",
+                        ["minimum"] = 1,
+                        ["maximum"] = 60,
+                        ["exclusive_minimum"] = false,
+                        ["exclusive_maximum"] = false,
                     },
                 },
             },
             ["basis_checks"] = new JsonArray(),
             ["policy_binding"] = new JsonObject
             {
-                ["policies"] = new JsonArray(), ["policy_set_digest"] = new string('f', 64), ["gate_outcomes"] = new JsonArray(), ["registry_gate_types"] = new JsonArray(),
+                ["policies"] = new JsonArray(),
+                ["policy_set_digest"] = new string('f', 64),
+                ["gate_outcomes"] = new JsonArray(),
+                ["registry_gate_types"] = new JsonArray(),
             },
-            ["issued_at"] = At(0), ["issuer_sovereign_id"] = "sovereign-c", ["issued_by"] = "na-key",
+            ["issued_at"] = At(0),
+            ["issuer_sovereign_id"] = "sovereign-c",
+            ["issued_by"] = "na-key",
         };
         change?.Invoke(grant);
         return grant;
@@ -199,20 +228,35 @@ public class GrantHolderTests
         var grant = NASigned(GrantRecord(change)).Deserialize<CapabilityGrant>()!;
         var token = NASigned(new JsonObject
         {
-            ["time_token_id"] = "token-0", ["grant_id"] = "grant-1", ["use_sequence"] = 0, ["issued_at"] = At(0),
-            ["issuer_sovereign_id"] = "sovereign-c", ["issued_by"] = "na-key",
+            ["time_token_id"] = "token-0",
+            ["grant_id"] = "grant-1",
+            ["use_sequence"] = 0,
+            ["issued_at"] = At(0),
+            ["issuer_sovereign_id"] = "sovereign-c",
+            ["issued_by"] = "na-key",
         });
         var outbox = new MemoryOutbox<RecordOutboxEntry>();
         var client = Client(na, outbox);
         var clock = Start.AddSeconds(600);
         var holder = new GrantHolder(new GrantHolderOptions
         {
-            Client = client, Signer = Bearer, NAKeys = NAKeyHistory.ValidAlways([NAKey.Public]), Grant = grant, TimeToken = token,
-            Now = () => clock, Persist = persist, ResourcePrefix = resourcePrefix,
+            Client = client,
+            Signer = Bearer,
+            NAKeys = NAKeyHistory.ValidAlways([NAKey.Public]),
+            Grant = grant,
+            TimeToken = token,
+            Now = () => clock,
+            Persist = persist,
+            ResourcePrefix = resourcePrefix,
         });
         return new Setup
         {
-            NA = na, Grant = grant, TimeToken = token, Holder = holder, Client = client, Outbox = outbox,
+            NA = na,
+            Grant = grant,
+            TimeToken = token,
+            Holder = holder,
+            Client = client,
+            Outbox = outbox,
             Tick = seconds => { clock = clock.AddSeconds(seconds); na.Clock = clock; },
         };
     }
@@ -285,11 +329,14 @@ public class GrantHolderTests
         Assert.Equal("grant_envelope_mismatch", (await Assert.ThrowsAsync<GrantRefusedException>(() => x.Holder.Act(Setup.Rotate(400), Action))).Code);
         Assert.Equal("grant_envelope_mismatch", (await Assert.ThrowsAsync<GrantRefusedException>(() => x.Holder.Act(new GrantActRequest
         {
-            Capability = "secret.rotate", RequestParameters = new Dictionary<string, object?> { ["lifetime_days"] = 30, ["extra"] = 1 },
+            Capability = "secret.rotate",
+            RequestParameters = new Dictionary<string, object?> { ["lifetime_days"] = 30, ["extra"] = 1 },
         }, Action))).Code);
         Assert.Contains("go together", (await Assert.ThrowsAsync<ArgumentException>(() => x.Holder.Act(new GrantActRequest
         {
-            Capability = "secret.rotate", RequestParameters = new Dictionary<string, object?> { ["lifetime_days"] = 30 }, ResourceId = "r",
+            Capability = "secret.rotate",
+            RequestParameters = new Dictionary<string, object?> { ["lifetime_days"] = 30 },
+            ResourceId = "r",
         }, Action))).Message, StringComparison.Ordinal);
         Assert.False(ran);
         Assert.Equal(0, x.Holder.State.Uses);
@@ -328,7 +375,8 @@ public class GrantHolderTests
         var ran = false;
         var e = await Assert.ThrowsAsync<GrantRefusedException>(() => x.Holder.Act(new GrantActRequest
         {
-            Capability = "secret.rotate", RequestParameters = new Dictionary<string, object?> { ["token"] = jwt },
+            Capability = "secret.rotate",
+            RequestParameters = new Dictionary<string, object?> { ["token"] = jwt },
         }, (_, _) => { ran = true; return Task.FromResult<ActionReport<string>?>(null); }));
         Assert.Equal("grant_use_secret_material", e.Code);
         Assert.False(ran);
@@ -487,7 +535,11 @@ public class GrantHolderTests
         var restored = JsonSerializer.Deserialize<GrantHolderState>(json.ToJsonString(), Auth.SerializerOptions)!;
         using var resumed = new GrantHolder(new GrantHolderOptions
         {
-            Client = x.Client, Signer = Bearer, NAKeys = NAKeyHistory.ValidAlways([NAKey.Public]), State = restored, Now = () => Start.AddSeconds(700),
+            Client = x.Client,
+            Signer = Bearer,
+            NAKeys = NAKeyHistory.ValidAlways([NAKey.Public]),
+            State = restored,
+            Now = () => Start.AddSeconds(700),
         });
         var second = (await resumed.Act(Setup.Rotate(), Report())).UnderGrant!;
         Assert.Equal((2, GrantRules.UseDigest(first.Use)), (second.Use.UseSequence, second.Use.PrevUseDigest));
@@ -511,8 +563,12 @@ public class GrantHolderTests
         using var x = Make();
         GrantHolderOptions Options(ISigner signer, NAKeyHistory? keys = null, JsonElement? token = null, GenesisMeshClient? client = null) => new()
         {
-            Client = client ?? x.Client, Signer = signer, NAKeys = keys ?? NAKeyHistory.ValidAlways([NAKey.Public]), Grant = x.Grant,
-            TimeToken = token ?? x.TimeToken, Now = () => Start.AddSeconds(600),
+            Client = client ?? x.Client,
+            Signer = signer,
+            NAKeys = keys ?? NAKeyHistory.ValidAlways([NAKey.Public]),
+            Grant = x.Grant,
+            TimeToken = token ?? x.TimeToken,
+            Now = () => Start.AddSeconds(600),
         };
         Assert.Equal("grant_bearer_mismatch", Assert.Throws<GrantRefusedException>(() => new GrantHolder(Options(new SeedSigner(BearerKey.Seed, "other")))).Code);
         Assert.Contains("not signed by the NA", Assert.Throws<GrantRefusedException>(() => new GrantHolder(Options(Bearer, NAKeyHistory.ValidAlways([BearerKey.Public])))).Message,
@@ -595,11 +651,15 @@ public class GrantHolderTests
         var rotate = Setup.Rotate();
         Assert.Equal("grant_use_out_of_scope", (await Assert.ThrowsAsync<GrantRefusedException>(() => x.Holder.Act(new GrantActRequest
         {
-            Capability = rotate.Capability, RequestParameters = rotate.RequestParameters, ResourceId = "kv:site-8/api-key", ResourceAction = "rotate",
+            Capability = rotate.Capability,
+            RequestParameters = rotate.RequestParameters,
+            ResourceId = "kv:site-8/api-key",
+            ResourceAction = "rotate",
         }, Report()))).Code);
         Assert.Equal("grant_use_out_of_scope", (await Assert.ThrowsAsync<GrantRefusedException>(() => x.Holder.Act(new GrantActRequest
         {
-            Capability = rotate.Capability, RequestParameters = rotate.RequestParameters,
+            Capability = rotate.Capability,
+            RequestParameters = rotate.RequestParameters,
         }, Report()))).Code);
         Assert.Equal(GrantPaths.Grant, (await x.Holder.Act(rotate, Report())).Path);
     }
@@ -622,7 +682,11 @@ public class GrantHolderTests
         using var client = Client(x.NA, failing);
         using var holder = new GrantHolder(new GrantHolderOptions
         {
-            Client = client, Signer = Bearer, NAKeys = NAKeyHistory.ValidAlways([NAKey.Public]), Grant = x.Grant, TimeToken = x.TimeToken,
+            Client = client,
+            Signer = Bearer,
+            NAKeys = NAKeyHistory.ValidAlways([NAKey.Public]),
+            Grant = x.Grant,
+            TimeToken = x.TimeToken,
             Now = () => Start.AddSeconds(600),
         });
         var e = await Assert.ThrowsAsync<EvidenceNotKeptException>(() => holder.Act(Setup.Rotate(), Report(value: "rotated")));
