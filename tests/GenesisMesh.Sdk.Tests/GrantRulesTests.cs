@@ -239,6 +239,11 @@ public class GrantRulesTests
         // Changed after signing, with a field this SDK does not know, or not in the reference's form: no record.
         Assert.False(OfflineVerifier.VerifyTimeToken(Changed(token, t => t["use_sequence"] = 2), [na]));
         Assert.False(OfflineVerifier.VerifyGrantRevocation(Changed(revocation, r => r["reason"] = "operator2"), [na]));
+        // Under a key history, the key valid at the record's own time: the token was issued at 00:05, the revocation is
+        // dated 01:00, the key is valid from 00:30.
+        var fromHalfPast = new NAKeyHistory("na", null, [new NAKey(1, "na-key", na, new DateTimeOffset(2026, 1, 1, 0, 30, 0, TimeSpan.Zero), null, null, false)]);
+        Assert.False(OfflineVerifier.VerifyTimeToken(token, fromHalfPast));
+        Assert.True(OfflineVerifier.VerifyGrantRevocation(revocation, fromHalfPast));
     }
 
     [Fact]
@@ -338,6 +343,8 @@ public class GrantRulesTests
         Assert.Matches("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", first.UseId);
         async Task<string> Code(GrantUseInput input) => (await Assert.ThrowsAsync<GrantRecordException>(() => GrantRecords.SignUse(input, Bearer))).Code;
         Assert.Equal("grant_use_malformed", await Code(First() with { UseId = "NOT-A-UUID" }));
+        // A use ID ending in a newline: the reference's pattern (`$`) takes it, every SDK refuses it.
+        Assert.Equal("grant_use_malformed", await Code(First() with { UseId = "00000000-0000-4000-8000-000000000001\n" }));
         Assert.Equal("grant_use_malformed", await Code(First() with { PreviousDigest = new string('f', 64) }));
         Assert.Equal("grant_use_malformed", await Code(First() with { UseSequence = 2 }));
         Assert.Equal("grant_use_malformed", await Code(First() with { ResourceId = "kv:x" }));
@@ -499,6 +506,10 @@ public class GrantRulesTests
         Assert.Equal(Record("canonical-TimeToken-first").GetProperty("issued_at").GetString(), GrantRules.NextPreviousUse(use).TimeTokenIssuedAt);
         Assert.Matches("^[0-9a-f]{64}$", GrantRules.UseDigest(use));
         Assert.True(OfflineVerifier.VerifyGrantUse(JsonSerializer.Serialize(use), Key("signature-GrantExecutionEvidence-signer")));
+        // The previous use gives the next its place in the chain.
+        var second = await GrantRecords.SignUse(First() with { UseSequence = 2, Previous = use }, Bearer);
+        Assert.Equal(GrantRules.UseDigest(use), second.PrevUseDigest);
+        Assert.True(GrantRules.ContinuesChain(second, new UseChainHead(1, GrantRules.UseDigest(use))));
         // None given: refused as the NA refuses a use without one.
         Assert.Equal("grant_use_malformed",
             (await Assert.ThrowsAsync<GrantRecordException>(() => GrantRecords.SignUse(First() with { TimeToken = default }, Bearer))).Code);

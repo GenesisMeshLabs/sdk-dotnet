@@ -232,5 +232,10 @@ public class GrantsTests
         // 1.9.0: a field the reference requires, missing, or a validity longer than 24 hours: no grant at all.
         Assert.Equal("malformed", Verify(SignedAgain(key, g => g.Remove("max_uses_per_time_token")), keys));
         Assert.Equal("malformed", Verify(SignedAgain(key, g => g["valid_until"] = "2099-01-01T00:00:00Z"), keys));
+        // The budget's bounds: 10,000 uses, 1,000 per time token.
+        Assert.Equal("accepted", Verify(SignedAgain(key, g => g["max_uses"] = 10000), keys));
+        Assert.Equal("malformed", Verify(SignedAgain(key, g => g["max_uses"] = 10001), keys));
+        Assert.Equal("accepted", Verify(SignedAgain(key, g => g["max_uses_per_time_token"] = 1000), keys));
+        Assert.Equal("malformed", Verify(SignedAgain(key, g => g["max_uses_per_time_token"] = 1001), keys));
     }
 }
