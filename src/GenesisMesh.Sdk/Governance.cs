@@ -215,6 +215,119 @@ public sealed class GovernedOutcome<T>
 /// <param name="Dropped">The parameters dropped, and <c>outcome_detail</c> when the detail was, in ordinal order.</param>
 public sealed record CleanedMetadata(IDictionary<string, object?> ExecutionParameters, string OutcomeDetail, IReadOnlyList<string> Dropped);
 
+/// <summary>The version a forward rotation issued (<see cref="Governance.CancelByRotatingForward"/>).</summary>
+/// <typeparam name="T">The value returned to the caller.</typeparam>
+public sealed class RotatedVersion<T>
+{
+    /// <summary>The new version's ID: recorded as the rotation evidence's <c>execution_parameters.version_id</c>. Required.</summary>
+    public string VersionId { get; init; } = "";
+
+    /// <summary>Returned to the caller; never recorded.</summary>
+    public T? Value { get; init; }
+
+    /// <summary>Other metadata for the rotation's evidence: identifiers and versions only.</summary>
+    public IDictionary<string, object?>? ExecutionParameters { get; init; }
+}
+
+/// <summary>What <see cref="Governance.CancelByRotatingForward"/> cancels, and how.</summary>
+/// <typeparam name="T">The rotation's value.</typeparam>
+public sealed class RotateForwardOptions<T>
+{
+    /// <summary>
+    /// The change's remediation state from the due queue (<c>remediation_due</c> or <c>overdue</c>): its subject, change
+    /// and resource name the record. Its state, mode and steps are checked before anything runs. Required.
+    /// </summary>
+    public RemediationStatus? Remediation { get; init; }
+
+    /// <summary>
+    /// The denied version: disabled once the readers have the new one. Default the state's
+    /// <see cref="RemediationStatus.ChangeVersionId"/>; when the state names one, it must be that one (the NA refuses a
+    /// record that disables another, <c>remediation_subject_mismatch</c>).
+    /// </summary>
+    public string? DeniedVersionId { get; init; }
+
+    /// <summary>
+    /// The governed rotation's evaluation and verification, as for <see cref="Governance.GovernedAction{T}(GenesisMeshClient, ExecutionRecorder, GovernedActionRequest, Func{BoundaryDecision, CancellationToken, Task{ActionReport{T}?}}, CancellationToken)"/>.
+    /// Its resource is the remediation's (leave <see cref="GovernedActionRequest.ResourceId"/> unset, or give the same);
+    /// its action <c>rotate</c> (the default) or <c>update</c>. Required.
+    /// </summary>
+    public GovernedActionRequest? Rotation { get; init; }
+
+    /// <summary>Issues a new version and moves the resource's readers to it, given the rotation's decision. Required.</summary>
+    public Func<BoundaryDecision, CancellationToken, Task<RotatedVersion<T>>>? Rotate { get; init; }
+
+    /// <summary>Disables the denied version, once the readers have the new one. Required.</summary>
+    public Func<string, CancellationToken, Task>? Disable { get; init; }
+
+    /// <summary>A note for the remediation record: up to 1024 characters, no secret material.</summary>
+    public string? Detail { get; init; }
+}
+
+/// <summary>What <see cref="Governance.CancelByRotatingForward"/> did.</summary>
+/// <typeparam name="T">The rotation's value.</typeparam>
+public sealed class RotateForwardResult<T>
+{
+    /// <summary>The governed rotation. When it was denied, nothing was rotated, disabled or recorded.</summary>
+    public GovernedActionResult<T> Rotation { get; init; } = new();
+
+    /// <summary>The signed remediation record, once the denied version was disabled.</summary>
+    public RemediationRecord? Remediation { get; init; }
+
+    /// <summary>The NA's acknowledgement, when it admitted the record.</summary>
+    public RecordSubmission? Submission { get; init; }
+
+    /// <summary>With a record outbox: the entry holding the record otherwise (pending or a dead letter).</summary>
+    public RecordOutboxEntry? Queued { get; init; }
+}
+
+/// <summary>What <see cref="Governance.UrgentAction"/> requests when the ordinary capability is denied, or cannot be evaluated.</summary>
+public sealed class EmergencyOptions
+{
+    /// <summary>The emergency capability: the one capability a policy with an <c>emergency</c> section selects. Required.</summary>
+    public string Capability { get; init; } = "";
+
+    /// <summary>
+    /// Why the change cannot wait: 1 to 1024 characters, no secret values. It is the emergency policy's justification
+    /// parameter, and a break-glass record's justification. Required.
+    /// </summary>
+    public string Justification { get; init; } = "";
+
+    /// <summary>The emergency policy's <c>justification_parameter</c>; default <c>justification</c>.</summary>
+    public string JustificationParameter { get; init; } = "justification";
+
+    /// <summary>The policies the emergency capability's decision must be bound to. Required.</summary>
+    public IReadOnlyList<BoundaryPolicy>? ExpectedPolicies { get; init; }
+}
+
+/// <summary>How an urgent change went (<see cref="UrgentActionResult{T}.Path"/>).</summary>
+public static class UrgentPaths
+{
+    /// <summary>Under the ordinary capability's ALLOW.</summary>
+    public const string Ordinary = "ordinary";
+    /// <summary>Under the emergency capability's decision (a DENY too, when it was denied).</summary>
+    public const string Emergency = "emergency";
+    /// <summary>Under break-glass naming the emergency capability: the NA did not answer.</summary>
+    public const string BreakGlass = "break_glass";
+}
+
+/// <summary>What <see cref="Governance.UrgentAction"/> did.</summary>
+/// <typeparam name="T">The action's value.</typeparam>
+public sealed class UrgentActionResult<T>
+{
+    /// <summary>A value of <see cref="UrgentPaths"/>.</summary>
+    public string Path { get; init; } = "";
+
+    /// <summary>
+    /// The change: under the ordinary or the emergency capability's decision (<see cref="GovernedOutcome{T}.Governed"/>,
+    /// <c>Authorized</c> false when the emergency capability was denied too), or under break-glass
+    /// (<see cref="GovernedOutcome{T}.BreakGlass"/>).
+    /// </summary>
+    public GovernedOutcome<T> Outcome { get; init; } = new();
+
+    /// <summary>The ordinary capability's DENY, when the emergency capability was requested after it.</summary>
+    public GovernedActionResult<T>? OrdinaryDenial { get; init; }
+}
+
 /// <summary>
 /// The decision did not pass offline verification, or could not be verified as asked: the action was not run.
 /// <see cref="GenesisMeshException.Code"/> is the reason, such as <c>invalid_signature</c>, <c>decision_expired</c>,
@@ -328,6 +441,49 @@ public sealed class EvidenceNotKeptException : GenesisMeshException
     /// it, once either works; a resubmission is a duplicate.
     /// </summary>
     public BreakGlassRecord? BreakGlassRecord { get; }
+}
+
+/// <summary>
+/// The forward rotation ran, but the remediation was not recorded (<c>remediation_not_recorded</c>,
+/// <see cref="Governance.CancelByRotatingForward"/>). <see cref="Exception.InnerException"/> is the cause:
+/// <list type="bullet">
+/// <item>Before the disable (<see cref="Disabled"/> false): the rotation's evidence was refused for good
+/// (<see cref="RotationQueued"/> a dead letter), or the record could not be built, for example the rotation issued the
+/// denied version (<c>remediation_malformed</c>). That rotation can never be cited: rotate again.</item>
+/// <item>The disable failed (<see cref="Disabled"/> false): disable the denied version, then record it.</item>
+/// <item>After the disable (<see cref="Disabled"/> true): the record could not be signed, submitted or kept. Once the
+/// cause is fixed, submit <see cref="Record"/>, or sign it again when there is none (a resubmission is a duplicate); do
+/// not rotate again.</item>
+/// </list>
+/// </summary>
+public sealed class RemediationNotRecordedException : GenesisMeshException
+{
+    internal RemediationNotRecordedException(Exception cause, ExecutionEvidence? rotationEvidence, object? value, RemediationRecord? record,
+        bool disabled = false, OutboxEntry? rotationQueued = null)
+        : base(0, "remediation_not_recorded", "the forward rotation ran; the remediation was not recorded: " + cause.Message,
+            "genesismesh: the forward rotation ran; the remediation was not recorded: " + cause.Message, cause)
+    {
+        RotationEvidence = rotationEvidence;
+        Value = value;
+        Record = record;
+        Disabled = disabled;
+        RotationQueued = rotationQueued;
+    }
+
+    /// <summary>True when the denied version was disabled.</summary>
+    public bool Disabled { get; }
+
+    /// <summary>With an evidence outbox: the rotation's evidence entry, when the NA has not admitted it.</summary>
+    public OutboxEntry? RotationQueued { get; }
+
+    /// <summary>The forward rotation's execution evidence.</summary>
+    public ExecutionEvidence? RotationEvidence { get; }
+
+    /// <summary>The rotation's value.</summary>
+    public object? Value { get; }
+
+    /// <summary>The signed remediation record, when signing succeeded.</summary>
+    public RemediationRecord? Record { get; }
 }
 
 /// <summary>
@@ -956,6 +1112,282 @@ public static partial class Governance
         var others = dropped.Count - parts.Count;
         if (others > 0) parts.Add($"{others} other field{(others == 1 ? "" : "s")}");
         return $"[{GuardNote}: {string.Join(", ", parts)}]";
+    }
+
+    // ── Remediation: the cancel pair (1.9.0; protocol 1.4.0) ────────────────
+
+    /// <summary>
+    /// Cancels a denied change to a versioned resource others read (1.9.0), as the NA states it
+    /// (<c>rotate_forward_then_disable</c>), and as the TypeScript SDK's <c>cancelByRotatingForward</c> does: two linked
+    /// records. A credential is never rolled back.
+    /// <list type="number">
+    /// <item>A governed rotation issues a new version under a decision of its own; its execution evidence names the
+    /// version (<c>execution_parameters.version_id</c>), so observers match it instead of judging it again. A DENY
+    /// returns without changing anything.</item>
+    /// <item><see cref="RotateForwardOptions{T}.Disable"/> then disables the denied version: the readers already have the
+    /// new one.</item>
+    /// <item>The remediation record names the rotation's evidence, the new version and the disabled one, signed by the
+    /// executor key and kept in the record outbox, or submitted without one.</item>
+    /// </list>
+    /// The state, the plan and the denied version are checked before anything runs, and the record before the denied
+    /// version is disabled, so a record the NA would refuse never follows a disable. The NA admits the record once it
+    /// holds the rotation's evidence (<c>remediation_rotation_missing</c> is transient): flush the evidence outbox before
+    /// the record outbox. A rotation the NA refused for good at once is never followed by the disable. One it refuses
+    /// only at a later flush (its evidence a dead letter then) leaves the record pending for good, the denied version
+    /// disabled: remove the record from the record outbox and cancel again, with a <see cref="RotateForwardOptions{T}.Disable"/>
+    /// that accepts a version already disabled. Read the state right before cancelling: for a decision the NA plans
+    /// from its latest execution. <paramref name="ct"/> cancels the steps up to the disable; once the denied version is disabled, the record is
+    /// kept whatever the token says.
+    /// </summary>
+    /// <typeparam name="T">The rotation's value.</typeparam>
+    /// <param name="client">The client of the NA, with the operator key that evaluates.</param>
+    /// <param name="recorder">The executor key's recorder: it signs the rotation's evidence and the remediation record.</param>
+    /// <param name="options">The remediation, the rotation, the disable and the denied version.</param>
+    /// <param name="ct">Cancels the steps before the record is kept.</param>
+    /// <exception cref="ArgumentException">An option is missing, or the rotation names another resource or action.</exception>
+    /// <exception cref="OutOfBandRecordException">
+    /// <c>remediation_subject_not_found</c> (the state names no change yet), <c>remediation_steps_mismatch</c> (the
+    /// plan is not a forward rotation), <c>remediation_malformed</c> (no denied version) or
+    /// <c>remediation_secret_material</c> (the denied version or the detail): nothing ran.
+    /// </exception>
+    /// <exception cref="TransitionRefusedException">
+    /// The state takes no remediation record, with the NA's code: <c>remediation_not_due</c> or
+    /// <c>remediation_already_recorded</c>; nothing ran.
+    /// </exception>
+    /// <exception cref="OutboxException">
+    /// A record outbox is configured and cannot be read (<c>outbox_file_unreadable</c>; a custom outbox throws its own
+    /// error): nothing ran.
+    /// </exception>
+    /// <exception cref="RemediationNotRecordedException">
+    /// The rotation ran and its evidence is in the NA or the evidence outbox, and the remediation was not recorded:
+    /// what to do next is on the exception.
+    /// </exception>
+    /// <exception cref="GenesisMeshException">
+    /// The rotation's own governed action failed after <see cref="RotateForwardOptions{T}.Rotate"/> ran, as
+    /// <see cref="GovernedAction{T}(GenesisMeshClient, ExecutionRecorder, GovernedActionRequest, Func{BoundaryDecision, CancellationToken, Task{ActionReport{T}?}}, CancellationToken)"/>
+    /// fails: without an evidence outbox, the NA refused its evidence, or did not answer (<see cref="NetworkException"/>),
+    /// or its report holds secret material (<see cref="SecretMaterialException"/>); with one,
+    /// <see cref="EvidenceNotKeptException"/> or <see cref="MetadataRefusedException"/>. Nothing was disabled.
+    /// </exception>
+    public static async Task<RotateForwardResult<T>> CancelByRotatingForward<T>(
+        GenesisMeshClient client, ExecutionRecorder recorder, RotateForwardOptions<T> options, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(recorder);
+        ArgumentNullException.ThrowIfNull(options);
+        var state = options.Remediation ?? throw new ArgumentException("genesismesh: the remediation state is required", nameof(options));
+        var rotation = options.Rotation ?? throw new ArgumentException("genesismesh: the rotation is required", nameof(options));
+        var rotate = options.Rotate ?? throw new ArgumentException("genesismesh: Rotate is required", nameof(options));
+        var disable = options.Disable ?? throw new ArgumentException("genesismesh: Disable is required", nameof(options));
+        var subject = RemediationInput.For(state, RemediationSteps.RotateForwardThenDisable);
+        if (!string.IsNullOrEmpty(state.Mode) && !string.IsNullOrEmpty(state.Steps)
+            && RemediationRules.StepsProblem(state.Mode, state.Steps,
+                new RemediationRecord { Outcome = RemediationOutcomes.Cancelled, Steps = RemediationSteps.RotateForwardThenDisable }) is { } problem)
+            throw new OutOfBandRecordException("remediation_steps_mismatch", problem);
+        if (!string.IsNullOrEmpty(state.State)
+            && RemediationRules.NextState(state.State, RemediationEvents.RecordRemediation, state.ReviewPending) is { Allowed: false } refused)
+            throw new TransitionRefusedException(refused.Refusal!, refused.Detail);
+        var denied = string.IsNullOrEmpty(options.DeniedVersionId) ? state.ChangeVersionId : options.DeniedVersionId;
+        if (string.IsNullOrEmpty(denied))
+            throw new OutOfBandRecordException("remediation_malformed", "the denied version is required");
+        if (!string.IsNullOrEmpty(state.ChangeVersionId) && denied != state.ChangeVersionId)
+            throw new OutOfBandRecordException("remediation_subject_mismatch",
+                $"the change made version {state.ChangeVersionId}; the denied version cannot be {denied}");
+        if (RemediationRules.SecretProblem(new RemediationRecord { DisabledVersionId = denied, Detail = options.Detail }) is { } secret)
+            throw new OutOfBandRecordException("remediation_secret_material", secret);
+        var action = rotation.ResourceAction ?? ResourceActions.Rotate;
+        if (action is not (ResourceActions.Rotate or ResourceActions.Update))
+            throw new ArgumentException("genesismesh: a forward rotation's action is rotate or update", nameof(options));
+        if (rotation.ResourceId is { } named && named != subject.ResourceId)
+            throw new ArgumentException("genesismesh: the rotation's resource is the remediation's", nameof(options));
+        // A record outbox that cannot be read fails here, before anything runs.
+        if (client.EvidenceStore.RecordOutbox is { } outbox) await outbox.List(ct).ConfigureAwait(false);
+
+        RotatedVersion<T>? rotated = null;
+        var request = new GovernedActionRequest
+        {
+            RequestedCapability = rotation.RequestedCapability,
+            AttestationId = rotation.AttestationId,
+            Agreement = rotation.Agreement,
+            Context = rotation.Context,
+            ResourceId = subject.ResourceId,
+            ResourceAction = action,
+            PriorResource = rotation.PriorResource,
+            NewResource = rotation.NewResource,
+            Verify = rotation.Verify,
+        };
+        var result = await GovernedAction<T>(client, recorder, request, async (decision, c) =>
+        {
+            rotated = await rotate(decision, c).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("genesismesh: Rotate returned no version");
+            var parameters = new Dictionary<string, object?>(rotated.ExecutionParameters ?? new Dictionary<string, object?>())
+            {
+                ["version_id"] = rotated.VersionId,
+            };
+            return new ActionReport<T> { Value = rotated.Value, ExecutionParameters = parameters };
+        }, ct).ConfigureAwait(false);
+        if (!result.Authorized) return new RotateForwardResult<T> { Rotation = result };
+        // A rotation the NA refused for good can never be cited: nothing is disabled.
+        if (result.Queued is { State: OutboxStates.DeadLetter } deadLetter)
+            throw new RemediationNotRecordedException(new InvalidOperationException(
+                    $"genesismesh: the rotation's evidence was refused for good ({deadLetter.LastError?.Code}): rotate again"),
+                result.Evidence, result.Value, null, rotationQueued: deadLetter);
+
+        var input = subject with
+        {
+            RotationEvidenceId = result.Evidence!.EvidenceId,
+            VersionId = rotated!.VersionId,
+            DisabledVersionId = denied,
+            Detail = options.Detail,
+        };
+        try
+        {
+            OutOfBandRecords.CheckRemediation(OutOfBandRecords.RemediationOf(input, recorder.ExecutorSovereignId));
+        }
+        catch (Exception e) when (e is OutOfBandRecordException or StrictJsonException)
+        {
+            throw new RemediationNotRecordedException(e, result.Evidence, result.Value, null, rotationQueued: result.Queued);
+        }
+        RemediationRecord? record = null;
+        var disabled = false;
+        try
+        {
+            await disable(denied, ct).ConfigureAwait(false);
+            disabled = true;
+            // Disabled: the record is kept whatever the token says.
+            record = await recorder.SignRemediation(input, CancellationToken.None).ConfigureAwait(false);
+            if (client.EvidenceStore.RecordOutbox is not null)
+            {
+                var delivery = await client.EvidenceStore.EnqueueRecord(record, CancellationToken.None).ConfigureAwait(false);
+                return new RotateForwardResult<T> { Rotation = result, Remediation = record, Submission = delivery.Submission, Queued = delivery.Queued };
+            }
+            var submission = await client.EvidenceStore.SubmitRemediation(record, CancellationToken.None).ConfigureAwait(false);
+            return new RotateForwardResult<T> { Rotation = result, Remediation = record, Submission = submission };
+        }
+        catch (Exception e)
+        {
+            throw new RemediationNotRecordedException(e, result.Evidence, result.Value, record, disabled, result.Queued);
+        }
+    }
+
+    // ── Urgent changes (1.9.0; protocol 1.4.0) ───────────────────────────────
+
+    /// <summary>
+    /// An urgent change (1.9.0), as the TypeScript SDK's <c>urgentAction</c>: never blocked, always governed and judged.
+    /// <list type="bullet">
+    /// <item>The ordinary capability is evaluated first (<paramref name="request"/>), as
+    /// <see cref="GovernedAction{T}(GenesisMeshClient, ExecutionRecorder, GovernedActionRequest, Func{BoundaryDecision, CancellationToken, Task{ActionReport{T}?}}, CancellationToken)"/>
+    /// does; an ALLOW runs the action under it.</item>
+    /// <item>On a DENY, the emergency capability is requested, with the justification in its justification parameter:
+    /// the NA decides under the emergency policy before the change, and reviews it after.</item>
+    /// <item>When the ordinary evaluation gets no answer, times out or is answered with a 5xx or a 429, the emergency
+    /// capability is evaluated next. When that fails so too, the action runs under break-glass naming the emergency
+    /// capability, with the justification parameter in its request parameters, and the NA judges it under the
+    /// emergency policy once it is back.</item>
+    /// </list>
+    /// Break-glass needs a record outbox, an attestation basis and a resource; all of it is checked before anything is
+    /// evaluated. The emergency capability's decision is verified against
+    /// <see cref="EmergencyOptions.ExpectedPolicies"/>. Any other error, after the action ran or a decision that fails
+    /// verification, is the caller's.
+    /// </summary>
+    /// <typeparam name="T">The action's value.</typeparam>
+    /// <param name="client">The client of the NA, with the operator key that evaluates and a record outbox.</param>
+    /// <param name="recorder">The executor key's recorder.</param>
+    /// <param name="request">The ordinary capability's evaluation, verification and resource.</param>
+    /// <param name="emergency">The emergency capability, the justification and the emergency policies.</param>
+    /// <param name="action">The change, given the verified decision, or null under break-glass.</param>
+    /// <param name="ct">Cancels the steps before and including the action.</param>
+    /// <exception cref="ArgumentException">An emergency option is missing.</exception>
+    /// <exception cref="OutboxException">No record outbox is configured (<c>record_outbox_required</c>), or it cannot be read.</exception>
+    /// <exception cref="OutOfBandRecordException">
+    /// <c>break_glass_malformed</c> or <c>break_glass_secret_material</c>, as for break-glass: nothing was evaluated.
+    /// </exception>
+    public static async Task<UrgentActionResult<T>> UrgentAction<T>(
+        GenesisMeshClient client,
+        ExecutionRecorder recorder,
+        GovernedActionRequest request,
+        EmergencyOptions emergency,
+        Func<BoundaryDecision?, CancellationToken, Task<ActionReport<T>?>> action,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(recorder);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(emergency);
+        ArgumentNullException.ThrowIfNull(action);
+        if (string.IsNullOrEmpty(emergency.Capability))
+            throw new ArgumentException("genesismesh: the emergency capability is required", nameof(emergency));
+        if (emergency.ExpectedPolicies is null)
+            throw new ArgumentException("genesismesh: the emergency policies are required", nameof(emergency));
+        var context = request.Context ?? new EvaluationContext();
+        var urgent = new GovernedActionRequest
+        {
+            RequestedCapability = emergency.Capability,
+            AttestationId = request.AttestationId,
+            Agreement = request.Agreement,
+            Context = new EvaluationContext
+            {
+                RequestParameters = new Dictionary<string, object?>(context.RequestParameters ?? new Dictionary<string, object?>())
+                {
+                    [emergency.JustificationParameter] = emergency.Justification,
+                },
+                Attributes = context.Attributes,
+                RequesterSovereignId = context.RequesterSovereignId,
+                ProviderSovereignId = context.ProviderSovereignId,
+                ContextId = context.ContextId,
+                ContextFreshnessSeq = context.ContextFreshnessSeq,
+                ParentKind = context.ParentKind,
+            },
+            ResourceId = request.ResourceId,
+            ResourceAction = request.ResourceAction,
+            PriorResource = request.PriorResource,
+            NewResource = request.NewResource,
+            Verify = request.Verify is { } verify
+                ? new GovernedVerification
+                {
+                    OperatorPublicKeys = verify.OperatorPublicKeys,
+                    KeyHistory = verify.KeyHistory,
+                    FreshnessProofIssuerKeys = verify.FreshnessProofIssuerKeys,
+                    ExpectedPolicies = emergency.ExpectedPolicies,
+                    ExpectedAttestation = verify.ExpectedAttestation,
+                }
+                : null,
+        };
+        var breakGlass = new BreakGlassOptions { Justification = emergency.Justification };
+        await CheckBreakGlass(client.EvidenceStore, recorder, urgent, breakGlass, ct).ConfigureAwait(false);
+
+        // Only an evaluation that got no answer, or a 5xx or a 429, goes on to the emergency capability; any other error
+        // (after the action ran, or a decision that fails verification) is the caller's.
+        Exception? evaluationError = null;
+        async Task<(BoundaryEvaluation Evaluation, string DecisionJson)> Evaluate(EvaluateRequest evaluation, CancellationToken c)
+        {
+            try
+            {
+                return await client.Boundary.EvaluateAsReceived(evaluation, c).ConfigureAwait(false);
+            }
+            catch (Exception e)
+            {
+                evaluationError = e;
+                throw;
+            }
+        }
+        GovernedActionResult<T>? ordinaryDenial = null;
+        try
+        {
+            var ordinary = await Run<T>(Evaluate, client.EvidenceStore, recorder, request, null, action, ct).ConfigureAwait(false);
+            if (ordinary.Governed!.Authorized) return new UrgentActionResult<T> { Path = UrgentPaths.Ordinary, Outcome = ordinary };
+            ordinaryDenial = ordinary.Governed;
+        }
+        catch (Exception e) when (ReferenceEquals(e, evaluationError) && EvaluationFailure(e) is not null)
+        {
+        }
+        var outcome = await Run(client.Boundary.EvaluateAsReceived, client.EvidenceStore, recorder, urgent, breakGlass, action, ct).ConfigureAwait(false);
+        return new UrgentActionResult<T>
+        {
+            Path = outcome.BrokeGlass ? UrgentPaths.BreakGlass : UrgentPaths.Emergency,
+            Outcome = outcome,
+            OrdinaryDenial = ordinaryDenial,
+        };
     }
 
     /// <summary>

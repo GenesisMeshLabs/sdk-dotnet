@@ -208,4 +208,135 @@ public class RemediationLiveTests
         Assert.Equal(record.RemediationId, Assert.Single(remediated, s => s.SubjectId == due.SubjectId).RemediationId);
         Assert.Equal("remediation_already_recorded", RemediationRules.NextState(RemediationStates.Remediated, RemediationEvents.RecordRemediation).Refusal);
     }
+
+    [Fact]
+    public async Task ADeniedRotationIsCancelledByRotatingForward()
+    {
+        using var na = await LiveNa.Start("--out-of-band", "on", "--remediation", "on");
+        if (na is null) return;
+        var inputs = na.Inputs;
+        var naKey = na.NaPublicKey;
+        GenesisMeshClient Operator(string seed, string keyId) => new(new ClientOptions { BaseUrl = na.BaseUrl, SigningKey = seed, KeyId = keyId });
+        using var ops = Operator((string)inputs["seed"]!, "ops");
+        using var controller = Operator((string)inputs["controllerSeed"]!, "controller");
+
+        var (observerSeed, observerKey) = NewKey();
+        var (executorSeed, executorKey) = NewKey();
+        await ops.EvidenceStore.RegisterExecutorKey(new RegisterExecutorKeyRequest
+        {
+            KeyId = "observer-key",
+            PublicKey = observerKey,
+            ExecutorSovereignId = "observer-a",
+            Role = "observer",
+            ResourcePrefix = "partner:",
+        });
+        await ops.EvidenceStore.RegisterExecutorKey(new RegisterExecutorKeyRequest
+        {
+            KeyId = "executor-key",
+            PublicKey = executorKey,
+            ExecutorSovereignId = "executor-a",
+            ResourcePrefix = "partner:",
+        });
+        var now = DateTimeOffset.UtcNow;
+        var policy = await ops.Policy.Publish(new BoundaryPolicyIntent
+        {
+            PolicyId = "partner-secret-lifetime",
+            ValidFrom = Canonical.Timestamp(now.AddDays(-1)),
+            ValidUntil = Canonical.Timestamp(now.AddDays(1)),
+            Selector = new PolicySelector { Capabilities = ["partner-secret.*"] },
+            Gates =
+            [
+                new GateSpec
+                {
+                    GateId = "max-lifetime", GateType = "max_value.v1", Order = 0,
+                    Config = new Dictionary<string, object?> { ["path"] = "request_parameters.lifetime_days", ["max"] = 90 },
+                },
+            ],
+            Remediation = new Dictionary<string, GateRemediation> { ["max-lifetime"] = new() { Mode = RemediationModes.Cancel, GraceSeconds = 3600 } },
+        });
+        Assert.True((await ops.Policy.Activate(policy.PolicyId, policy.Version)).Active);
+        var attestation = await ops.Attestation.Issue(new Dictionary<string, object?>
+        {
+            ["subject_id"] = "partner-org-1",
+            ["roles"] = new[] { "role:client" },
+            ["validity_hours"] = 24,
+            ["claims"] = new Dictionary<string, object?> { ["capabilities"] = new[] { "partner-secret.rotate" } },
+        });
+
+        // A rotation in the console with a lifetime beyond the policy: its cancel is a forward rotation.
+        var observer = new ObservationRecorder("observer-a", new SeedSigner(observerSeed, "observer-key"));
+        var observation = await observer.Record(new ObservationInput
+        {
+            ResourceId = "partner:app-9/secret",
+            Action = ResourceActions.Rotate,
+            Capability = "partner-secret.rotate",
+            ChangedAt = DateTimeOffset.UtcNow,
+            Actor = "principal-7f3a",
+            Source = "cloud-activity-log",
+            SourceEventId = "event-r2",
+            VersionId = "v2",
+            Metadata = new Dictionary<string, object?> { ["lifetime_days"] = 400 },
+        });
+        var judgement = (await controller.EvidenceStore.SubmitObservation(observation)).Judgement!.Payload;
+        var due = await ops.EvidenceStore.Remediation(judgement.JudgementId);
+        Assert.Equal((RemediationStates.RemediationDue, RemediationModes.Cancel, RemediationSteps.RotateForwardThenDisable, "v2"),
+            (due.State, due.Mode, due.Steps, due.ChangeVersionId));
+
+        // The controller rotates forward under a decision of its own, disables the denied version and records both.
+        var disabled = new List<string>();
+        var executor = new ExecutionRecorder("executor-a", new SeedSigner(executorSeed, "executor-key"));
+        var options = new RotateForwardOptions<string>
+        {
+            Remediation = due,
+            DeniedVersionId = due.ChangeVersionId!,
+            Rotation = new GovernedActionRequest
+            {
+                RequestedCapability = "partner-secret.rotate",
+                AttestationId = attestation.AttestationId,
+                Context = new EvaluationContext { RequestParameters = new Dictionary<string, object?> { ["lifetime_days"] = 30 } },
+                Verify = new GovernedVerification { OperatorPublicKeys = [naKey], ExpectedPolicies = [policy], ExpectedAttestation = attestation },
+            },
+            Rotate = (_, _) => Task.FromResult(new RotatedVersion<string> { VersionId = "v3", Value = "new secret handed to its readers" }),
+            Disable = (version, _) =>
+            {
+                disabled.Add(version);
+                return Task.CompletedTask;
+            },
+            Detail = "rotated forward, then the denied version disabled",
+        };
+        // A denied version other than the change's would be disabled, then its record refused for good: refused first.
+        var mismatch = await Assert.ThrowsAsync<OutOfBandRecordException>(() => Governance.CancelByRotatingForward(controller, executor,
+            new RotateForwardOptions<string>
+            {
+                Remediation = due,
+                DeniedVersionId = "v1",
+                Rotation = options.Rotation,
+                Rotate = options.Rotate,
+                Disable = options.Disable,
+            }));
+        Assert.Equal("remediation_subject_mismatch", mismatch.Code);
+        Assert.Empty(disabled);
+        var result = await Governance.CancelByRotatingForward(controller, executor, options);
+        Assert.True(result.Rotation.Authorized);
+        Assert.Equal(["v2"], disabled);
+        Assert.Equal("v3", result.Rotation.Evidence!.ExecutionParameters.GetProperty("version_id").GetString());
+        Assert.Equal(("recorded", RemediationStates.Remediated), (result.Submission!.Status, result.Submission.Remediation!.State));
+        var record = result.Remediation!;
+        Assert.Equal((result.Rotation.Evidence.EvidenceId, "v3", "v2"), (record.RotationEvidenceId, record.VersionId, record.DisabledVersionId));
+        var settled = await ops.EvidenceStore.Remediation(judgement.JudgementId);
+        Assert.Equal((RemediationStates.Remediated, record.RemediationId), (settled.State, settled.RemediationId));
+
+        // Again: the state takes no second record, and nothing runs.
+        var again = await Assert.ThrowsAsync<TransitionRefusedException>(() => Governance.CancelByRotatingForward(controller, executor,
+            new RotateForwardOptions<string>
+            {
+                Remediation = settled,
+                DeniedVersionId = "v2",
+                Rotation = options.Rotation,
+                Rotate = options.Rotate,
+                Disable = options.Disable,
+            }));
+        Assert.Equal("remediation_already_recorded", again.Code);
+        Assert.Equal(["v2"], disabled);
+    }
 }
