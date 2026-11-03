@@ -94,7 +94,7 @@ public class GrantHolderLiveTests
             RecordOutbox = new MemoryOutbox<RecordOutboxEntry>(),
         });
         using var device = Device();
-        using var holder = new GrantHolder(new GrantHolderOptions
+        var holder = new GrantHolder(new GrantHolderOptions
         {
             Client = device,
             Signer = bearer,
@@ -170,7 +170,7 @@ public class GrantHolderLiveTests
         // A short grant under the stricter policy, used past its end with the NA out of reach: break-glass again.
         var shortGrant = await ops.Grants.IssueGrant(Request(DateTimeOffset.UtcNow.AddSeconds(3), 1, 20));
         using var second = Device();
-        using var shortHolder = new GrantHolder(new GrantHolderOptions
+        var shortHolder = new GrantHolder(new GrantHolderOptions
         {
             Client = second,
             Signer = bearer,

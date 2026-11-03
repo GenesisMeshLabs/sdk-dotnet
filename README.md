@@ -1577,7 +1577,7 @@ using var device = new GenesisMeshClient(new ClientOptions
     SigningKey = operatorSeed, KeyId = "ops",   // evaluates when the holder falls back
     RecordOutbox = new FileRecordOutbox("/var/lib/site/records"),
 });
-using var holder = new GrantHolder(new GrantHolderOptions
+var holder = new GrantHolder(new GrantHolderOptions
 {
     Client = device,
     Signer = bearerSigner,                      // the grant's bearer key
@@ -1609,15 +1609,21 @@ var synced = await holder.Sync();  // on reconnect: the revocation feed, a fresh
   left (asking for a fresh one when the NA answers). A request outside the
   grant throws `GrantRefusedException`, and nothing runs.
 - Every use takes the next place in the grant's chain, and is never dated
-  before its time token or the previous use. One the NA quarantines keeps its
-  place, and stops counting against the budget, which counts admitted uses.
+  before its time token or the previous use. One the NA quarantines after it
+  continued the chain keeps its place, and stops counting against the budget,
+  which counts admitted uses; one refused as a conflict, a chain mismatch or
+  over budget still counts.
 - When the grant has ended, its budget or time token is spent, or it is
   revoked, the holder falls back to a governed action with break-glass: an NA
   that answers decides, and a DENY is never broken through; one out of reach
   leaves the change to break-glass, recorded and judged after the fact.
   Without a fallback it throws `GrantUnusableException`.
-- Its calls run one at a time; its state (`GrantHolderState`) is the JSON the
-  TypeScript SDK's holder keeps.
+- Its calls run one at a time (do not call it from inside an action), and its
+  state changes whole. `GrantHolderState` is the JSON the TypeScript SDK's
+  holder keeps; on its first change the holder takes up a later use of its
+  grant the record outbox holds, kept before a stop left the state unpersisted.
+- `Sync` reports a time token the NA refuses (`TimeTokenRefusal`, such as a
+  clock more than 300 seconds off the NA's) and still uploads the outbox.
 
 The SDK runs the shared `grants` suite's signed-form, signature, envelope,
 envelope parameter and use vectors

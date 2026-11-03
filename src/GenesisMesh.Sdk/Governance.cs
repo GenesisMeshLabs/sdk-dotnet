@@ -443,8 +443,8 @@ public sealed class EvidenceNotKeptException : GenesisMeshException
     public BreakGlassRecord? BreakGlassRecord { get; }
 
     /// <summary>
-    /// For a use of a grant (<see cref="GrantHolder.Act"/>, 1.9.0): the signed use, when signing succeeded. Keep it in the
-    /// record outbox, or submit it, once either works; the holder's chain did not move to it.
+    /// For a use of a grant (<see cref="GrantHolder.Act"/>, 1.9.0): the signed use, when signing succeeded. Do not keep or
+    /// submit it: the holder's chain did not move to it, and its next use takes that place.
     /// </summary>
     public GrantExecutionEvidence? GrantUse { get; internal init; }
 }

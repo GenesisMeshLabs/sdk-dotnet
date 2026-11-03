@@ -56,6 +56,7 @@ public class GrantHolderTests
         public List<JsonNode> Uses { get; } = [];
         public List<JsonNode> BreakGlass { get; } = [];
         public string? TokenRefusal;
+        public int TokenRefusalStatus = 409;
         /// <summary>Refuse the next use for good: the NA quarantines it.</summary>
         public string? QuarantineNext;
         public List<string> RevokedGrants = [];
@@ -75,7 +76,7 @@ public class GrantHolderTests
                         var asked = body!["request"]!;
                         if (!OfflineVerifier.VerifyTimeTokenRequest(asked.ToJsonString(), BearerKey.Public))
                             return Refusal(422, "time_token_request_invalid_signature");
-                        if (TokenRefusal is { } refused) return Refusal(409, refused);
+                        if (TokenRefusal is { } refused) return Refusal(TokenRefusalStatus, refused);
                         var token = new JsonObject
                         {
                             ["time_token_id"] = $"token-{asked["use_sequence"]}-{Clock.ToUnixTimeSeconds()}",
@@ -164,11 +165,7 @@ public class GrantHolderTests
                 : null,
         };
 
-        public void Dispose()
-        {
-            Holder.Dispose();
-            Client.Dispose();
-        }
+        public void Dispose() => Client.Dispose();
     }
 
     private static JsonObject GrantRecord(Action<JsonObject>? change = null)
@@ -533,7 +530,7 @@ public class GrantHolderTests
         var json = JsonNode.Parse(JsonSerializer.Serialize(saved[^1], Auth.SerializerOptions))!.AsObject();
         Assert.Equal(["grant", "time_token", "uses", "head_digest", "head_executed_at", "revocation_feed", "unusable"], json.Select(p => p.Key));
         var restored = JsonSerializer.Deserialize<GrantHolderState>(json.ToJsonString(), Auth.SerializerOptions)!;
-        using var resumed = new GrantHolder(new GrantHolderOptions
+        var resumed = new GrantHolder(new GrantHolderOptions
         {
             Client = x.Client,
             Signer = Bearer,
@@ -577,7 +574,7 @@ public class GrantHolderTests
         ahead["use_sequence"] = 1;
         ahead["use_head_digest"] = new string('a', 64);
         Assert.Equal("grant_time_token_invalid", Assert.Throws<GrantRefusedException>(() => new GrantHolder(Options(Bearer, token: NASigned(ahead)))).Code);
-        using var impostor = new GrantHolder(Options(new SeedSigner(NewKey().Seed, "device-key")));
+        var impostor = new GrantHolder(Options(new SeedSigner(NewKey().Seed, "device-key")));
         Assert.Equal("grant_bearer_mismatch", (await Assert.ThrowsAsync<GrantRefusedException>(() => impostor.Act(Setup.Rotate(), Report()))).Code);
         using var plain = Client(x.NA, null);
         Assert.Equal("record_outbox_required", Assert.Throws<OutboxException>(() => new GrantHolder(Options(Bearer, client: plain))).Code);
@@ -680,7 +677,7 @@ public class GrantHolderTests
         x.NA.Offline = true;
         var failing = new FailingOutbox();
         using var client = Client(x.NA, failing);
-        using var holder = new GrantHolder(new GrantHolderOptions
+        var holder = new GrantHolder(new GrantHolderOptions
         {
             Client = client,
             Signer = Bearer,
@@ -692,14 +689,209 @@ public class GrantHolderTests
         var e = await Assert.ThrowsAsync<EvidenceNotKeptException>(() => holder.Act(Setup.Rotate(), Report(value: "rotated")));
         Assert.Equal(("rotated", 1), (e.Value, e.GrantUse!.UseSequence));
         Assert.Equal(0, holder.State.Uses);
+        // The outbox back: the next use takes that place.
+        failing.Fails = false;
+        Assert.Equal(1, (await holder.Act(Setup.Rotate(), Report())).UnderGrant!.Use.UseSequence);
     }
 
-    /// <summary>A record outbox that lists but cannot store.</summary>
+    /// <summary>A record outbox that cannot store while <see cref="Fails"/>.</summary>
     private sealed class FailingOutbox : IOutbox<RecordOutboxEntry>
     {
-        public Task<IReadOnlyList<RecordOutboxEntry>> List(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<RecordOutboxEntry>>([]);
-        public Task Add(RecordOutboxEntry entry, CancellationToken ct = default) => throw new IOException("disk full");
-        public Task Update(RecordOutboxEntry entry, CancellationToken ct = default) => throw new IOException("disk full");
-        public Task Remove(string id, CancellationToken ct = default) => Task.CompletedTask;
+        private readonly MemoryOutbox<RecordOutboxEntry> _inner = new();
+        public bool Fails = true;
+        public Task<IReadOnlyList<RecordOutboxEntry>> List(CancellationToken ct = default) => _inner.List(ct);
+        public Task Add(RecordOutboxEntry entry, CancellationToken ct = default) => Fails ? throw new IOException("disk full") : _inner.Add(entry, ct);
+        public Task Update(RecordOutboxEntry entry, CancellationToken ct = default) => Fails ? throw new IOException("disk full") : _inner.Update(entry, ct);
+        public Task Remove(string id, CancellationToken ct = default) => _inner.Remove(id, ct);
+    }
+
+    // ── The independent review's cases ─────────────────────────────────────
+
+    [Fact]
+    public async Task AFailedActionsUseIsPersisted_AndResumingSignsTheNextPlace()
+    {
+        var saved = new List<GrantHolderState>();
+        using var x = Make(persist: (s, _) => { saved.Add(s); return Task.CompletedTask; });
+        x.NA.Offline = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => x.Holder.Act<string>(Setup.Rotate(), (_, _) => throw new InvalidOperationException("vault down")));
+        Assert.Equal(1, saved[^1].Uses);
+        var resumed = new GrantHolder(new GrantHolderOptions
+        {
+            Client = x.Client,
+            Signer = Bearer,
+            NAKeys = NAKeyHistory.ValidAlways([NAKey.Public]),
+            State = saved[^1],
+            Now = () => Start.AddSeconds(700),
+        });
+        Assert.Equal(2, (await resumed.Act(Setup.Rotate(), Report())).UnderGrant!.Use.UseSequence);
+    }
+
+    [Fact]
+    public async Task AFailedActionWhoseStateCannotBePersistedKeepsBothErrors()
+    {
+        using var x = Make(persist: (_, _) => throw new IOException("disk full"));
+        x.NA.Offline = true;
+        var e = await Assert.ThrowsAsync<GrantStateNotKeptException>(() =>
+            x.Holder.Act<string>(Setup.Rotate(), (_, _) => throw new InvalidOperationException("vault down")));
+        Assert.Equal(("vault down", GrantUseOutcomes.Failure), (e.ActionError!.Message, e.Use.Outcome));
+        Assert.IsType<IOException>(e.InnerException);
+    }
+
+    [Fact]
+    public async Task ACallCancelledInItsTurnLeavesTheOthersInOrder()
+    {
+        using var x = Make();
+        x.NA.Offline = true;
+        var release = new TaskCompletionSource();
+        var first = x.Holder.Act(Setup.Rotate(), async (_, _) =>
+        {
+            await release.Task;
+            return new ActionReport<string>();
+        });
+        using var cancel = new CancellationTokenSource();
+        var cancelled = x.Holder.Act(Setup.Rotate(), Report(), cancel.Token);
+        var third = x.Holder.Act(Setup.Rotate(), Report());
+        await cancel.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+        await Task.Delay(50);
+        Assert.False(third.IsCompleted); // still waits for the first
+        release.SetResult();
+        Assert.Equal((1, 2), ((await first).UnderGrant!.Use.UseSequence, (await third).UnderGrant!.Use.UseSequence));
+    }
+
+    [Fact]
+    public async Task ItsStateIsReadWhole_WhileItActs()
+    {
+        using var x = Make(g => { g["max_uses"] = 10000; g["max_uses_per_time_token"] = 1000; });
+        x.NA.Offline = true;
+        var digests = new Dictionary<int, string>();
+        var acting = Task.Run(async () =>
+        {
+            for (var i = 0; i < 150; i++)
+            {
+                var use = (await x.Holder.Act(Setup.Rotate(), Report())).UnderGrant!.Use;
+                lock (digests) digests[use.UseSequence] = GrantRules.UseDigest(use);
+            }
+        });
+        var snapshots = new List<GrantHolderState>();
+        while (!acting.IsCompleted) snapshots.Add(x.Holder.State);
+        await acting;
+        Assert.NotEmpty(snapshots);
+        Assert.All(snapshots, s => Assert.Equal(s.Uses == 0 ? null : digests[s.Uses], s.HeadDigest));
+    }
+
+    [Fact]
+    public async Task ATokenTheNARefusesForAClockOffItsOwnStillLetsSyncUpload()
+    {
+        using var x = Make();
+        x.NA.Offline = true;
+        var use = await Use(x);
+        x.NA.Offline = false;
+        (x.NA.TokenRefusal, x.NA.TokenRefusalStatus) = ("time_token_request_stale", 422);
+        var synced = await x.Holder.Sync();
+        Assert.True(synced.Reachable);
+        Assert.Equal(("time_token_request_stale", (string?)null), (synced.TimeTokenRefusal!.Code, synced.Unusable));
+        Assert.Equal([use.Use.UseId], synced.Flushed!.Admitted.Select(e => e.Id));
+    }
+
+    [Fact]
+    public async Task ASpentTokenTheNAWillNotRenewForAClockOffItsOwnGoesToTheNA()
+    {
+        using var x = Make(g => g["max_uses_per_time_token"] = 1);
+        await Use(x);
+        (x.NA.TokenRefusal, x.NA.TokenRefusalStatus) = ("time_token_request_stale", 422);
+        // The NA answers: the fallback asks it (this fake NA has no evaluate route, so the governed action is refused).
+        var e = await Assert.ThrowsAnyAsync<GenesisMeshException>(() => x.Holder.Act(Setup.Rotate(), Report()));
+        Assert.Equal("not_found", e.Code);
+        Assert.Contains(x.NA.Requests, r => r.Contains("evaluate", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnNAAnsweringTheBearerKeyRetiredRefusesTheFirstChangeAlready()
+    {
+        using var x = Make(g => g["max_uses_per_time_token"] = 1);
+        await Use(x);
+        x.NA.TokenRefusal = "grant_bearer_key_retired";
+        Assert.Equal("grant_bearer_key_retired", (await Assert.ThrowsAsync<GrantRefusedException>(() => x.Holder.Act(Setup.Rotate(), Report()))).Code);
+        Assert.Equal("grant_bearer_key_retired", x.Holder.State.Unusable);
+    }
+
+    [Fact]
+    public async Task AUseKeptBeforeItsStateWasPersistedIsTakenUp_NoPlaceSignedTwice()
+    {
+        using var x = Make();
+        x.NA.Offline = true;
+        var before = x.Holder.State;
+        var first = await Use(x);
+        // A restart from the state persisted before that use: the record outbox holds it.
+        var resumed = new GrantHolder(new GrantHolderOptions
+        {
+            Client = x.Client,
+            Signer = Bearer,
+            NAKeys = NAKeyHistory.ValidAlways([NAKey.Public]),
+            State = before,
+            Now = () => Start.AddSeconds(700),
+        });
+        var second = (await resumed.Act(Setup.Rotate(), Report())).UnderGrant!.Use;
+        Assert.Equal((2, GrantRules.UseDigest(first.Use)), (second.UseSequence, second.PrevUseDigest));
+    }
+
+    [Fact]
+    public async Task UnderAKeyHistoryAFeedOfALaterKeyReplacesOneOfAnEarlierKey()
+    {
+        // The NA's key 1 handed over to key 2 an hour ago; key 1 still vouches (the grace), so its feed counts.
+        var next = NewKey();
+        var handedOver = DateTimeOffset.UtcNow.AddHours(-1);
+        var history = new NAKeyHistory("sovereign-c", null,
+        [
+            new NAKey(1, "na-key", NAKey.Public, null, handedOver, null, false),
+            new NAKey(2, "na-key-2", next.Public, handedOver, null, null, false),
+        ]);
+        using var x = Make(g => { g["issued_at"] = Canonical.Timestamp(handedOver.AddMinutes(-30)); g["valid_from"] = Canonical.Timestamp(handedOver.AddMinutes(-30)); g["valid_until"] = Canonical.Timestamp(handedOver.AddHours(3)); });
+        JsonObject Feed(long sequence, DateTimeOffset at, Key key)
+        {
+            var feed = new JsonObject
+            {
+                ["feed_id"] = $"feed-{sequence}",
+                ["issuer_sovereign_id"] = "sovereign-c",
+                ["sequence"] = sequence,
+                ["issued_at"] = Canonical.Timestamp(at),
+                ["revoked_attestation_ids"] = new JsonArray(),
+                ["revocation_reasons"] = new JsonObject(),
+                ["issued_by"] = "na-key",
+                ["revoked_grant_ids"] = new JsonArray(),
+            };
+            var body = OfflineVerifier.ReceivedCanonical("SovereignRevocationFeed", JsonSerializer.SerializeToElement(feed));
+            feed["signatures"] = new JsonArray(new JsonObject
+            {
+                ["key_id"] = "na-key",
+                ["sig"] = Convert.ToBase64String(SignatureAlgorithm.Ed25519.Sign(key, Encoding.UTF8.GetBytes(body))),
+            });
+            return feed;
+        }
+        var older = Feed(9, handedOver.AddMinutes(-10), NAKey.Key).Deserialize<SovereignRevocationFeed>()!;
+        var newer = Feed(1, handedOver.AddMinutes(10), next.Key).Deserialize<SovereignRevocationFeed>()!;
+        var holder = new GrantHolder(new GrantHolderOptions
+        {
+            Client = x.Client,
+            Signer = Bearer,
+            NAKeys = history,
+            Grant = x.Grant,
+            TimeToken = x.TimeToken,
+        });
+        Assert.True(await holder.UpdateRevocationFeed(older));
+        Assert.True(await holder.UpdateRevocationFeed(newer));
+        Assert.Equal(1, holder.State.RevocationFeed!.Sequence);
+        // Keys valid at every time count as one: the higher sequence stays.
+        var listed = new GrantHolder(new GrantHolderOptions
+        {
+            Client = x.Client,
+            Signer = Bearer,
+            NAKeys = NAKeyHistory.ValidAlways([NAKey.Public, next.Public]),
+            Grant = x.Grant,
+            TimeToken = x.TimeToken,
+        });
+        Assert.True(await listed.UpdateRevocationFeed(older));
+        Assert.False(await listed.UpdateRevocationFeed(newer));
     }
 }

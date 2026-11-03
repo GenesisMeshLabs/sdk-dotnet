@@ -226,6 +226,12 @@ public sealed class GrantSyncResult
     /// <summary>The NA's refusal of a time token, when it refused (<c>grant_expired</c>, <c>grant_revoked</c>, ...); null otherwise.</summary>
     public string? Unusable { get; init; }
 
+    /// <summary>
+    /// The NA's refusal of a time token for another reason, such as <c>time_token_request_stale</c> (this clock is more
+    /// than 300 seconds off the NA's); the upload still ran. Null otherwise.
+    /// </summary>
+    public GenesisMeshException? TimeTokenRefusal { get; init; }
+
     /// <summary>The record outbox flush, when it ran.</summary>
     public RecordFlushResult? Flushed { get; init; }
 }
@@ -288,6 +294,9 @@ public sealed class GrantStateNotKeptException : GenesisMeshException
 
     /// <summary>The record outbox entry holding the use otherwise.</summary>
     public RecordOutboxEntry? Queued { get; }
+
+    /// <summary>When the action itself failed: its error, and <see cref="Use"/> is its failure use. Null when it ran.</summary>
+    public Exception? ActionError { get; internal init; }
 }
 
 /// <summary>
@@ -318,11 +327,17 @@ public sealed class GrantStateNotKeptException : GenesisMeshException
 /// (<see cref="Governance.GovernedAction{T}(GenesisMeshClient, ExecutionRecorder, GovernedActionRequest, BreakGlassOptions, Func{BoundaryDecision?, CancellationToken, Task{ActionReport{T}?}}, CancellationToken)"/>),
 /// naming the capability: an NA that answers decides (a DENY is never broken through), and one that cannot be reached
 /// (no answer, a timeout, a 5xx or a 429) leaves the change to run under break-glass, recorded and judged after the
-/// fact. Any other refusal throws <see cref="GrantRefusedException"/>, and nothing runs.
+/// fact. Any other error of the governed action (a refused evaluation, a decision that fails verification) is thrown
+/// as it is, and nothing runs.
 /// </para>
-/// <para>Dispose it once done with it; the client stays the caller's to dispose.</para>
+/// <para>
+/// Its calls run one at a time, and its state changes whole: <see cref="State"/> never shows a use counted without its
+/// digest. Do not call the holder from inside an action: that call would wait for the action. On its first change it
+/// takes up the latest use of its grant the record outbox holds beyond its state (kept before the process stopped,
+/// unpersisted), so no place in the chain is signed twice.
+/// </para>
 /// </summary>
-public sealed class GrantHolder : IDisposable
+public sealed class GrantHolder
 {
     /// <summary>The NA's answers to a time token request that end the grant for its holder.</summary>
     private static readonly FrozenSet<string> Ended =
@@ -345,8 +360,11 @@ public sealed class GrantHolder : IDisposable
     private readonly Func<GrantHolderState, CancellationToken, Task>? _persist;
     private readonly Func<DateTimeOffset> _now;
     private readonly ExecutionRecorder _recorder;
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _turns = new();
+    private Task _last = Task.CompletedTask;
+    private readonly object _stateLock = new();
     private bool _bearerChecked;
+    private bool _adopted;
 
     /// <summary>A holder of the grant in <paramref name="options"/>, checked before anything else.</summary>
     /// <param name="options">The grant and its first time token, or a state to resume from, and how to hold it.</param>
@@ -384,31 +402,86 @@ public sealed class GrantHolder : IDisposable
         _recorder = new ExecutionRecorder(held.BearerSovereignId, _signer);
     }
 
-    /// <summary>Releases the lock its calls take turns on.</summary>
-    public void Dispose() => _gate.Dispose();
-
     /// <summary>A copy of the holder's state, to persist and resume from.</summary>
-    public GrantHolderState State => Copy(_state);
+    public GrantHolderState State
+    {
+        get
+        {
+            lock (_stateLock) return Copy(_state);
+        }
+    }
 
     /// <summary>The grant held.</summary>
-    public CapabilityGrant Grant => Copy(_state.Grant);
+    public CapabilityGrant Grant
+    {
+        get
+        {
+            lock (_stateLock) return Copy(_state.Grant);
+        }
+    }
 
     private static T Copy<T>(T value) => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value, Auth.SerializerOptions), Auth.SerializerOptions)!;
 
     private static string Json<T>(T value) => JsonSerializer.Serialize(value, Auth.SerializerOptions);
 
     /// <summary>Runs <paramref name="run"/> after the calls before it: two uses never take the same place in the chain.</summary>
-    private async Task<TResult> Serial<TResult>(Func<Task<TResult>> run, CancellationToken ct)
+    private Task<TResult> Serial<TResult>(Func<Task<TResult>> run, CancellationToken ct)
     {
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task previous;
+        lock (_turns)
+        {
+            previous = _last;
+            _last = done.Task;
+        }
+        return Turn(previous, done, run, ct);
+    }
+
+    private static async Task<TResult> Turn<TResult>(Task previous, TaskCompletionSource done, Func<Task<TResult>> run, CancellationToken ct)
+    {
+        try
+        {
+            await previous.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Not run: the calls after it still wait for the ones before it.
+            _ = previous.ContinueWith(_ => done.TrySetResult(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            throw;
+        }
         try
         {
             return await run().ConfigureAwait(false);
         }
         finally
         {
-            _gate.Release();
+            done.TrySetResult();
         }
+    }
+
+    /// <summary>
+    /// Once, before the first change: the latest use of this grant the record outbox holds beyond the state's head (kept,
+    /// then the process stopped before its state was persisted) becomes the head, so no place is signed twice.
+    /// </summary>
+    private async Task AdoptKeptUses(CancellationToken ct)
+    {
+        if (_adopted) return;
+        var grantId = _state.Grant.GrantId;
+        RecordOutboxEntry? latest = null;
+        var place = _state.Uses;
+        foreach (var entry in await _client.EvidenceStore.RequireRecordOutbox().List(ct).ConfigureAwait(false))
+        {
+            if (entry.Kind == RecordOutboxKinds.GrantExecution && Text(entry.Record, "grant_id") == grantId
+                && Sequence(entry.Record) is { } sequence && sequence > place)
+                (latest, place) = (entry, sequence);
+        }
+        if (latest is not null)
+        {
+            var digest = GrantRules.RecordDigest("GrantExecutionEvidence", latest.Record.GetRawText());
+            lock (_stateLock) (_state.Uses, _state.HeadDigest, _state.HeadExecutedAt) = (place, digest, Text(latest.Record, "executed_at"));
+            await Persist(ct).ConfigureAwait(false);
+        }
+        _adopted = true;
     }
 
     private async Task Persist(CancellationToken ct)
@@ -454,8 +527,8 @@ public sealed class GrantHolder : IDisposable
     /// <summary>
     /// Verifies a revocation feed (signed by the NA's key valid at its time and still vouching now, issued by the grant's
     /// issuer) and keeps it unless the one held is newer. A holder refuses a grant the feed it holds lists as revoked.
-    /// Feeds are ordered by the key sequence of their signer in the NA's verified history, then by their
-    /// <c>sequence</c> (1.8.0): a feed signed by a later key always replaces one signed by an earlier key, and a held
+    /// Feeds are ordered by the key sequence of their signer in the NA's verified history (keys all valid at every time
+    /// count as one), then by their <c>sequence</c> (1.8.0): a feed signed by a later key always replaces one signed by an earlier key, and a held
     /// feed whose key has passed its vouching horizon no longer blocks a newer one; otherwise a feed with a forged high
     /// <c>sequence</c>, signed with a succeeded key, would stop the holder from taking the NA's feeds for good.
     /// </summary>
@@ -472,16 +545,20 @@ public sealed class GrantHolder : IDisposable
             if (!OfflineVerifier.VerifyRevocationFeedSignature(Json(feed), _naKeys, now) || feed.IssuerSovereignId != _state.Grant.IssuerSovereignId)
                 throw new GrantRefusedException("feed_invalid_signature", "the revocation feed is not the grant issuer's");
             if (_state.RevocationFeed is { } held && !FeedReplaces(feed, held, now)) return false;
-            _state.RevocationFeed = Copy(feed);
+            lock (_stateLock) _state.RevocationFeed = Copy(feed);
             await Persist(ct).ConfigureAwait(false);
             return true;
         }, ct);
     }
 
-    /// <summary>The key sequence of a feed's signer in the NA's verified history; 0 for keys valid at every time, or no signer.</summary>
+    /// <summary>
+    /// The key sequence of a feed's signer in the NA's verified history; 0 for keys that are all valid at every time
+    /// (<see cref="NAKeyHistory.ValidAlways"/>, a list of keys), or no signer.
+    /// </summary>
     private int FeedKeySequence(SovereignRevocationFeed feed)
     {
-        if (_naKeys.RootPublicKey is null || OfflineVerifier.RevocationFeedSigner(Json(feed), _naKeys) is not { } signer) return 0;
+        if (_naKeys.Keys.All(k => k.ValidFrom is null && k.SucceededAt is null && k.ValidTo is null)
+            || OfflineVerifier.RevocationFeedSigner(Json(feed), _naKeys) is not { } signer) return 0;
         return _naKeys.Keys.FirstOrDefault(k => k.PublicKey == signer)?.KeySequence ?? 0;
     }
 
@@ -522,6 +599,7 @@ public sealed class GrantHolder : IDisposable
 
     private async Task<JsonElement> Refresh(CancellationToken ct)
     {
+        await AdoptKeptUses(ct).ConfigureAwait(false);
         var grant = _state.Grant;
         var (uses, head) = (_state.Uses, _state.HeadDigest);
         JsonElement token;
@@ -538,14 +616,14 @@ public sealed class GrantHolder : IDisposable
         }
         catch (GenesisMeshException e) when (e.Status == 409 && Ended.Contains(e.Code))
         {
-            _state.Unusable = e.Code;
+            lock (_stateLock) _state.Unusable = e.Code;
             await Persist(ct).ConfigureAwait(false);
             throw;
         }
         CheckToken(token, grant, uses);
         if (Sequence(token) != uses || Text(token, "use_head_digest") != head)
             throw new GrantRefusedException("grant_time_token_mismatch", "the time token names another chain head than the holder asked for");
-        _state.TimeToken = token.Clone();
+        lock (_stateLock) _state.TimeToken = token.Clone();
         await Persist(ct).ConfigureAwait(false);
         return token;
     }
@@ -553,7 +631,9 @@ public sealed class GrantHolder : IDisposable
     /// <summary>
     /// On reconnect: reads the revocation feed, asks for a fresh time token, and uploads the record outbox (the grant's
     /// uses in their chain's order, with the other records). A step the NA does not answer is skipped, not thrown
-    /// (<see cref="GrantSyncResult.Reachable"/> false), and the steps after it with it; other errors are thrown.
+    /// (<see cref="GrantSyncResult.Reachable"/> false), and the steps after it with it. A time token the NA refuses is
+    /// reported (<see cref="GrantSyncResult.Unusable"/> when the grant has ended, <see cref="GrantSyncResult.TimeTokenRefusal"/>
+    /// otherwise, such as a clock more than 300 seconds off the NA's) and the upload still runs; other errors are thrown.
     /// </summary>
     /// <param name="ignoreBackoff">Upload records still in their backoff too (the default: the NA is back).</param>
     /// <param name="ct">Cancels the steps.</param>
@@ -570,6 +650,7 @@ public sealed class GrantHolder : IDisposable
         }
         JsonElement? token = null;
         string? unusable = null;
+        GenesisMeshException? refused = null;
         try
         {
             token = await RefreshTimeToken(ct).ConfigureAwait(false);
@@ -582,8 +663,12 @@ public sealed class GrantHolder : IDisposable
         {
             return new GrantSyncResult { Reachable = false };
         }
+        catch (GenesisMeshException e) when (e.Status is >= 400 and < 500)
+        {
+            refused = e;
+        }
         var flushed = await _client.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = ignoreBackoff }, ct).ConfigureAwait(false);
-        return new GrantSyncResult { Reachable = true, TimeToken = token, Unusable = unusable, Flushed = flushed };
+        return new GrantSyncResult { Reachable = true, TimeToken = token, Unusable = unusable, TimeTokenRefusal = refused, Flushed = flushed };
     }
 
     // ── Acting ──────────────────────────────────────────────────────────────
@@ -592,8 +677,10 @@ public sealed class GrantHolder : IDisposable
     /// Acts within the grant, offline: checks it (see the class), runs <paramref name="action"/>, signs the use with the
     /// bearer key and keeps it in the record outbox (submitted at once when the NA is reachable). An action that throws
     /// is recorded as a <c>failure</c> use and the error rethrown. When the grant cannot be used,
-    /// <see cref="GrantActRequest.Fallback"/> decides (see the class). <paramref name="ct"/> cancels the steps before
-    /// and including the action; once it has run, its use is kept whatever the token says.
+    /// <see cref="GrantActRequest.Fallback"/> decides (see the class); so it does when the uses of the time token are
+    /// spent and the NA will not issue another for a reason other than the grant's end (such as a clock more than 300
+    /// seconds off its own): the NA then decides. <paramref name="ct"/> cancels the steps before and including the
+    /// action; once it has run, its use is kept whatever the token says.
     /// </summary>
     /// <typeparam name="T">The action's value.</typeparam>
     /// <param name="request">The change.</param>
@@ -608,8 +695,15 @@ public sealed class GrantHolder : IDisposable
     /// </exception>
     /// <exception cref="GrantUnusableException">The grant cannot be used and there is no fallback, or no attestation to break the glass under: nothing ran.</exception>
     /// <exception cref="GovernedActionException">The action failed, and its failure use could not be kept.</exception>
-    /// <exception cref="EvidenceNotKeptException">The action ran, and its use could not be kept (<see cref="EvidenceNotKeptException.GrantUse"/>): do not run it again.</exception>
-    /// <exception cref="GrantStateNotKeptException">The action ran and its use is kept; the holder's state could not be persisted.</exception>
+    /// <exception cref="EvidenceNotKeptException">
+    /// The action ran, and its use could not be kept (<see cref="EvidenceNotKeptException.GrantUse"/>): do not run it
+    /// again. The chain did not move: the next use takes that place.
+    /// </exception>
+    /// <exception cref="GrantStateNotKeptException">
+    /// The use is kept (for a failed action, its failure use: <see cref="GrantStateNotKeptException.ActionError"/>); the
+    /// holder's state could not be persisted.
+    /// </exception>
+    /// <exception cref="GenesisMeshException">Under a fallback: the governed action's own errors, such as a refused evaluation.</exception>
     public Task<GrantActResult<T>> Act<T>(GrantActRequest request, Func<GrantAuthority, CancellationToken, Task<ActionReport<T>?>> action,
         CancellationToken ct = default)
     {
@@ -621,6 +715,7 @@ public sealed class GrantHolder : IDisposable
     private async Task<GrantActResult<T>> ActNow<T>(GrantActRequest request, Func<GrantAuthority, CancellationToken, Task<ActionReport<T>?>> action,
         CancellationToken ct)
     {
+        await AdoptKeptUses(ct).ConfigureAwait(false);
         var grant = _state.Grant;
         if ((request.ResourceId is null) != (request.ResourceAction is null))
             throw new ArgumentException("genesismesh: resource_id and resource_action go together", nameof(request));
@@ -685,13 +780,24 @@ public sealed class GrantHolder : IDisposable
         }
         catch (Exception actionError)
         {
+            GrantExecutionEvidence failure;
+            RecordDelivery kept;
             try
             {
-                await Keep(await Sign(new ActionReport<T> { OutcomeDetail = "action failed" }, GrantUseOutcomes.Failure).ConfigureAwait(false)).ConfigureAwait(false);
+                failure = await Sign(new ActionReport<T> { OutcomeDetail = "action failed" }, GrantUseOutcomes.Failure).ConfigureAwait(false);
+                kept = await Keep(failure).ConfigureAwait(false);
             }
             catch (Exception recordError)
             {
                 throw new GovernedActionException(actionError, recordError, null);
+            }
+            try
+            {
+                await Persist(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception persistError)
+            {
+                throw new GrantStateNotKeptException(persistError, null, failure, kept.Submission, kept.Queued) { ActionError = actionError };
             }
             throw;
         }
@@ -736,14 +842,15 @@ public sealed class GrantHolder : IDisposable
     private async Task<RecordDelivery> Keep(GrantExecutionEvidence use)
     {
         var (uses, head, headAt) = (_state.Uses, _state.HeadDigest, _state.HeadExecutedAt);
-        (_state.Uses, _state.HeadDigest, _state.HeadExecutedAt) = (use.UseSequence, GrantRules.UseDigest(use), use.ExecutedAt);
+        var digest = GrantRules.UseDigest(use);
+        lock (_stateLock) (_state.Uses, _state.HeadDigest, _state.HeadExecutedAt) = (use.UseSequence, digest, use.ExecutedAt);
         try
         {
             return await _client.EvidenceStore.EnqueueRecord(use, CancellationToken.None).ConfigureAwait(false);
         }
         catch
         {
-            (_state.Uses, _state.HeadDigest, _state.HeadExecutedAt) = (uses, head, headAt);
+            lock (_stateLock) (_state.Uses, _state.HeadDigest, _state.HeadExecutedAt) = (uses, head, headAt);
             throw;
         }
     }
@@ -783,6 +890,16 @@ public sealed class GrantHolder : IDisposable
         catch (GenesisMeshException e) when (GrantFallbackCodes.All.Contains(e.Code))
         {
             return e.Code;
+        }
+        catch (GenesisMeshException e) when (Ended.Contains(e.Code))
+        {
+            throw new GrantRefusedException(e.Code, $"the NA answered {e.Code} for this grant");
+        }
+        catch (GenesisMeshException e) when (e.Status is >= 400 and < 500)
+        {
+            // The NA answered but will not issue a token now (such as a clock more than 300 s off its own,
+            // time_token_request_stale): the change goes to it, which decides.
+            return GrantFallbackCodes.TimeTokenExhausted;
         }
     }
 
