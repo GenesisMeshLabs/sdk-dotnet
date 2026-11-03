@@ -30,9 +30,8 @@ From 1.9 it also carries the NA's 1.4.0 remediation and reviews: the rules,
 the due queue, remediation records and reviews, cancelling a denied change by
 rotating forward and urgent changes (see
 [Remediation and reviews](#remediation-and-reviews)), and verifies their
-entries in an export. Not yet here: verifying the store's 1.5.0 and later
-entry kinds in an export (key successions, archives, grants) and store
-anchors. Those live in the
+entries in an export. Not yet here: verifying the store's 1.5.0 entry kinds
+in an export (key successions, archives) and store anchors. Those live in the
 [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript) and the
 [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust). The embedded field
 registry lists their records.
@@ -56,11 +55,9 @@ the grants' records and rules offline (the parameter envelope, a use's place
 in its chain and the rules it keeps, and uses and time token requests signed
 with the bearer key), calls the NA's grant routes (issuing, reading and
 revoking grants, time tokens and uses), and holds a grant: a `GrantHolder` acts
-within it while the NA is out of reach and falls back to break-glass past it
-(see [Pre-issued grants](#pre-issued-grants)). Verifying grants, their uses
-and revocations in an evidence export lives in the
-[TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript) and the
-[Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust).
+within it while the NA is out of reach and falls back to break-glass past it,
+and verifies grants, their uses and revocations in an export (see
+[Pre-issued grants](#pre-issued-grants)).
 
 ## Install
 
@@ -1367,15 +1364,26 @@ bool kept = OfflineVerifier.VerifyRetentionCheckpoint(checkpointJson, [naKey]);
     holder record for that key (`review_approval_key_mismatch`), decided by a second holder
     (`review_same_holder`), of its subject as stored
     (`review_subject_mismatch`, `review_subject_missing`), and no waiver
-    after a remediation (`review_waiver_after_remediation`).
+    after a remediation (`review_waiver_after_remediation`);
+  - each grant use (1.9.0): continuing its grant's use chain
+    (`grant_use_chain_break`), of a grant the run holds (`grant_missing`),
+    signed by that grant's bearer key (`grant_bearer_mismatch`) within the
+    key's resource prefix (`grant_use_out_of_scope`), naming its digest
+    (`grant_mismatch`), keeping the use rules against what the run holds
+    (`GrantRules.UseProblem`'s codes, such as `grant_revoked` or
+    `grant_use_uploaded_late`), and taking the next place of its resource's
+    chain; a grant's revocation once (`duplicate_grant_revocation`), of a
+    grant held; and no grant use sharing another record's ID
+    (`duplicate_record`).
 
   A bad entry is a failure, never an exception.
 - It verifies the kinds a governed store holds (decisions, justification
   proofs, execution evidence, retention checkpoints), the records of changes
   outside the governed path (observations, break-glass records, judgements,
-  quarantine and registry records) and remediation and review records.
-  Entries of the 1.5.0 and later kinds (key successions, archives, grants)
-  fail as `unknown_entry_kind`; their envelopes still chain. Verify a store
+  quarantine and registry records), remediation and review records, and
+  pre-issued grants, their uses and revocations. Entries of the 1.5.0 kinds
+  (key successions, archives) fail as `unknown_entry_kind`; their envelopes
+  still chain. Verify a store
   holding them with the TypeScript or Rust SDK, or `genesis-mesh audit
   verify`. Anchors are not checked, nor where the store placed an executor
   key.
@@ -1626,7 +1634,7 @@ var synced = await holder.Sync();  // on reconnect: the revocation feed, a fresh
   clock more than 300 seconds off the NA's) and still uploads the outbox.
 
 The SDK runs the shared `grants` suite's signed-form, signature, envelope,
-envelope parameter and use vectors
+envelope parameter, use and export vectors
 (`tests/GenesisMesh.Sdk.Tests/testdata/conformance/grants.json`), and 1,510
 further cases the Python reference judged
 (`tests/GenesisMesh.Sdk.Tests/testdata/grants/rule_cases.json`).

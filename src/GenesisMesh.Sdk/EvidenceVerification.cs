@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -50,18 +51,26 @@ public static partial class OfflineVerifier
 {
     /// <summary>
     /// The entry kinds this SDK verifies (1.9.0): those a governed store holds, the records of changes outside the
-    /// governed path, and remediation and review records. The store's other kinds (key successions, archives and grants)
-    /// fail as <c>unknown_entry_kind</c>, as a kind from a later release does; their envelopes still chain.
+    /// governed path, remediation and review records, and pre-issued grants, their uses and revocations. The store's
+    /// other kinds (key successions and archives) fail as <c>unknown_entry_kind</c>, as a kind from a later release does;
+    /// their envelopes still chain.
     /// </summary>
     internal static readonly string[] VerifiedEntryKinds =
     [
         "decision", "justification", "execution", "retention_checkpoint",
         "observation", "break_glass", "judgement", "quarantine", "registry",
         "remediation", "review",
+        "grant", "grant_execution", "grant_revocation",
     ];
 
-    /// <summary>The kinds the NA signs among the records of changes outside the governed path; an observer or executor key signs the others.</summary>
-    private static readonly HashSet<string> NASignedOutOfBandKinds = new(StringComparer.Ordinal) { "judgement", "quarantine", "registry", "review" };
+    /// <summary>
+    /// The kinds the NA signs among the records it stores exactly as signed (v1.6.0: also grants and their revocations);
+    /// an observer or executor key signs the others (a grant use: its grant's bearer key).
+    /// </summary>
+    private static readonly HashSet<string> NASignedOutOfBandKinds = new(StringComparer.Ordinal)
+    {
+        "judgement", "quarantine", "registry", "review", "grant", "grant_revocation",
+    };
 
     /// <summary>v1.3.0: a kind whose record the store holds exactly as signed: a record of a change outside the governed path.</summary>
     private static bool IsOutOfBand(string kind) => EnvelopeFields.ContainsKey(kind);
@@ -86,6 +95,9 @@ public static partial class OfflineVerifier
         ["registry"] = "registry_record_id",
         ["remediation"] = "remediation_id",
         ["review"] = "review_id",
+        ["grant"] = "grant_id",
+        ["grant_execution"] = "use_id",
+        ["grant_revocation"] = "revocation_id",
     };
 
     /// <summary>The model each kind's payload holds; a decision payload wraps two, its decision and its context.</summary>
@@ -101,6 +113,9 @@ public static partial class OfflineVerifier
         ["registry"] = "RegistryRecord",
         ["remediation"] = "RemediationRecord",
         ["review"] = "ReviewRecord",
+        ["grant"] = "CapabilityGrant",
+        ["grant_execution"] = "GrantExecutionEvidence",
+        ["grant_revocation"] = "GrantRevocationRecord",
     };
 
     /// <summary>
@@ -139,6 +154,16 @@ public static partial class OfflineVerifier
             ("record_id", "review_id"), ("subject_id", "subject_id"), ("resource_id", "resource_id"), ("capability", "capability"),
             ("outcome", "verdict"),
         ],
+        // v1.6.0 (no new envelope field): a use's grant is its subject_id, its place in its chain its exec_sequence_no; its
+        // resource_sequence is the NA's, outside the record.
+        ["grant"] = [("record_id", "grant_id"), ("executor_sovereign_id", "bearer_sovereign_id")],
+        ["grant_execution"] =
+        [
+            ("record_id", "use_id"), ("subject_id", "grant_id"), ("resource_id", "resource_id"), ("resource_action", "resource_action"),
+            ("capability", "capability"), ("executor_sovereign_id", "executor_sovereign_id"), ("outcome", "outcome"),
+            ("exec_sequence_no", "use_sequence"),
+        ],
+        ["grant_revocation"] = [("record_id", "revocation_id"), ("subject_id", "grant_id"), ("outcome", "reason")],
     };
 
     /// <summary>
@@ -152,7 +177,10 @@ public static partial class OfflineVerifier
     /// forward rotation of that resource by its own executor, made after the change, once; a review (signed by the NA)
     /// is proved by the requests it embeds, signed with the keys and holders the holder registry records, decided by a
     /// second holder, of its subject as stored, and no waiver follows a remediation (the holder registry is checked for an
-    /// operator key when the run holds a holder record for it). Pass an export (<see cref="ParseExportLines(string)"/>,
+    /// operator key when the run holds a holder record for it). A grant (v1.6.0, signed by the NA) is held for its uses
+    /// and revocation; a use (signed by its grant's bearer key) continues its grant's use chain, names the grant the run
+    /// holds and its digest, keeps the use rules (<see cref="GrantRules.UseProblem"/>) against what the run holds, and
+    /// takes the next place of its resource's chain; a revocation names a grant held, once. Pass an export (<see cref="ParseExportLines(string)"/>,
     /// <see cref="EvidenceStoreClient.ExportAll"/>) or, with <see cref="EvidenceVerifyOptions.Contiguous"/> false, a
     /// history. Nothing is thrown for a bad entry, or an event built by hand that is not one: each finding is a failure,
     /// with the reason codes every implementation uses.
@@ -160,15 +188,11 @@ public static partial class OfflineVerifier
     /// <remarks>
     /// This SDK verifies the kinds a governed store holds (<c>decision</c>, <c>justification</c>, <c>execution</c>,
     /// <c>retention_checkpoint</c>) and, from 1.9.0, the records of changes outside the governed path
-    /// (<c>observation</c>, <c>break_glass</c>, <c>judgement</c>, <c>quarantine</c>, <c>registry</c>) and remediation
-    /// and review records (<c>remediation</c>, <c>review</c>). Any other kind fails as <c>unknown_entry_kind</c>; verify
+    /// (<c>observation</c>, <c>break_glass</c>, <c>judgement</c>, <c>quarantine</c>, <c>registry</c>), remediation
+    /// and review records (<c>remediation</c>, <c>review</c>), and pre-issued grants (<c>grant</c>,
+    /// <c>grant_execution</c>, <c>grant_revocation</c>). Any other kind fails as <c>unknown_entry_kind</c>; verify
     /// such a store with the TypeScript or Rust SDK, or the core's <c>genesis-mesh audit verify</c>. Anchors are not
     /// checked here, nor where the store placed an executor key (an audit pack's registry records).
-    /// <para>
-    /// A judgement may match a grant use. With grants unknown, this SDK reports what it can see, a match it does not hold
-    /// or nothing, where the TypeScript SDK names the grant's failure; either way the run does not verify. A break-glass
-    /// record sharing a grant use's ID is not named as a duplicate.
-    /// </para>
     /// </remarks>
     /// <param name="events">The entries, in store order.</param>
     /// <param name="options">The keys, and what the run is.</param>
@@ -269,6 +293,21 @@ public static partial class OfflineVerifier
         private readonly HashSet<string> _cited = new(StringComparer.Ordinal);
         /// <summary>v1.4.0: each operator key's holder records the NA signed (<c>operator_key_holder</c>), in store order.</summary>
         private readonly Dictionary<string, List<HolderRecord>> _operatorKeys = new(StringComparer.Ordinal);
+        /// <summary>v1.6.0: the authentic grants held, by ID, with their digest as received.</summary>
+        private readonly Dictionary<string, (CapabilityGrant Grant, string Digest)> _grantsHeld = new(StringComparer.Ordinal);
+        /// <summary>v1.6.0: when each grant was revoked: its first authentic revocation.</summary>
+        private readonly Dictionary<string, string> _revoked = new(StringComparer.Ordinal);
+        /// <summary>v1.6.0: the head of each grant's use chain: an admitted use, or a quarantined one that continued it.</summary>
+        private readonly Dictionary<string, UseChainHead> _chainHeads = new(StringComparer.Ordinal);
+        /// <summary>v1.6.0: each grant's last admitted use, as the order and time rules compare a use with it.</summary>
+        private readonly Dictionary<string, PreviousUse> _lastAdmitted = new(StringComparer.Ordinal);
+        /// <summary>v1.6.0: how many uses of each grant were admitted, when the run holds its chain from its first use.</summary>
+        private readonly Dictionary<string, int> _admittedUses = new(StringComparer.Ordinal);
+        /// <summary>v1.6.0: each chain use's digest and time, by grant and place (<see cref="UseKey"/>).</summary>
+        private readonly Dictionary<string, TokenHead> _useHeads = new(StringComparer.Ordinal);
+        /// <summary>v1.6.0: the IDs of uses, and of the other records a judgement matches by ID (execution evidence, break-glass records).</summary>
+        private readonly HashSet<string> _useIds = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _otherMatchable = new(StringComparer.Ordinal);
         private long? _firstSequence;
         private bool _fromStart;
         private JsonElement? _previous;
@@ -354,6 +393,30 @@ public static partial class OfflineVerifier
 
         /// <summary>v1.3.1: judgement subjects are keyed by kind and ID: a break-glass record may share an observation's ID.</summary>
         private static string SubjectKey(string kind, string id) => kind + "\0" + id;
+
+        /// <summary>v1.6.0: a use of a grant, by grant and place in its chain.</summary>
+        private static string UseKey(string grantId, int place) => grantId + "\0" + place.ToString(CultureInfo.InvariantCulture);
+
+        /// <summary>
+        /// v1.6.0: a quarantined use (signed by its grant's bearer key, when the run holds the grant) that continues its
+        /// grant's use chain is the chain's head: the next use may link to it.
+        /// </summary>
+        private void QuarantinedUse(JsonElement raw)
+        {
+            if (!Shapes.GrantUse(raw)) return;
+            var use = raw.Deserialize<GrantExecutionEvidence>()!;
+            if (_grantsHeld.TryGetValue(use.GrantId, out var held)
+                && (!IsObject(raw, "signature", out var sig) || Str(sig, "key_id") != held.Grant.BearerKeyId
+                    || !OutOfBandSignedBy(raw, [held.Grant.BearerPublicKey])))
+                return;
+            var hasHead = _chainHeads.TryGetValue(use.GrantId, out var head);
+            if (!hasHead && !_fromStart && use.UseSequence != 1) return;
+            if (!GrantRules.ContinuesChain(use, hasHead ? head! : new UseChainHead(0, null))) return;
+            var digest = GrantRecordDigest("GrantExecutionEvidence", raw);
+            _chainHeads[use.GrantId] = new UseChainHead(use.UseSequence, digest);
+            _useHeads[UseKey(use.GrantId, use.UseSequence)] = new TokenHead(digest, use.ExecutedAt);
+            if (use.UseSequence == 1) _admittedUses.TryAdd(use.GrantId, 0);
+        }
 
         /// <summary>
         /// The registered key that may sign an observation (an observer key), or execution evidence or a break-glass record
@@ -524,6 +587,9 @@ public static partial class OfflineVerifier
             "quarantine" => Shapes.Quarantine(payload),
             "remediation" => Shapes.Remediation(payload),
             "review" => Shapes.Review(payload),
+            "grant" => Shapes.Grant(payload),
+            "grant_execution" => Shapes.GrantUse(payload),
+            "grant_revocation" => Shapes.GrantRevocation(payload),
             _ => Shapes.Registry(payload),
         };
 
@@ -579,7 +645,7 @@ public static partial class OfflineVerifier
                 // v1.3.1: the envelope of a record outside the governed path names what its record says.
                 if (EnvelopeFields.TryGetValue(kind, out var fields))
                 {
-                    var wrong = fields.Where(f => TextOrNull(entry, f.Envelope) != TextOrNull(payload, f.Record)).Select(f => f.Envelope).ToList();
+                    var wrong = fields.Where(f => EnvelopeValue(entry, f.Envelope) != EnvelopeValue(payload, f.Record)).Select(f => f.Envelope).ToList();
                     if (wrong.Count > 0) Fail("envelope_mismatch", $"{kind}: {string.Join(", ", wrong)}");
                 }
                 switch (kind)
@@ -611,6 +677,15 @@ public static partial class OfflineVerifier
                         break;
                     case "review":
                         Review(recordId);
+                        break;
+                    case "grant":
+                        Grant(recordId);
+                        break;
+                    case "grant_execution":
+                        GrantUse(recordId);
+                        break;
+                    case "grant_revocation":
+                        GrantRevocation();
                         break;
                     default:
                         Registry();
@@ -767,6 +842,9 @@ public static partial class OfflineVerifier
                 {
                     Result.BreakGlass++;
                     run._matchable.Add(recordId);
+                    // v1.6.0: a judgement matches a grant use, execution evidence and a break-glass record by ID.
+                    if (run._useIds.Contains(recordId)) Fail("duplicate_record", $"break_glass {recordId} is a grant use's ID");
+                    run._otherMatchable.Add(recordId);
                     return;
                 }
                 Result.Observations++;
@@ -810,12 +888,136 @@ public static partial class OfflineVerifier
                 }
             }
 
-            /// <summary>A quarantine entry (v1.3.0): signed by the NA, holding the record whose digest it names.</summary>
+            /// <summary>
+            /// A quarantine entry (v1.3.0): signed by the NA, holding the record whose digest it names. An authentic one of a
+            /// grant use (v1.6.0) that continued its chain is the chain's head.
+            /// </summary>
             private void Quarantine()
             {
+                var failures = Result.Failures.Count;
                 NASignature(keys => OutOfBandSignedBy(record, keys), "QuarantineRecord");
+                var authentic = Result.Failures.Count == failures;
                 Result.Quarantined++;
                 if (PayloadDigest(payload.GetProperty("record")) != Str(payload, "record_digest")) Fail("quarantine_digest_mismatch");
+                else if (authentic && Str(payload, "record_kind") == "grant_execution") run.QuarantinedUse(payload.GetProperty("record"));
+            }
+
+            /// <summary>A grant (v1.6.0): signed by the NA; held for its uses and revocation once its signature verifies.</summary>
+            private void Grant(string grantId)
+            {
+                var failures = Result.Failures.Count;
+                NASignature(keys => OutOfBandSignedBy(record, keys), "CapabilityGrant");
+                Result.Grants++;
+                // A grant whose signature fails is not held: its uses and revocation are checked as for a grant the run does not hold.
+                if (Result.Failures.Count == failures)
+                    run._grantsHeld[grantId] = (payload.Deserialize<CapabilityGrant>()!, GrantRecordDigest("CapabilityGrant", payload));
+            }
+
+            /// <summary>
+            /// A grant's revocation (v1.6.0): signed by the NA, of a grant the run holds when it holds the store from its start
+            /// (<c>grant_missing</c>), naming its digest (<c>grant_mismatch</c>), once (<c>duplicate_grant_revocation</c>).
+            /// </summary>
+            private void GrantRevocation()
+            {
+                var failures = Result.Failures.Count;
+                NASignature(keys => OutOfBandSignedBy(record, keys), "GrantRevocationRecord");
+                var authentic = Result.Failures.Count == failures;
+                Result.GrantRevocations++;
+                var grantId = Str(payload, "grant_id")!;
+                if (!run._grantsHeld.TryGetValue(grantId, out var held))
+                {
+                    if (run._contiguous && run._fromStart) Fail("grant_missing", grantId);
+                }
+                else if (Str(payload, "grant_digest") != held.Digest)
+                {
+                    Fail("grant_mismatch", grantId);
+                }
+                if (run._revoked.ContainsKey(grantId)) Fail("duplicate_grant_revocation", grantId);
+                else if (authentic) run._revoked[grantId] = Str(payload, "revoked_at")!;
+            }
+
+            /// <summary>
+            /// A grant use (v1.6.0), signed by its grant's bearer key (a registered executor key of its sovereign): it
+            /// continues its grant's use chain, whose head may be a quarantined use that continued it
+            /// (<c>grant_use_chain_break</c>); names a grant the run holds when it holds the store from its start
+            /// (<c>grant_missing</c>), signed by that grant's bearer key (<c>grant_bearer_mismatch</c>), within the key's
+            /// resource prefix (<c>grant_use_out_of_scope</c>), naming the grant's digest (<c>grant_mismatch</c>); then the
+            /// use rules (<see cref="GrantRules.UseProblem"/>, with the admission codes) with what the run holds: the budget
+            /// counts admitted uses when the run holds the chain from its first use, and the order and time rules compare a
+            /// use with the last admitted one. A use takes the next place of its resource's chain, which the NA assigns in
+            /// the envelope (<c>resource_chain_break</c>); one without a resource has none (<c>envelope_mismatch</c>).
+            /// </summary>
+            private void GrantUse(string useId)
+            {
+                var key = run.FittingKey(kind, payload);
+                Signature(key is not null && OutOfBandSignedBy(payload, [key.PublicKey]), "GrantExecutionEvidence");
+                Result.GrantExecutions++;
+                var use = payload.Deserialize<GrantExecutionEvidence>()!;
+                var grantId = use.GrantId;
+                var received = GrantRecordDigest("GrantExecutionEvidence", payload);
+                var isHeld = run._grantsHeld.TryGetValue(grantId, out var held);
+                var signer = run.KeyNamed(payload);
+                var hasHead = run._chainHeads.TryGetValue(grantId, out var head);
+                if ((hasHead || run._fromStart) && !GrantRules.ContinuesChain(use, hasHead ? head! : new UseChainHead(0, null)))
+                    Fail("grant_use_chain_break", grantId);
+                if (!isHeld)
+                {
+                    if (run._contiguous && run._fromStart) Fail("grant_missing", grantId);
+                }
+                else if (!IsObject(payload, "signature", out var sig) || Str(sig, "key_id") != held.Grant.BearerKeyId
+                         || use.ExecutorSovereignId != held.Grant.BearerSovereignId
+                         || (signer is not null && signer.PublicKey != held.Grant.BearerPublicKey))
+                {
+                    Fail("grant_bearer_mismatch", useId);
+                }
+                if (signer?.ResourcePrefix is { } prefix && !(use.ResourceId ?? "").StartsWith(prefix, StringComparison.Ordinal))
+                    Fail("grant_use_out_of_scope", $"signing key covers only resources starting with {prefix}");
+                if (isHeld && use.GrantDigest != held.Digest) Fail("grant_mismatch", grantId);
+                if (use.UseSequence == 1) run._admittedUses.TryAdd(grantId, 0);
+                var token = payload.GetProperty("time_token");
+                var tokenKeys = Str(token, "issued_at") is { } issued && TryReadTimestamp(issued, out var at) ? run.KeysAt(at)
+                    : run._history is null ? run._naKeys : [];
+                var tokenPlace = PayloadInteger(token, "use_sequence");
+                var named = tokenPlace is > 0 && run._useHeads.TryGetValue(UseKey(grantId, (int)tokenPlace), out var n) ? n : null;
+                try
+                {
+                    if (GrantRules.UseProblem(use, new UseCheck
+                    {
+                        Grant = isHeld ? held.Grant : null,
+                        Previous = run._lastAdmitted.GetValueOrDefault(grantId),
+                        Admitted = run._admittedUses.TryGetValue(grantId, out var admitted) ? admitted : null,
+                        TokenHead = named,
+                        TokenKeys = tokenKeys,
+                        RawToken = token,
+                        RevokedAt = run._revoked.GetValueOrDefault(grantId),
+                        RecordedAt = Str(entry, "recorded_at"),
+                    }) is { } problem)
+                        Fail(problem.Code, problem.Detail);
+                }
+                catch (ArgumentException e)
+                {
+                    // A time the use's checks cannot read: the entry's own, as the shapes accepted the records'.
+                    Fail("payload_invalid", e.Message);
+                }
+                run._chainHeads[grantId] = new UseChainHead(use.UseSequence, received);
+                run._lastAdmitted[grantId] = GrantRules.NextPreviousUse(use);
+                if (run._admittedUses.TryGetValue(grantId, out var count)) run._admittedUses[grantId] = count + 1;
+                run._useHeads[UseKey(grantId, use.UseSequence)] = new TokenHead(received, use.ExecutedAt);
+                var position = entry.TryGetProperty("resource_sequence", out var p) && p.ValueKind != JsonValueKind.Null ? PayloadInteger(p) : null;
+                if (use.ResourceId is { } resourceId)
+                {
+                    var hasResource = run._resourceHeads.TryGetValue(resourceId, out var resourceHead);
+                    if ((hasResource || run._fromStart) && position != (hasResource ? resourceHead.Sequence + 1 : 1))
+                        Fail("resource_chain_break", resourceId);
+                    run._resourceHeads[resourceId] = (position ?? 0, received);
+                }
+                else if (entry.TryGetProperty("resource_sequence", out var given) && given.ValueKind != JsonValueKind.Null)
+                {
+                    Fail("envelope_mismatch", "grant_execution: resource_sequence");
+                }
+                if (run._otherMatchable.Contains(useId)) Fail("duplicate_record", $"grant_execution {useId} is another record's ID");
+                run._useIds.Add(useId);
+                run._matchable.Add(useId);
             }
 
             private void Decision(string decisionId)
@@ -869,7 +1071,10 @@ public static partial class OfflineVerifier
                     Fail("evidence_chain_break");
                 }
                 run._lastExecution[decisionId] = payload.Clone();
-                run._matchable.Add(Str(payload, "evidence_id")!);
+                var evidenceId = Str(payload, "evidence_id")!;
+                run._matchable.Add(evidenceId);
+                if (run._useIds.Contains(evidenceId)) Fail("duplicate_record", $"execution {evidenceId} is a grant use's ID");
+                run._otherMatchable.Add(evidenceId);
                 TryReadTimestamp(Str(payload, "executed_at")!, out var executed);
                 run._executed[Str(payload, "evidence_id")!] = new(Str(payload, "resource_id"), seq, executed,
                     Str(payload, "executor_sovereign_id")!, decisionId);
@@ -936,6 +1141,17 @@ public static partial class OfflineVerifier
     /// <summary>A field as an envelope comparison reads it: its text, or null when absent or null (the record shapes allow nothing else).</summary>
     private static string? TextOrNull(JsonElement obj, string name) =>
         obj.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    /// <summary>
+    /// An envelope field or the record field it names, as JavaScript's strict equality compares them: a string by its
+    /// text, a number by its value (<c>7</c> is <c>7.0</c>); null for null, an absent field or anything else.
+    /// </summary>
+    private static string? EnvelopeValue(JsonElement obj, string name) =>
+        !obj.TryGetProperty(name, out var value) ? null
+        : value.ValueKind == JsonValueKind.String ? "s" + value.GetString()
+        : value.ValueKind == JsonValueKind.Number
+            ? "n" + (PayloadInteger(value)?.ToString(CultureInfo.InvariantCulture) ?? value.GetRawText())
+            : null;
 
     /// <summary>
     /// An integer in a payload, as JavaScript reads one (TypeScript <c>Number.isSafeInteger</c>): a number with no
