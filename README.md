@@ -1419,7 +1419,7 @@ operator's reach and checks an export against them (1.9.0, as the reference's
 `verify_store_anchors` and `check_events_against_anchors`):
 
 ```csharp
-var anchors = OfflineVerifier.ParseAnchors(heldAnchorsJson);  // the copies you hold
+var anchors = OfflineVerifier.ParseAnchors(heldAnchorsJson);  // the copies you hold, in order
 var chain = OfflineVerifier.VerifyStoreAnchors(anchors, new AnchorVerifyOptions
 {
     KeyHistory = history,          // each anchor signed by the key valid at its anchored_at
@@ -1434,9 +1434,11 @@ OfflineVerifier.CheckEventsAgainstAnchors(events, anchors, run);
   `na_key_not_valid_at_time` under a key history), the sovereign
   (`anchor_sovereign_mismatch`), the anchor chain (`anchor_sequence_gap`,
   `anchor_chain_break`) and heads that only move forward
-  (`anchor_not_increasing`). The run may start after anchor 1. It needs the
-  NA's keys or key history, or `SkipSignatures` for a check of the database
-  without them.
+  (`anchor_not_increasing`), in `anchor_sequence` order. The run may start
+  after anchor 1. It needs the NA's keys or key history, or `SkipSignatures`
+  for a check of the database without them. `ParseAnchors` reads an array of
+  anchors or a page of the anchors route, and refuses an anchor that is not
+  well formed.
 - `CheckEventsAgainstAnchors` ties the run at its start (entry 1, a retention
   checkpoint in the run, or with `FromAnchor` a held anchor its first entry
   continues from; otherwise `export_not_linked_to_anchors`) and at its end

@@ -60,18 +60,22 @@ public static partial class OfflineVerifier
     public static string AnchorDigest(StoreAnchor anchor) => Sha256Hex(AnchorCanonical(anchor));
 
     /// <summary>
-    /// Store anchors read from their JSON (an array, as <c>GET /admin/evidence/anchors</c> serves them), each well formed
-    /// as the reference reads one: positive positions, a UTC <c>anchored_at</c>, and no field the anchor does not have.
+    /// Store anchors read from their JSON: an array of anchors, or a page of <c>GET /admin/evidence/anchors</c> (its
+    /// <c>anchors</c>). Each must be well formed: positions from 1, a UTC <c>anchored_at</c>, and no field an anchor does
+    /// not have (the reference's model also reads some lax spellings, such as an integer written as text, which this SDK
+    /// refuses). Keep them in <c>anchor_sequence</c> order for <see cref="VerifyStoreAnchors"/>.
     /// </summary>
-    /// <param name="anchorsJson">A JSON array of anchors.</param>
+    /// <param name="anchorsJson">A JSON array of anchors, or a page holding them.</param>
     /// <exception cref="StrictJsonException"><paramref name="anchorsJson"/> is not strict JSON.</exception>
-    /// <exception cref="FormatException">It is not an array, or an item is not a well-formed anchor.</exception>
+    /// <exception cref="FormatException">It is neither, or an item is not a well-formed anchor.</exception>
     public static IReadOnlyList<StoreAnchor> ParseAnchors(string anchorsJson)
     {
         using var doc = StrictJsonReader.Parse(anchorsJson);
-        if (doc.RootElement.ValueKind != JsonValueKind.Array) throw new FormatException("store anchors are a JSON array");
+        var list = doc.RootElement;
+        if (list.ValueKind == JsonValueKind.Object && list.TryGetProperty("anchors", out var page)) list = page;
+        if (list.ValueKind != JsonValueKind.Array) throw new FormatException("store anchors are a JSON array, or a page holding one");
         var anchors = new List<StoreAnchor>();
-        foreach (var item in doc.RootElement.EnumerateArray())
+        foreach (var item in list.EnumerateArray())
         {
             if (!Shapes.Anchor(item)) throw new FormatException("invalid store anchor");
             anchors.Add(ReadPayload<StoreAnchor>(item)!);
@@ -103,9 +107,7 @@ public static partial class OfflineVerifier
             throw new ArgumentException("pass NAPublicKeys or KeyHistory, not both", nameof(options));
         if (!options.SkipSignatures && options.KeyHistory is null && options.NAPublicKeys.Count == 0)
             throw new ArgumentException("pass NAPublicKeys or KeyHistory, or SkipSignatures to check no signature", nameof(options));
-        var records = anchors.Select(a => a is not null && JsonSerializer.SerializeToElement(a) is var e && Shapes.Anchor(e)
-            ? e
-            : throw new ArgumentException("invalid store anchor", nameof(anchors))).ToList();
+        var records = AnchorRecords(anchors);
         var result = new AnchorVerification { Verified = true };
         void Fail(long n, string reason, string detail = "")
         {
@@ -150,6 +152,13 @@ public static partial class OfflineVerifier
         return result;
     }
 
+    /// <summary>Each anchor as the JSON it serializes to, well formed as <see cref="ParseAnchors"/> reads one.</summary>
+    /// <exception cref="ArgumentException">An anchor is null or not well formed.</exception>
+    private static List<JsonElement> AnchorRecords(IReadOnlyList<StoreAnchor> anchors) =>
+        anchors.Select(a => a is not null && JsonSerializer.SerializeToElement(a) is var e && Shapes.Anchor(e)
+            ? e
+            : throw new ArgumentException("invalid store anchor", nameof(anchors))).ToList();
+
     /// <summary>
     /// The retention checkpoint in a run that explains where it starts, as received: the one whose last removed entry is
     /// the one right before <paramref name="first"/>. Pass it as <see cref="EvidenceVerifyOptions.Checkpoint"/>. Null
@@ -186,7 +195,10 @@ public static partial class OfflineVerifier
     /// <param name="result">The run's verification, which gets the failures and the summary.</param>
     /// <param name="options">A deliberate slice, or a run from an anchor; null for neither.</param>
     /// <exception cref="ArgumentNullException"><paramref name="events"/>, <paramref name="anchors"/> or <paramref name="result"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="events"/> or <paramref name="anchors"/> holds a null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="events"/> holds a null, or <paramref name="anchors"/> a null or an anchor that is not well formed
+    /// (as <see cref="ParseAnchors"/> reads one).
+    /// </exception>
     public static void CheckEventsAgainstAnchors(IReadOnlyList<EvidenceEvent> events, IReadOnlyList<StoreAnchor> anchors,
         EvidenceStoreVerification result, AnchorCheckOptions? options = null)
     {
@@ -194,7 +206,7 @@ public static partial class OfflineVerifier
         ArgumentNullException.ThrowIfNull(anchors);
         ArgumentNullException.ThrowIfNull(result);
         if (events.Any(e => e?.Entry is null)) throw new ArgumentException("events holds a null", nameof(events));
-        if (anchors.Any(a => a is null)) throw new ArgumentException("anchors holds a null", nameof(anchors));
+        AnchorRecords(anchors);
         options ??= new AnchorCheckOptions();
         void Fail(long? sequence, string reason, string detail = "")
         {

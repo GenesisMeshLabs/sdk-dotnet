@@ -128,6 +128,24 @@ public class AnchorTests
         Assert.Throws<ArgumentException>(() => OfflineVerifier.CheckEventsAgainstAnchors([null!], anchors, result));
         Assert.Throws<ArgumentException>(() => OfflineVerifier.CheckEventsAgainstAnchors([], [null!], result));
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.CheckEventsAgainstAnchors([], anchors, null!));
+        // A typed anchor that is not well formed is refused there too: it never counts as matched.
+        var unplaced = OfflineVerifier.ParseAnchors(Case("chain-base-history").GetProperty("anchors").GetRawText())[0];
+        unplaced.StoreSequence = 0;
+        Assert.Throws<ArgumentException>(() => OfflineVerifier.CheckEventsAgainstAnchors([], [unplaced], result));
+        unplaced.StoreSequence = 5;
+        unplaced.EntryDigest = null!;
+        Assert.Throws<ArgumentException>(() => OfflineVerifier.CheckEventsAgainstAnchors([], [unplaced], result));
+    }
+
+    [Fact]
+    public void AnchorsAreReadFromAnArrayOrFromAPageOfTheAnchorsRoute()
+    {
+        var list = Case("chain-base-history").GetProperty("anchors").GetRawText();
+        var page = "{\"count\":3,\"next_after_anchor\":null,\"anchors\":" + list + "}";
+        Assert.Equal(OfflineVerifier.ParseAnchors(list).Select(OfflineVerifier.AnchorDigest),
+            OfflineVerifier.ParseAnchors(page).Select(OfflineVerifier.AnchorDigest));
+        Assert.Throws<FormatException>(() => OfflineVerifier.ParseAnchors("{\"anchors\":{}}"));
+        Assert.Throws<FormatException>(() => OfflineVerifier.ParseAnchors("{\"count\":0}"));
     }
 
     [Fact]
