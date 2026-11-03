@@ -211,5 +211,29 @@ public class GrantsLiveTests
         var latest = (await ops.Grants.GrantUses(grantId, new GrantUsesParams { Limit = 1 })).Uses[0];
         Assert.Equal((third.UseId, "quarantined", "grant_revoked"), (latest.UseId, latest.State, latest.RejectionCode));
         Assert.Contains((await ops.Grants.Grants(new GrantListParams { Status = GrantStatuses.Revoked })).Grants, g => g.GrantId == grantId);
+
+        // The whole store verifies offline: the grant, its admitted uses, the quarantined one in its chain, the revocation.
+        await ExportVerifiesOffline(ops, naKey, grants: 1, uses: 2, revocations: 1);
+    }
+
+    /// <summary>
+    /// The NA's whole export verifies offline (1.9.0), as the NA verifies it: every entry, the grants, their uses and
+    /// revocations with them, and as many of each kind.
+    /// </summary>
+    internal static async Task ExportVerifiesOffline(GenesisMeshClient ops, string naKey, long grants, long uses, long revocations)
+    {
+        var events = new List<EvidenceEvent>();
+        await foreach (var e in ops.EvidenceStore.ExportAll()) events.Add(e);
+        var server = await ops.EvidenceStore.Verify();
+        Assert.True(server.Verified);
+        var offline = OfflineVerifier.VerifyEvidenceEvents(events, new EvidenceVerifyOptions
+        {
+            NAPublicKeys = [naKey],
+            ExecutorKeys = await ops.EvidenceStore.ListExecutorKeys(),
+        });
+        Assert.True(offline.Verified, string.Join("; ", offline.Failures.Select(f => $"{f.StoreSequence} {f.Reason} {f.Detail}")));
+        Assert.Equal((server.CheckedEntries, server.Grants, server.GrantExecutions, server.GrantRevocations, server.Quarantined, server.BreakGlass),
+            (offline.CheckedEntries, offline.Grants, offline.GrantExecutions, offline.GrantRevocations, offline.Quarantined, offline.BreakGlass));
+        Assert.Equal((grants, uses, revocations), (offline.Grants, offline.GrantExecutions, offline.GrantRevocations));
     }
 }

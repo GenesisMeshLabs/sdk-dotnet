@@ -187,5 +187,8 @@ public class GrantHolderLiveTests
         Assert.Equal([RecordOutboxKinds.BreakGlass], (await shortHolder.Sync()).Flushed!.Admitted.Select(e => e.Kind));
         var changes = (await ops.EvidenceStore.ResourceChanges(resource)).Changes.Select(c => (c.Kind, c.GovernedBy));
         Assert.Equal([("grant_execution", "grant"), ("grant_execution", "grant"), ("break_glass", "after_the_fact"), ("break_glass", "after_the_fact")], changes);
+
+        // The whole store verifies offline: both grants, the uses at the NA's resource positions, the revocation.
+        await GrantsLiveTests.ExportVerifiesOffline(ops, naKey, grants: 2, uses: 2, revocations: 1);
     }
 }

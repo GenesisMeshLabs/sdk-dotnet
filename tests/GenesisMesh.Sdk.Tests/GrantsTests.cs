@@ -18,13 +18,10 @@ namespace GenesisMesh.Sdk.Tests;
 public class GrantsTests
 {
     private static readonly string SuitePath = Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "grants.json");
-    private static readonly HashSet<string> KindsRun = new() { "canonical_form", "verify_record", "envelope_parameter", "envelope", "use" };
+    private static readonly HashSet<string> KindsRun = new() { "canonical_form", "verify_record", "envelope_parameter", "envelope", "use", "verify_export" };
 
-    /// <summary>
-    /// <c>issuance</c> is the NA's own decision (an SDK never issues a grant); <c>verify_export</c>: an export's grant
-    /// entries are verified offline in a later step of 1.9.0.
-    /// </summary>
-    private static readonly HashSet<string> KindsNotRun = new() { "issuance", "verify_export" };
+    /// <summary><c>issuance</c> is the NA's own decision: an SDK never issues a grant.</summary>
+    private static readonly HashSet<string> KindsNotRun = new() { "issuance" };
 
     private static JsonElement.ArrayEnumerator Vectors()
     {
@@ -51,6 +48,11 @@ public class GrantsTests
     {
         var v = Vector(id);
         var kind = v.GetProperty("kind").GetString();
+        if (kind == "verify_export")
+        {
+            Assert.Equal(Canonical.FromJson(v.GetProperty("expected").GetRawText()), Canonical.FromJson(ExportOutcome(v.GetProperty("input"))));
+            return;
+        }
         if (kind is "envelope_parameter" or "envelope" or "use")
         {
             Assert.Equal(Canonical.FromJson(v.GetProperty("expected").GetRawText()), Canonical.FromJson(RuleOutcome(kind, v.GetProperty("input"))));
@@ -81,6 +83,33 @@ public class GrantsTests
                 throw new InvalidOperationException($"vector kind {v.GetProperty("kind").GetString()} is not run");
         }
         Assert.Equal(Canonical.FromJson(v.GetProperty("expected").GetRawText()), Canonical.FromJson(JsonSerializer.Serialize(got)));
+    }
+
+    /// <summary>
+    /// An export verified as the reference reports it: its failures by place and reason, unique and in order, and its
+    /// counts (executions always, the others when not 0).
+    /// </summary>
+    internal static string ExportOutcome(JsonElement input)
+    {
+        var r = OfflineVerifier.VerifyEvidenceEvents(OfflineVerifier.ParseExportLines(input.GetProperty("lines").GetString()!), new EvidenceVerifyOptions
+        {
+            NAPublicKeys = input.GetProperty("na_public_keys").EnumerateArray().Select(k => k.GetString()!).ToList(),
+            ExecutorKeys = input.GetProperty("executor_keys").Deserialize<List<ExecutorKeyRecord>>()!,
+            Contiguous = !input.TryGetProperty("contiguous", out var contiguous) || contiguous.GetBoolean(),
+        });
+        var failures = r.Failures.Select(f => (f.StoreSequence, f.Reason)).Distinct()
+            .OrderBy(f => f.StoreSequence ?? 0).ThenBy(f => f.Reason, StringComparer.Ordinal)
+            .Select(f => new Dictionary<string, object?> { ["store_sequence"] = f.StoreSequence, ["reason"] = f.Reason }).ToList();
+        var counts = new Dictionary<string, long> { ["executions"] = r.Executions };
+        foreach (var (name, count) in new (string, long)[]
+        {
+            ("observations", r.Observations), ("judgements", r.Judgements), ("quarantined", r.Quarantined), ("grants", r.Grants),
+            ("grant_executions", r.GrantExecutions), ("grant_revocations", r.GrantRevocations),
+        })
+        {
+            if (count > 0) counts[name] = count;
+        }
+        return JsonSerializer.Serialize(new Dictionary<string, object> { ["verified"] = r.Verified, ["failures"] = failures, ["counts"] = counts });
     }
 
     /// <summary>An envelope, a parameter or a use as the grants rules read it, in the vector's terms.</summary>
