@@ -3488,6 +3488,15 @@ public sealed class RecordSubmission
     [JsonPropertyName("remediation")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public RemediationStatus? Remediation { get; set; }
+
+    /// <summary>
+    /// v1.6.0, for a grant use the NA has just recorded (<c>recorded</c>): the position it gave the use in its resource's
+    /// chain (the use takes none of its own); null for a use without a resource. A <c>duplicate</c> does not send it: its
+    /// position is its entry's (<see cref="EvidenceStoreEntry.ResourceSequence"/>).
+    /// </summary>
+    [JsonPropertyName("resource_sequence")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? ResourceSequence { get; set; }
 }
 
 /// <summary>One observation's answer in a batch (<see cref="EvidenceStoreClient.SubmitObservations"/>).</summary>
@@ -4702,13 +4711,13 @@ public static class RecordOutboxKinds
     public const string BreakGlass = "break_glass";
     /// <summary>A remediation record (<see cref="RemediationRecord"/>).</summary>
     public const string Remediation = "remediation";
-    /// <summary>A grant use. This SDK does not sign them yet; one in an outbox another SDK wrote is submitted.</summary>
+    /// <summary>A grant use (<see cref="GrantExecutionEvidence"/>, 1.9.0).</summary>
     public const string GrantExecution = "grant_execution";
 }
 
 /// <summary>
 /// One signed record in the record outbox (1.9.0), until the NA admits it: an observation, a break-glass record or a
-/// remediation record, or a grant use another SDK kept. The TypeScript and Rust SDKs read and write the same JSON.
+/// remediation record, or a grant use. The TypeScript and Rust SDKs read and write the same JSON.
 /// Entries do not change: the client stores a new one (<c>with</c>) for each attempt.
 /// </summary>
 public sealed record RecordOutboxEntry : IOutboxEntry
@@ -5244,4 +5253,274 @@ public sealed class GrantRevocationRecord
     [JsonPropertyName("signature")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public JsonElement Signature { get; set; }
+}
+
+// ── Pre-issued grants: the NA's calls (1.9.0) ────────────────────────────────
+
+/// <summary>The states of a grant (<see cref="GrantSummary.Status"/>).</summary>
+public static class GrantStatuses
+{
+    /// <summary>Valid now, with uses left.</summary>
+    public const string Active = "active";
+    /// <summary>Not valid yet.</summary>
+    public const string Scheduled = "scheduled";
+    /// <summary>Its budget is spent: every use it allows was admitted.</summary>
+    public const string Exhausted = "exhausted";
+    /// <summary>Past its end.</summary>
+    public const string Expired = "expired";
+    /// <summary>Revoked: by an operator, or by the NA when what it rests on changed.</summary>
+    public const string Revoked = "revoked";
+}
+
+/// <summary>A grant the NA issued (<see cref="GrantsClient.IssueGrant"/>): the signed grant, its first time token and its store entry.</summary>
+public sealed class IssuedGrant
+{
+    /// <summary>The grant, signed by the NA.</summary>
+    [JsonPropertyName("grant")]
+    public CapabilityGrant Grant { get; set; } = new();
+
+    /// <summary>The first time token (<c>use_sequence</c> 0), exactly as the NA signed it: give it to the first use.</summary>
+    [JsonPropertyName("time_token")]
+    public JsonElement TimeToken { get; set; }
+
+    /// <summary>The grant's store entry.</summary>
+    [JsonPropertyName("entry")]
+    public EvidenceStoreEntry Entry { get; set; } = new();
+
+    /// <summary>SHA-256 hex of the entry's canonical JSON.</summary>
+    [JsonPropertyName("entry_digest")]
+    public string EntryDigest { get; set; } = "";
+}
+
+/// <summary>A grant as the NA lists it (<see cref="GrantsClient.Grants"/>).</summary>
+public class GrantSummary
+{
+    /// <summary>The grant's ID.</summary>
+    [JsonPropertyName("grant_id")]
+    public string GrantId { get; set; } = "";
+
+    /// <summary>A value of <see cref="GrantStatuses"/>.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    /// <summary>The executor key that alone can use it.</summary>
+    [JsonPropertyName("bearer_key_id")]
+    public string BearerKeyId { get; set; } = "";
+
+    /// <summary>The bearer key's sovereign.</summary>
+    [JsonPropertyName("bearer_sovereign_id")]
+    public string BearerSovereignId { get; set; } = "";
+
+    /// <summary>The capabilities it grants.</summary>
+    [JsonPropertyName("capabilities")]
+    public List<string> Capabilities { get; set; } = [];
+
+    /// <summary>What it rests on: <c>attestation</c> or <c>agreement</c>.</summary>
+    [JsonPropertyName("basis_kind")]
+    public string BasisKind { get; set; } = "";
+
+    /// <summary>The attestation's or agreement's ID.</summary>
+    [JsonPropertyName("basis_id")]
+    public string BasisId { get; set; } = "";
+
+    /// <summary>When it starts.</summary>
+    [JsonPropertyName("valid_from")]
+    public string ValidFrom { get; set; } = "";
+
+    /// <summary>When it ends.</summary>
+    [JsonPropertyName("valid_until")]
+    public string ValidUntil { get; set; } = "";
+
+    /// <summary>Its budget.</summary>
+    [JsonPropertyName("max_uses")]
+    public int MaxUses { get; set; }
+
+    /// <summary>The uses the NA admitted.</summary>
+    [JsonPropertyName("uses")]
+    public int Uses { get; set; }
+
+    /// <summary>When the NA issued it.</summary>
+    [JsonPropertyName("issued_at")]
+    public string IssuedAt { get; set; } = "";
+
+    /// <summary>The operator key that asked for it.</summary>
+    [JsonPropertyName("issued_by_operator")]
+    public string IssuedByOperator { get; set; } = "";
+
+    /// <summary>Its position in the store.</summary>
+    [JsonPropertyName("store_sequence")]
+    public long StoreSequence { get; set; }
+
+    /// <summary>When it was revoked; null while it is not.</summary>
+    [JsonPropertyName("revoked_at")]
+    public string? RevokedAt { get; set; }
+
+    /// <summary>Why it was revoked (a value of <see cref="GrantRevocationReasons"/>); null while it is not.</summary>
+    [JsonPropertyName("revocation_reason")]
+    public string? RevocationReason { get; set; }
+}
+
+/// <summary>One grant (<see cref="GrantsClient.Grant"/>): its summary, the uses left, the signed grant, its policy versions and its revocation.</summary>
+public sealed class GrantDetail : GrantSummary
+{
+    /// <summary>The uses its budget still allows.</summary>
+    [JsonPropertyName("remaining_uses")]
+    public int RemainingUses { get; set; }
+
+    /// <summary>The positions of its use chain: admitted uses and quarantined uses that continued it.</summary>
+    [JsonPropertyName("chain_length")]
+    public int ChainLength { get; set; }
+
+    /// <summary>The grant, signed by the NA.</summary>
+    [JsonPropertyName("grant")]
+    public CapabilityGrant Grant { get; set; } = new();
+
+    /// <summary>The policy versions it is bound to: deactivating one revokes it.</summary>
+    [JsonPropertyName("policy_versions")]
+    public List<GrantPolicyVersion> PolicyVersions { get; set; } = [];
+
+    /// <summary>Its revocation, signed by the NA; null while it is not revoked, or once retention removed the revocation's entry.</summary>
+    [JsonPropertyName("revocation")]
+    public GrantRevocationRecord? Revocation { get; set; }
+}
+
+/// <summary>A policy version a grant is bound to.</summary>
+public sealed class GrantPolicyVersion
+{
+    /// <summary>The policy.</summary>
+    [JsonPropertyName("policy_id")]
+    public string PolicyId { get; set; } = "";
+
+    /// <summary>Its version.</summary>
+    [JsonPropertyName("version")]
+    public int Version { get; set; }
+}
+
+/// <summary>A page of grants to read (<see cref="GrantsClient.Grants"/>).</summary>
+public sealed class GrantListParams
+{
+    /// <summary>
+    /// <c>active</c> (neither revoked nor ended: also <see cref="GrantStatuses.Scheduled"/> and
+    /// <see cref="GrantStatuses.Exhausted"/> grants), <c>expired</c> or <c>revoked</c>; null for every grant.
+    /// </summary>
+    public string? Status { get; set; }
+
+    /// <summary>Only the grants of this bearer key; null for every key.</summary>
+    public string? BearerKeyId { get; set; }
+
+    /// <summary>Grants a page, 1 to 500; null for the NA's default (100).</summary>
+    public int? Limit { get; set; }
+
+    /// <summary>The previous page's <see cref="GrantList.NextBefore"/>.</summary>
+    public string? Before { get; set; }
+}
+
+/// <summary>A page of grants, newest first by <c>issued_at</c>, then <c>grant_id</c>.</summary>
+public sealed class GrantList
+{
+    /// <summary>The grants.</summary>
+    [JsonPropertyName("grants")]
+    public List<GrantSummary> Grants { get; set; } = [];
+
+    /// <summary>The cursor of the next page (the last grant's ID); null on the last page.</summary>
+    [JsonPropertyName("next_before")]
+    public string? NextBefore { get; set; }
+}
+
+/// <summary>
+/// One position of a grant's use chain (<see cref="GrantsClient.GrantUses"/>). Once retention has removed its store
+/// entry, the NA no longer sends what the entry held: <see cref="RecordedAt"/>, <see cref="ResourceId"/>,
+/// <see cref="ResourceSequence"/> and <see cref="Outcome"/> are null.
+/// </summary>
+public sealed class GrantUseSummary
+{
+    /// <summary>The use's ID.</summary>
+    [JsonPropertyName("use_id")]
+    public string UseId { get; set; } = "";
+
+    /// <summary>Its position in the chain, from 1.</summary>
+    [JsonPropertyName("use_sequence")]
+    public int UseSequence { get; set; }
+
+    /// <summary><c>admitted</c>, or <c>quarantined</c>: a use the NA refused that continued the chain.</summary>
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "";
+
+    /// <summary>Why a quarantined use was refused (a value of <see cref="GrantUseRejectionCodes.All"/>); null when admitted.</summary>
+    [JsonPropertyName("rejection_code")]
+    public string? RejectionCode { get; set; }
+
+    /// <summary>When it ran.</summary>
+    [JsonPropertyName("executed_at")]
+    public string ExecutedAt { get; set; } = "";
+
+    /// <summary>When the NA stored it; null once retention removed its entry.</summary>
+    [JsonPropertyName("recorded_at")]
+    public string? RecordedAt { get; set; }
+
+    /// <summary>Its entry's position in the store.</summary>
+    [JsonPropertyName("store_sequence")]
+    public long StoreSequence { get; set; }
+
+    /// <summary>The resource it changed; null for none.</summary>
+    [JsonPropertyName("resource_id")]
+    public string? ResourceId { get; set; }
+
+    /// <summary>The position the NA gave it in the resource's chain; null when quarantined or without a resource.</summary>
+    [JsonPropertyName("resource_sequence")]
+    public long? ResourceSequence { get; set; }
+
+    /// <summary>A value of <see cref="GrantUseOutcomes"/>; null once retention removed its entry.</summary>
+    [JsonPropertyName("outcome")]
+    public string? Outcome { get; set; }
+}
+
+/// <summary>A page of a grant's use chain to read (<see cref="GrantsClient.GrantUses"/>).</summary>
+public sealed class GrantUsesParams
+{
+    /// <summary>Uses a page, 1 to 500; null for the NA's default (100).</summary>
+    public int? Limit { get; set; }
+
+    /// <summary>The previous page's <see cref="GrantUses.NextBefore"/>: a <c>use_sequence</c>.</summary>
+    public int? Before { get; set; }
+}
+
+/// <summary>A page of a grant's use chain, newest first.</summary>
+public sealed class GrantUses
+{
+    /// <summary>The grant.</summary>
+    [JsonPropertyName("grant_id")]
+    public string GrantId { get; set; } = "";
+
+    /// <summary>The positions of the chain.</summary>
+    [JsonPropertyName("uses")]
+    public List<GrantUseSummary> Uses { get; set; } = [];
+
+    /// <summary>The cursor of the next page (the last position's <c>use_sequence</c>); null on the last page.</summary>
+    [JsonPropertyName("next_before")]
+    public int? NextBefore { get; set; }
+}
+
+/// <summary>A grant an operator revoked (<see cref="GrantsClient.RevokeGrant"/>): the NA's revocation and its store entry.</summary>
+public sealed class GrantRevoked
+{
+    /// <summary>The grant.</summary>
+    [JsonPropertyName("grant_id")]
+    public string GrantId { get; set; } = "";
+
+    /// <summary><see cref="GrantStatuses.Revoked"/>.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    /// <summary>The revocation, signed by the NA.</summary>
+    [JsonPropertyName("revocation")]
+    public GrantRevocationRecord Revocation { get; set; } = new();
+
+    /// <summary>The revocation's store entry.</summary>
+    [JsonPropertyName("entry")]
+    public EvidenceStoreEntry Entry { get; set; } = new();
+
+    /// <summary>SHA-256 hex of the entry's canonical JSON.</summary>
+    [JsonPropertyName("entry_digest")]
+    public string EntryDigest { get; set; } = "";
 }

@@ -814,7 +814,7 @@ public sealed partial class EvidenceStoreClient
     }
 
     /// <summary>A time as the NA writes one, in the RFC 3339 grammar a review takes: UTC, microseconds when not zero, <c>Z</c>.</summary>
-    private static string Rfc3339(DateTimeOffset value)
+    internal static string Rfc3339(DateTimeOffset value)
     {
         var utc = value.UtcDateTime;
         var micros = utc.Ticks % TimeSpan.TicksPerSecond / 10;

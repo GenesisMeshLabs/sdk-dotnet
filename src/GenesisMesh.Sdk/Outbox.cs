@@ -252,6 +252,13 @@ public static class EvidenceOutbox
         return RecordEntry(RecordOutboxKinds.Remediation, record.RemediationId, record, now);
     }
 
+    /// <summary>A new pending record outbox entry for a signed grant use (1.9.0).</summary>
+    public static RecordOutboxEntry RecordEntry(GrantExecutionEvidence use, DateTimeOffset? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(use);
+        return RecordEntry(RecordOutboxKinds.GrantExecution, use.UseId, use, now);
+    }
+
     private static RecordOutboxEntry RecordEntry(string kind, string id, object record, DateTimeOffset? now) => new()
     {
         Id = id,

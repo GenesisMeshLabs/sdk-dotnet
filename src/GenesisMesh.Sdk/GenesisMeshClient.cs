@@ -46,6 +46,12 @@ public sealed class GenesisMeshClient : IDisposable
     /// </summary>
     public EvidenceStoreClient EvidenceStore { get; }
 
+    /// <summary>
+    /// Pre-issued grants (1.9.0): issue, read and revoke grants (admin), and the holder's time tokens and uses, signed
+    /// with the grant's bearer key.
+    /// </summary>
+    public GrantsClient Grants { get; }
+
     /// <summary>The boundary policy lifecycle: validate, publish, activate, deactivate, list and verify (v0.58).</summary>
     public PolicyClient Policy { get; }
 
@@ -68,6 +74,7 @@ public sealed class GenesisMeshClient : IDisposable
         Disclosure = new DisclosureClient(_transport);
         Evidence = new EvidenceClient(_transport);
         EvidenceStore = new EvidenceStoreClient(_transport, opts.Outbox, opts.RecordOutbox);
+        Grants = new GrantsClient(_transport);
         Policy = new PolicyClient(_transport);
         Health = new HealthClient(_transport);
         NA = new NetworkAuthorityClient(_transport);

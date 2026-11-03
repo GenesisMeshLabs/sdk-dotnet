@@ -117,7 +117,7 @@ jobs:
           python3 scripts/check_trx.py TestResults/live --project tests/GenesisMesh.Sdk.Tests/GenesisMesh.Sdk.Tests.csproj
           --only-test EveryCallReturnsWhatTheNASent --only-test APartnerControllerRunsTheLifecycleOnAStandardKey
           --only-test ChangesOutsideTheGovernedPathAreRecordedAndJudged --only-test ADeniedChangeIsRemediatedAndReviewed
-          --only-test ADeniedRotationIsCancelledByRotatingForward
+          --only-test ADeniedRotationIsCancelledByRotatingForward --only-test AGrantIsIssuedUsedAndRevoked
 
   release-train:
     runs-on: ubuntu-latest
