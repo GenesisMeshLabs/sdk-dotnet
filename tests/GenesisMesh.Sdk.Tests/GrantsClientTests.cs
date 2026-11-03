@@ -407,6 +407,20 @@ public class GrantsClientTests
     }
 
     [Fact]
+    public async Task AGapIsRetriedWhenNoEarlierUseOfThisGrantWasRefused()
+    {
+        // A dead letter of another grant, or one later in this grant's chain, leaves this use's gap to close.
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        await outbox.Add(DeadLetter(UseAt(1, "00000000-0000-4000-8000-000000000099"), "grant_use_invalid_signature", null));
+        await outbox.Add(DeadLetter(UseAt(3), "grant_use_invalid_signature", null));
+        await outbox.Add(EvidenceOutbox.RecordEntry(UseAt(2)));
+        using var gm = Client([], NA(_ => Refused(422, "grant_use_chain_gap")), outbox: outbox);
+        var flushed = await gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true });
+        Assert.Equal(["grant_use_chain_gap"], flushed.Pending.Select(e => e.LastError!.Code));
+        Assert.Empty(flushed.DeadLettered);
+    }
+
+    [Fact]
     public async Task AGrantsUsesAreSentInTheirChainsOrder()
     {
         // Kept in the other order (two acts at once, offline): the NA still gets use 1 first.
