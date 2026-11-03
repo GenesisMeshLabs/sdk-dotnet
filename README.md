@@ -52,11 +52,12 @@ idempotent requests, and sign with a key it does not hold (see
 history (see [Health](#health) and [NA](#na)).
 
 From 1.6 it checks a pre-issued grant's NA signature, and from 1.9 it holds
-the grants' records and rules offline: the parameter envelope, a use's place
+the grants' records and rules offline (the parameter envelope, a use's place
 in its chain and the rules it keeps, and uses and time token requests signed
-with the bearer key (see [Pre-issued grants](#pre-issued-grants)).
-Requesting grants, holding time tokens, acting within a grant offline and
-falling back to break-glass live in the
+with the bearer key) and calls the NA's grant routes: issuing, reading and
+revoking grants, time tokens and uses (see
+[Pre-issued grants](#pre-issued-grants)). Holding a grant across runs, acting
+within it while the NA is out of reach and falling back to break-glass live in the
 [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript) and the
 [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust), as does verifying
 grants, their uses and revocations in an evidence export.
@@ -513,8 +514,9 @@ await foreach (var change in client.EvidenceStore.AllResourceChanges("partner:ap
 
 #### The record outbox
 
-A record outbox keeps signed observations and break-glass records until the
-NA admits them, as the outbox keeps execution records:
+A record outbox keeps signed observations and break-glass records (from 1.9.0
+also remediation records and grant uses) until the NA admits them, as the
+outbox keeps execution records:
 
 ```csharp
 using var client = new GenesisMeshClient(new ClientOptions
@@ -523,7 +525,7 @@ using var client = new GenesisMeshClient(new ClientOptions
     RecordOutbox = new FileRecordOutbox("/var/lib/portal/records"),  // not the outbox's directory
 });
 
-var delivery = await client.EvidenceStore.EnqueueRecord(observation);  // or a break-glass record
+var delivery = await client.EvidenceStore.EnqueueRecord(observation);  // or another signed record
 // delivery.Submission when the NA admitted it; otherwise delivery.Queued, pending or a dead letter
 
 var flushed = await client.EvidenceStore.FlushRecords();  // at startup and on a timer
@@ -539,8 +541,8 @@ var flushed = await client.EvidenceStore.FlushRecords();  // at startup and on a
   `EnqueueRecord` returns it as `Queued` without sending it, or, until that
   call has stored it, waits for that call.
 - `FlushRecords` sends break-glass records first, so an observation of the same
-  change finds its break-glass record, then observations in batches of up to
-  100, each in the order added. A batch the NA refuses whole, such as one
+  change finds its break-glass record, then grant uses, then observations in
+  batches of up to 100, then remediation records, each in the order added. A batch the NA refuses whole, such as one
   holding a record it cannot read, is split until the record it refuses is
   tried alone. A batch it throttles (429) halves the client's batches from
   then on. A transient answer that names a wait (`Retry-After`, such as a 429
@@ -557,9 +559,8 @@ var flushed = await client.EvidenceStore.FlushRecords();  // at startup and on a
   resubmission of a record it holds with a `duplicate`.
 - `FileRecordOutbox` writes the format of the TypeScript and Rust SDKs
   (`gm.evidence.record-outbox.v1`), and keeps each record as it was read, so a
-  controller can move between them. A grant use or remediation record one of
-  those SDKs kept there is submitted too: grant uses before the observations,
-  remediation records after them. `EvidenceOutbox.RecordEntry` makes an entry
+  controller can move between them, whichever SDK kept a record.
+  `EvidenceOutbox.RecordEntry` makes an entry
   for your own `IOutbox<RecordOutboxEntry>`, and
   `MemoryOutbox<RecordOutboxEntry>` is for tests.
 
@@ -1517,6 +1518,46 @@ var use = await GrantRecords.SignUse(new GrantUseInput
 }, bearerSigner);
 var problem = GrantRules.UseProblem(use, new UseCheck { Grant = grant, TokenKeys = [naKey] });
 ```
+
+From 1.9.0 the client also calls the NA's grant routes (`client.Grants`):
+
+```csharp
+var issued = await ops.Grants.IssueGrant(new IssueGrantRequest
+{
+    BearerKeyId = "device-key",                 // a registered executor key
+    Capabilities = ["secret.rotate"],
+    AttestationId = attestation.AttestationId,  // or an Agreement the NA trusts
+    ValidUntil = DateTimeOffset.UtcNow.AddHours(4),
+    MaxUses = 3,
+    ParameterEnvelope = new Dictionary<string, EnvelopeParameter>
+    {
+        ["lifetime_days"] = new(true, null, null,
+            new NumericRange("integer", GrantNumber.Of(1), GrantNumber.Of(60), false, false)),
+    },
+});
+// issued.Grant; issued.TimeToken, as the NA signed it, for the first use
+
+// The holder signs with the bearer key; its client needs no operator key.
+var submitted = await device.Grants.SubmitGrantUse(use);  // or device.EvidenceStore.EnqueueRecord(use)
+var request = await GrantRecords.SignTimeTokenRequest(new TimeTokenRequestInput
+{
+    GrantId = issued.Grant.GrantId,
+    UseSequence = 1,                            // the uses made, and the last one's digest
+    UseHeadDigest = GrantRules.UseDigest(use),
+}, bearerSigner);
+var token = await device.Grants.RequestTimeToken(request);  // for the next use
+```
+
+- `Grants` and `AllGrants`, `Grant`, and `GrantUses` and `AllGrantUses` read
+  grants and a grant's use chain (read tier); `IssueGrant` and `RevokeGrant`
+  need the privileged tier.
+- The NA refuses a grant an applied policy could deny (`ValidationException`,
+  `grant_gate_may_deny`), and a time token for a grant that can no longer be
+  used (`ConflictException`: `grant_expired`, `grant_revoked`,
+  `grant_budget_exhausted` or `grant_bearer_key_retired`).
+- A use it refuses for good is kept as a quarantine entry
+  (`Details.quarantine_id`) and keeps its place in the chain. In the record
+  outbox it is a dead letter naming that entry.
 
 The SDK runs the shared `grants` suite's signed-form, signature, envelope,
 envelope parameter and use vectors

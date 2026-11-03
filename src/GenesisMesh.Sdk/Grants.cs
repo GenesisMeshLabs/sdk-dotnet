@@ -81,6 +81,26 @@ public readonly struct GrantNumber : IEquatable<GrantNumber>, IComparable<GrantN
         return true;
     }
 
+    /// <summary>An integer, exactly (an envelope's bound, for <see cref="NumericRange"/>).</summary>
+    /// <param name="value">The integer.</param>
+    public static GrantNumber Of(long value) => new(new BigInteger(value));
+
+    /// <summary>An integer, exactly: up to 2^64 - 1.</summary>
+    /// <param name="value">The integer.</param>
+    /// <exception cref="ArgumentOutOfRangeException">It does not fit 64 bits (-2^63 to 2^64 - 1).</exception>
+    public static GrantNumber Of(BigInteger value) => value < MinInteger || value > MaxInteger
+        ? throw new ArgumentOutOfRangeException(nameof(value), value, "integers must fit in 64 bits")
+        : new GrantNumber(value);
+
+    /// <summary>A number as the reference holds it: an integral one as an integer (<c>5.0</c> is <c>5</c>).</summary>
+    /// <param name="value">The number.</param>
+    /// <exception cref="ArgumentOutOfRangeException">It is not finite, or is integral beyond 64 bits.</exception>
+    public static GrantNumber Of(double value)
+    {
+        if (!double.IsFinite(value)) throw new ArgumentOutOfRangeException(nameof(value), value, "numbers must be finite");
+        return double.IsInteger(value) ? Of(new BigInteger(value)) : new GrantNumber(value);
+    }
+
     /// <summary>The number in JSON: an integer's digits, any other number as the reference prints a float.</summary>
     public override string ToString() => _isFraction ? Canonical.FloatRepr(_fraction) : _integer.ToString(CultureInfo.InvariantCulture);
 

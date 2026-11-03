@@ -127,6 +127,23 @@ public sealed partial class EvidenceStoreClient
     }
 
     /// <summary>
+    /// Keeps a grant use signed with its bearer key (<see cref="GrantRecords.SignUse"/>) in the record outbox and
+    /// submits it, as <see cref="EnqueueRecord(ObservationRecord, CancellationToken)"/> does an observation. A grant's
+    /// uses are admitted in their chain's order: one the NA cannot place yet (<c>grant_use_chain_gap</c>) or that is
+    /// dated past its clock (<c>grant_use_in_future</c>) stays pending; one it refuses for good is quarantined and
+    /// kept as a dead letter naming its quarantine entry.
+    /// </summary>
+    /// <exception cref="OutboxException">
+    /// No record outbox is configured (<c>record_outbox_required</c>), or it cannot be read.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">The record outbox holds another record with the same ID.</exception>
+    public async Task<RecordDelivery> EnqueueRecord(GrantExecutionEvidence use, CancellationToken ct = default)
+    {
+        var outbox = RequireRecordOutbox();
+        return await Enqueued(outbox, EvidenceOutbox.RecordEntry(use), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Submits the record outbox's pending records: break-glass records first, then grant uses, then observations up
     /// to 100 at a time, then remediation records, each in the order they were added. A batch the NA refuses whole (a
     /// record it cannot read) or that is larger than it takes is split in halves until the record it refuses is tried
