@@ -151,6 +151,22 @@ public sealed class OutOfBandRecordException : GenesisMeshException
     }
 }
 
+/// <summary>
+/// The NA's state table does not allow what was asked of a change's remediation state (1.9.0;
+/// <see cref="RemediationRules.NextState"/>), refused before anything ran: <see cref="GenesisMeshException.Code"/> is
+/// the NA's code, such as <c>remediation_not_due</c> or <c>remediation_already_recorded</c>.
+/// </summary>
+public sealed class TransitionRefusedException : GenesisMeshException
+{
+    /// <summary>A transition refused with <paramref name="code"/> for <paramref name="detail"/>.</summary>
+    /// <param name="code">The NA's code.</param>
+    /// <param name="detail">What was refused.</param>
+    public TransitionRefusedException(string code, string detail)
+        : base(0, code, detail, "genesismesh: " + detail)
+    {
+    }
+}
+
 /// <summary>HTTP 400 — request body failed validation.</summary>
 public sealed class BadRequestException : GenesisMeshException
 {

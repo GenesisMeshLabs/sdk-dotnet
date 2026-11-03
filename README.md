@@ -879,6 +879,77 @@ else if (!outcome.Governed.Authorized)
   `StrictJsonException`, `NetworkException` or the NA's refusal) comes after
   the action ran: do not run it again.
 
+#### Cancelling a denied change, and urgent changes
+
+From 1.9 two helpers build on governed actions for the NA's remediation
+records (1.4.0 of the protocol), as TypeScript's do.
+
+`CancelByRotatingForward` cancels a denied change to a versioned resource
+others read, when the NA's plan is `rotate_forward_then_disable`. A credential
+is never rolled back:
+
+```csharp
+var result = await Governance.CancelByRotatingForward(client, executor, new RotateForwardOptions<string>
+{
+    Remediation = due,                                   // from the due queue: remediation_due or overdue
+    DeniedVersionId = due.ChangeVersionId!,
+    Rotation = new GovernedActionRequest
+    {
+        RequestedCapability = "partner-secret.rotate", AttestationId = attestation.AttestationId,
+        Verify = new GovernedVerification { OperatorPublicKeys = [naKey], ExpectedPolicies = policies, ExpectedAttestation = attestation },
+    },
+    Rotate = async (decision, ct) => new RotatedVersion<string> { VersionId = await IssueNewVersion(ct) },  // readers move to it
+    Disable = (version, ct) => DisableVersion(version, ct),
+});
+// result.Rotation: the governed rotation; result.Remediation: the record naming it and the disabled version.
+```
+
+1. A governed rotation issues a new version under a decision of its own. Its
+   execution evidence names the version (`execution_parameters.version_id`),
+   so observers match it instead of judging it again. A DENY returns without
+   changing anything.
+2. `Disable` then disables the denied version: the readers already have the
+   new one.
+3. The remediation record names the rotation's evidence, the new version and
+   the disabled one. It is kept in the record outbox, or submitted without
+   one. The NA admits it once it holds the rotation's evidence, so flush the
+   evidence outbox first.
+
+The state, the plan and the denied version are checked before anything runs:
+- a state that takes no record throws `TransitionRefusedException`
+  (`remediation_not_due`, `remediation_already_recorded`);
+- a plan that is no forward rotation is `remediation_steps_mismatch`.
+
+The record is checked before the denied version is disabled, so a record the
+NA would refuse never follows a disable. Once the rotation has run, a failure
+throws `RemediationNotRecordedException`, with the rotation's evidence and the
+signed record when there is one. Do not rotate again.
+
+`UrgentAction` makes a change that is never blocked and always governed and
+judged:
+
+```csharp
+var urgent = await Governance.UrgentAction(client, executor, request, new EmergencyOptions
+{
+    Capability = "partner-secret.emergency-rotate",      // the one capability an emergency policy selects
+    Justification = "incident 42: rotate the leaked key now",
+    ExpectedPolicies = emergencyPolicies,
+}, (decision, ct) => Rotate(decision, ct));
+// urgent.Path: ordinary, emergency or break_glass; urgent.Outcome: the change.
+```
+
+- **The ordinary capability** is evaluated first; an ALLOW runs the action
+  under it.
+- **On a DENY,** the emergency capability is requested, with the
+  justification in its justification parameter. The NA decides under the
+  emergency policy, and reviews the change after it.
+- **When the NA cannot be reached,** times out or answers a 5xx or a 429, the
+  action runs under break-glass naming the emergency capability, and the NA
+  judges it once it is back.
+
+Break-glass needs a record outbox, an attestation basis and a resource: all of
+it is checked before anything is evaluated.
+
 #### A partner controller on a standard key
 
 [`PartnerLifecycleTests`](https://github.com/GenesisMeshLabs/sdk-dotnet/blob/main/tests/GenesisMesh.Sdk.Tests/PartnerLifecycleTests.cs)
