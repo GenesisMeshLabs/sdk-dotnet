@@ -9,55 +9,62 @@
 
 ## Scope
 
-This SDK covers the Network Authority's trust API: the sub-clients
-below (agreements, boundary decisions and from 1.9 policy-aware evaluation,
-boundary policies, trust evidence, attestations, selective disclosure,
-consensus and data usage), offline verification of their signed records, and
-signed admin calls to any other route. It is growing to the TypeScript SDK's
-governed lifecycle (decision 0008 of the core). From 1.9 it records and
-submits execution evidence, reads where each resource's chain ends, and reads
-and administers the store: its status, the NA's verification of it, resource
-and vendor histories, the export, executor keys and retention (see
-[EvidenceStore](#evidencestore)). It runs governed actions with the evidence
-outbox, break-glass when the NA cannot be reached, and reconciliation (see
-[Governed actions](#governed-actions)), and verifies an export offline (see
-[Verifying an export](#verifying-an-export)).
-It signs observations and break-glass records, the changes made outside the
-governed path, submits and judges them, keeps them in a record outbox until the
-NA admits them, and reads each resource's changes (see
-[Changes outside the governed path](#changes-outside-the-governed-path)).
-From 1.9 it also carries the NA's 1.4.0 remediation and reviews: the rules,
-the due queue, remediation records and reviews, cancelling a denied change by
-rotating forward and urgent changes (see
-[Remediation and reviews](#remediation-and-reviews)), and verifies their
-entries in an export. It verifies every entry kind of the store in an
-export, key successions and archive records included, and a range of an
-audit pack with its cited entries, and checks an export against the store
-anchors an auditor holds (see [Store anchors](#store-anchors)).
-A boundary policy with the 1.4.0 sections (`remediation`, `review_required`,
-`emergency`) verifies here like any other.
+From 1.9 this SDK is a governed client of the Network Authority, as the
+TypeScript SDK is (decision 0008 of the core). The node identity and the edge
+agent stay in the Rust SDK.
 
-From 1.5 it reads the NA's key history (see
-[NA key history](#na-key-history)), so decisions and agreements signed before
-and after a key succession keep verifying. Audit packs and their
-verification are not part of this SDK yet: they live in the core
-(`genesis-mesh audit pack`, `genesis-mesh audit verify`), the TypeScript SDK
-(`verifyAuditPack`) and the Rust SDK's standalone verifier
-`genesis-mesh-verify`.
+**Calls to the NA**
+- The trust API: agreements, boundary decisions and policy-aware evaluation,
+  boundary policies, trust evidence, attestations, selective disclosure,
+  consensus and data usage (see [Sub-clients](#sub-clients)), the NA's health
+  and key history (see [Health](#health) and [NA](#na)), and signed admin
+  calls to any other route (see [Raw admin calls](#raw-admin-calls)).
+- The evidence store (1.9): execution evidence and where each resource's chain
+  ends; the store's status, the NA's verification of it, resource and vendor
+  histories, the export, executor keys and retention; store anchors, audit
+  packs and archives (see [EvidenceStore](#evidencestore)).
+- Changes outside the governed path (1.9): observations and break-glass
+  records, signed, submitted and judged, kept in a record outbox until the NA
+  admits them (see
+  [Changes outside the governed path](#changes-outside-the-governed-path)).
+- Remediation and reviews (1.9), the NA's 1.4.0 rules: the due queue,
+  remediation records and reviews (see
+  [Remediation and reviews](#remediation-and-reviews)).
+- Grants (1.9): issuing, reading and revoking pre-issued grants, time tokens
+  and uses (see [Pre-issued grants](#pre-issued-grants)).
 
-From 1.9 a client can serve several NA instances with failover, retry
-idempotent requests, and sign with a key it does not hold (see
-[Client options](#client-options)). It also reads the NA's health and its key
-history (see [Health](#health) and [NA](#na)).
+**Governed actions** (1.9)
+- `Governance.GovernedAction` runs a change under a decision with the evidence
+  outbox, and reconciles resources; break-glass when the NA cannot be reached;
+  cancelling a denied change by rotating forward, and urgent changes (see
+  [Governed actions](#governed-actions)).
+- A `GrantHolder` acts within a pre-issued grant while the NA is out of reach,
+  and falls back to break-glass past it (see
+  [Holding a grant](#holding-a-grant-190)).
 
-From 1.6 it checks a pre-issued grant's NA signature, and from 1.9 it holds
-the grants' records and rules offline (the parameter envelope, a use's place
-in its chain and the rules it keeps, and uses and time token requests signed
-with the bearer key), calls the NA's grant routes (issuing, reading and
-revoking grants, time tokens and uses), and holds a grant: a `GrantHolder` acts
-within it while the NA is out of reach and falls back to break-glass past it,
-and verifies grants, their uses and revocations in an export (see
-[Pre-issued grants](#pre-issued-grants)).
+**Offline verification**, with canonical JSON and Ed25519 only and the
+reference's reason codes (see [Offline verification](#offline-verification))
+- The NA's signed records: agreements, boundary decisions with their policy
+  and attestation bindings, license policies and data access intents, and from
+  1.9 boundary policies, attestations, treaties and revocation feeds. A policy
+  with the 1.4.0 sections (`remediation`, `review_required`, `emergency`)
+  verifies like any other.
+- The NA's key history (1.5), so records signed before and after a key
+  succession keep verifying (see [NA key history](#na-key-history)).
+- A pre-issued grant's signature (1.6), and from 1.9 the grants' rules: the
+  parameter envelope, a use's place in its chain, and uses and time token
+  requests signed with the bearer key.
+- An export (1.9): every entry kind of the store, checked against the store
+  anchors an auditor holds (see [Verifying an export](#verifying-an-export) and
+  [Store anchors](#store-anchors)).
+- Audit packs (1.9): a pack verified from the root key and the anchors held,
+  its report, and its completeness against a change log from outside Genesis
+  Mesh (see [Audit packs](#audit-packs) and
+  [Completeness against an outside log](#completeness-against-an-outside-log)).
+
+**The transport** (1.9): one client serves several NA instances with
+failover, retries idempotent requests, and signs with a key it does not hold
+(see [Client options](#client-options)).
 
 ## Install
 
