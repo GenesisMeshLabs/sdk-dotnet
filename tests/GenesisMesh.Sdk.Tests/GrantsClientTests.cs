@@ -319,6 +319,111 @@ public class GrantsClientTests
         Assert.Throws<ArgumentNullException>(() => EvidenceOutbox.RecordEntry((GrantExecutionEvidence)null!));
     }
 
+    [Theory]
+    [InlineData(201, "")]
+    [InlineData(204, "")]
+    [InlineData(201, """{"time_token":null}""")]
+    public async Task AnAnswerWithoutATimeTokenIsOneThatCouldNotBeRead(int status, string body)
+    {
+        using var gm = Client([], _ => new HttpResponseMessage((HttpStatusCode)status) { Content = new StringContent(body, Encoding.UTF8, "application/json") });
+        var request = await GrantRecords.SignTimeTokenRequest(new TimeTokenRequestInput { GrantId = "g-1", UseSequence = 0 }, Bearer);
+        Assert.Equal(NetworkException.ResponseBodyUnreadable, (await Assert.ThrowsAsync<NetworkException>(() => gm.Grants.RequestTimeToken(request))).Code);
+    }
+
+    [Fact]
+    public async Task AnEmptyPageEndsTheReading()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, req => req.RequestUri!.AbsolutePath.EndsWith("/uses", StringComparison.Ordinal)
+            ? Json(200, """{"grant_id":"g-1","uses":[],"next_before":7}""")
+            : Json(200, """{"grants":[],"next_before":"g-9"}"""));
+        await foreach (var _ in gm.Grants.AllGrants()) Assert.Fail("no grant");
+        await foreach (var _ in gm.Grants.AllGrantUses("g-1")) Assert.Fail("no use");
+        Assert.Equal(2, sent.Count);
+    }
+
+    // ── A grant's uses in the record outbox ────────────────────────────────
+
+    /// <summary>A use of <paramref name="grantId"/> at <paramref name="sequence"/> (its signature is not checked here).</summary>
+    private static GrantExecutionEvidence UseAt(int sequence, string grantId = "00000000-0000-4000-8000-000000000010")
+    {
+        var use = SampleUse();
+        use.UseSequence = sequence;
+        use.GrantId = grantId;
+        use.UseId = $"00000000-0000-4000-8000-{sequence:D6}{grantId[^6..]}";
+        return use;
+    }
+
+    private static RecordOutboxEntry DeadLetter(GrantExecutionEvidence use, string code, string? quarantineId) =>
+        EvidenceOutbox.RecordEntry(use) with
+        {
+            State = OutboxStates.DeadLetter,
+            Attempts = 1,
+            LastError = new SubmissionFailure { Status = 422, Code = code, Message = "refused", QuarantineId = quarantineId },
+        };
+
+    private static Func<HttpRequestMessage, HttpResponseMessage> NA(Func<JsonNode, HttpResponseMessage> answer) =>
+        req => answer(JsonNode.Parse(req.Content!.ReadAsStringAsync().Result)!["evidence"]!);
+
+    private static HttpResponseMessage Recorded(JsonNode use) =>
+        Json(201, $$"""{"status":"recorded","entry":{{Entry("grant_execution", use["use_id"]!.GetValue<string>())}},"entry_digest":"55","payload":{{use.ToJsonString()}},"resource_sequence":1}""");
+
+    [Theory]
+    [InlineData("grant_use_invalid_signature", null)]
+    [InlineData("grant_use_malformed", null)]
+    [InlineData("grant_use_conflict", "q-1")]
+    [InlineData("grant_use_chain_mismatch", "q-1")]
+    public async Task AUseBehindOneThatNeverTookItsPlaceIsADeadLetter(string refusal, string? quarantineId)
+    {
+        // Use 1 was refused before it took its place in the chain: the gap it left never closes, and the flush goes on.
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        await outbox.Add(DeadLetter(UseAt(1), refusal, quarantineId));
+        var second = UseAt(2);
+        var other = UseAt(1, "00000000-0000-4000-8000-000000000099");
+        await outbox.Add(EvidenceOutbox.RecordEntry(second));
+        await outbox.Add(EvidenceOutbox.RecordEntry(other));
+        var sent = new List<Sent>();
+        using var gm = Client(sent, NA(use => use["grant_id"]!.GetValue<string>() == other.GrantId ? Recorded(use) : Refused(422, "grant_use_chain_gap")),
+            outbox: outbox);
+        var flushed = await gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true });
+        var dead = Assert.Single(flushed.DeadLettered);
+        Assert.Equal((second.UseId, EvidenceOutbox.PredecessorDeadLettered), (dead.Id, dead.LastError!.Code));
+        Assert.Contains("use 1 of this grant was refused before it took its place in the chain", dead.LastError.Message, StringComparison.Ordinal);
+        Assert.Equal([other.UseId], flushed.Admitted.Select(e => e.Id));
+        Assert.Empty(flushed.Pending);
+    }
+
+    [Fact]
+    public async Task AGapBehindAUseTheNAKeptInTheChainIsRetried()
+    {
+        // Quarantined for a reason that keeps its place: the NA places the next use once it holds this one.
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        await outbox.Add(DeadLetter(UseAt(1), "grant_use_outside_validity", "q-1"));
+        await outbox.Add(EvidenceOutbox.RecordEntry(UseAt(2)));
+        using var gm = Client([], NA(_ => Refused(422, "grant_use_chain_gap")), outbox: outbox);
+        var flushed = await gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true });
+        Assert.Equal(["grant_use_chain_gap"], flushed.Pending.Select(e => e.LastError!.Code));
+        Assert.Empty(flushed.DeadLettered);
+    }
+
+    [Fact]
+    public async Task AGrantsUsesAreSentInTheirChainsOrder()
+    {
+        // Kept in the other order (two acts at once, offline): the NA still gets use 1 first.
+        var outbox = new MemoryOutbox<RecordOutboxEntry>();
+        await outbox.Add(EvidenceOutbox.RecordEntry(UseAt(2)));
+        await outbox.Add(EvidenceOutbox.RecordEntry(UseAt(1)));
+        var order = new List<int>();
+        using var gm = Client([], NA(use =>
+        {
+            order.Add(use["use_sequence"]!.GetValue<int>());
+            return Recorded(use);
+        }), outbox: outbox);
+        var flushed = await gm.EvidenceStore.FlushRecords();
+        Assert.Equal([1, 2], order);
+        Assert.Equal(2, flushed.Admitted.Count);
+    }
+
     // ── Numbers for an envelope's bounds ───────────────────────────────────
 
     [Fact]

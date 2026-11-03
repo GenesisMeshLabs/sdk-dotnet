@@ -3490,8 +3490,9 @@ public sealed class RecordSubmission
     public RemediationStatus? Remediation { get; set; }
 
     /// <summary>
-    /// v1.6.0, for a grant use the NA recorded: the position it gave the use in its resource's chain (the use takes
-    /// none of its own); null for a use without a resource.
+    /// v1.6.0, for a grant use the NA has just recorded (<c>recorded</c>): the position it gave the use in its resource's
+    /// chain (the use takes none of its own); null for a use without a resource. A <c>duplicate</c> does not send it: its
+    /// position is its entry's (<see cref="EvidenceStoreEntry.ResourceSequence"/>).
     /// </summary>
     [JsonPropertyName("resource_sequence")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -5378,7 +5379,7 @@ public sealed class GrantDetail : GrantSummary
     [JsonPropertyName("policy_versions")]
     public List<GrantPolicyVersion> PolicyVersions { get; set; } = [];
 
-    /// <summary>Its revocation, signed by the NA; null while it is not revoked.</summary>
+    /// <summary>Its revocation, signed by the NA; null while it is not revoked, or once retention removed the revocation's entry.</summary>
     [JsonPropertyName("revocation")]
     public GrantRevocationRecord? Revocation { get; set; }
 }

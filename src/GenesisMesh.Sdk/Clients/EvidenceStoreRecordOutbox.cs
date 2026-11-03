@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace GenesisMesh;
 
 // The record outbox (1.9.0): observations and break-glass records kept until the NA admits them, as the TypeScript
@@ -129,9 +131,11 @@ public sealed partial class EvidenceStoreClient
     /// <summary>
     /// Keeps a grant use signed with its bearer key (<see cref="GrantRecords.SignUse"/>) in the record outbox and
     /// submits it, as <see cref="EnqueueRecord(ObservationRecord, CancellationToken)"/> does an observation. A grant's
-    /// uses are admitted in their chain's order: one the NA cannot place yet (<c>grant_use_chain_gap</c>) or that is
-    /// dated past its clock (<c>grant_use_in_future</c>) stays pending; one it refuses for good is quarantined and
-    /// kept as a dead letter naming its quarantine entry.
+    /// uses are admitted in their chain's order, and flushed in it: one the NA cannot place yet
+    /// (<c>grant_use_chain_gap</c>) or that is dated past its clock (<c>grant_use_in_future</c>) stays pending. One it
+    /// refuses for good is a dead letter, naming the quarantine entry the NA kept of an authentic use
+    /// (<see cref="SubmissionFailure.QuarantineId"/>); a use behind one the NA refused before it took its place in the
+    /// chain can never be placed, and is a dead letter too (<see cref="EvidenceOutbox.PredecessorDeadLettered"/>).
     /// </summary>
     /// <exception cref="OutboxException">
     /// No record outbox is configured (<c>record_outbox_required</c>), or it cannot be read.
@@ -144,8 +148,10 @@ public sealed partial class EvidenceStoreClient
     }
 
     /// <summary>
-    /// Submits the record outbox's pending records: break-glass records first, then grant uses, then observations up
-    /// to 100 at a time, then remediation records, each in the order they were added. A batch the NA refuses whole (a
+    /// Submits the record outbox's pending records: break-glass records first, then grant uses in their chain's order,
+    /// then observations up to 100 at a time, then remediation records, each in the order they were added. A grant use
+    /// behind one the NA refused before it took its place in the chain is a dead letter
+    /// (<see cref="EvidenceOutbox.PredecessorDeadLettered"/>). A batch the NA refuses whole (a
     /// record it cannot read) or that is larger than it takes is split in halves until the record it refuses is tried
     /// alone. A batch it throttles (429) halves the batches of this client from then on. A transient answer that names a
     /// wait (<c>Retry-After</c>, such as a 429 or a 503) holds every record back that long, at least 5 seconds and at
@@ -332,7 +338,9 @@ public sealed partial class EvidenceStoreClient
     {
         var run = new RecordRun();
         var pending = (await outbox.List(ct).ConfigureAwait(false)).Where(e => e.State == OutboxStates.Pending).ToList();
-        var entries = FirstKinds.SelectMany(kind => pending.Where(e => e.Kind == kind))
+        var entries = FirstKinds.SelectMany(kind => kind == RecordOutboxKinds.GrantExecution
+                ? pending.Where(e => e.Kind == kind).OrderBy(UseSequence)
+                : pending.Where(e => e.Kind == kind))
             .Concat(pending.Where(e => !FirstKinds.Contains(e.Kind))).ToList();
         var stopped = false;
         for (var i = 0; i < entries.Count;)
@@ -512,10 +520,67 @@ public sealed partial class EvidenceStoreClient
         }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // A gap behind a use not admitted yet is retried; behind a use refused before it took its place, it never closes.
+            var (failure, _) = EvidenceOutbox.ClassifyRecord(e);
+            if (entry.Kind == RecordOutboxKinds.GrantExecution && failure.Code == "grant_use_chain_gap"
+                && await PlaceNeverTaken(outbox, entry, ct).ConfigureAwait(false) is { } earlier)
+            {
+                return new RecordDelivery
+                {
+                    Queued = await KeepRecord(outbox, entry with
+                    {
+                        Attempts = entry.Attempts + 1,
+                        State = OutboxStates.DeadLetter,
+                        NextAttemptAt = null,
+                        LastError = new SubmissionFailure
+                        {
+                            Status = failure.Status,
+                            Code = EvidenceOutbox.PredecessorDeadLettered,
+                            Message = $"use {earlier} of this grant was refused before it took its place in the chain; the NA answered {failure.Code}: {failure.Message}",
+                        },
+                    }).ConfigureAwait(false),
+                };
+            }
             return new RecordDelivery { Queued = await RecordFailed(outbox, entry, e).ConfigureAwait(false) };
         }
         await RemoveRecord(outbox, entry.Id).ConfigureAwait(false);
         return new RecordDelivery { Submission = submission };
+    }
+
+    /// <summary>A grant use's place in its chain, as its record holds it; the end for one it does not hold.</summary>
+    private static long UseSequence(RecordOutboxEntry entry) =>
+        entry.Record.ValueKind == JsonValueKind.Object && entry.Record.TryGetProperty("use_sequence", out var n) && n.TryGetInt64(out var sequence)
+            ? sequence
+            : long.MaxValue;
+
+    /// <summary>
+    /// The place of an earlier use of the same grant that the record outbox holds as a dead letter and that never took
+    /// its place in the chain, or null: the NA refused it without keeping it (no quarantine entry), or kept it as a
+    /// conflict or a chain mismatch, which do not continue the chain. The gap such a use leaves never closes.
+    /// </summary>
+    private static async Task<long?> PlaceNeverTaken(IOutbox<RecordOutboxEntry> outbox, RecordOutboxEntry use, CancellationToken ct)
+    {
+        var grantId = use.Record.ValueKind == JsonValueKind.Object && use.Record.TryGetProperty("grant_id", out var g) ? g.GetString() : null;
+        var place = UseSequence(use);
+        IReadOnlyList<RecordOutboxEntry> held;
+        try
+        {
+            held = await outbox.List(ct).ConfigureAwait(false);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null; // the outbox could not be read: retried as any gap is
+        }
+        foreach (var entry in held)
+        {
+            if (entry.Kind != RecordOutboxKinds.GrantExecution || entry.State != OutboxStates.DeadLetter || entry.Id == use.Id) continue;
+            if (entry.Record.ValueKind != JsonValueKind.Object || !entry.Record.TryGetProperty("grant_id", out var other)
+                || other.ValueKind != JsonValueKind.String || other.GetString() != grantId) continue;
+            var earlier = UseSequence(entry);
+            if (earlier >= place) continue;
+            if (entry.LastError?.QuarantineId is null || entry.LastError.Code is "grant_use_conflict" or "grant_use_chain_mismatch") return earlier;
+        }
+        return null;
     }
 
     /// <summary>

@@ -11,7 +11,14 @@
 - **Grant uses in the record outbox:** `EnqueueRecord(GrantExecutionEvidence)` and `EvidenceOutbox.RecordEntry(GrantExecutionEvidence)`.
 - **`GrantNumber.Of`:** an envelope's bounds from a `long`, a `BigInteger` (up to 2^64 - 1) or a `double` (an integral one as an integer).
 
+### Changed
+
+- **The record outbox sends a grant's uses in their chain's order**, not the order they were added, so uses kept in another order (two acts at once, offline) do not stop each flush at the later one.
+- **A grant use behind one the NA refused before it took its place in the chain is a dead letter** (`evidence_predecessor_dead_lettered`): such a use, refused without a quarantine entry or as a conflict or a chain mismatch, leaves a gap that never closes. The use behind it stayed pending (`grant_use_chain_gap`) and ended every flush that ignored backoff.
+
 ### Differs from TypeScript
+
+- The record outbox's grant uses: as above; TypeScript keeps the order they were added and retries a use behind such a gap.
 
 - `RequestTimeToken` takes a request already signed (`GrantRecords.SignTimeTokenRequest`); TypeScript also signs one when given the bearer key's signer.
 - A time token is a `JsonElement`, kept as the NA signed it, so its signature verifies and a use carries it unchanged.

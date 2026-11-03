@@ -541,8 +541,9 @@ var flushed = await client.EvidenceStore.FlushRecords();  // at startup and on a
   `EnqueueRecord` returns it as `Queued` without sending it, or, until that
   call has stored it, waits for that call.
 - `FlushRecords` sends break-glass records first, so an observation of the same
-  change finds its break-glass record, then grant uses, then observations in
-  batches of up to 100, then remediation records, each in the order added. A batch the NA refuses whole, such as one
+  change finds its break-glass record, then grant uses (a grant's in their
+  chain's order), then observations in batches of up to 100, then remediation
+  records, each in the order added. A batch the NA refuses whole, such as one
   holding a record it cannot read, is split until the record it refuses is
   tried alone. A batch it throttles (429) halves the client's batches from
   then on. A transient answer that names a wait (`Retry-After`, such as a 429
@@ -1555,9 +1556,13 @@ var token = await device.Grants.RequestTimeToken(request);  // for the next use
   `grant_gate_may_deny`), and a time token for a grant that can no longer be
   used (`ConflictException`: `grant_expired`, `grant_revoked`,
   `grant_budget_exhausted` or `grant_bearer_key_retired`).
-- A use it refuses for good is kept as a quarantine entry
-  (`Details.quarantine_id`) and keeps its place in the chain. In the record
-  outbox it is a dead letter naming that entry.
+- An authentic use it refuses for good is kept as a quarantine entry
+  (`Details.quarantine_id`), and keeps its place in the chain unless it was
+  refused as a conflict or a chain mismatch. In the record outbox it is a dead
+  letter naming that entry. A use behind one the NA refused before it took its
+  place can never be placed: the record outbox makes it a dead letter too
+  (`evidence_predecessor_dead_lettered`), and sends a grant's uses in their
+  chain's order.
 
 The SDK runs the shared `grants` suite's signed-form, signature, envelope,
 envelope parameter and use vectors

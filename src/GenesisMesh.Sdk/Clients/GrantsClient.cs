@@ -147,7 +147,7 @@ public sealed class GrantsClient
             var page = await _t.AdminGetAsync<GrantList>("/admin/grants", ListQuery(status, bearerKeyId, limit, before), ct)
                 .ConfigureAwait(false);
             foreach (var grant in page.Grants) yield return grant;
-            if (page.NextBefore is not { } next) yield break;
+            if (page.NextBefore is not { } next || page.Grants.Count == 0) yield break;
             if (next == before) throw new InvalidOperationException("genesismesh: the grant list's cursor did not advance");
             before = next;
         }
@@ -219,7 +219,7 @@ public sealed class GrantsClient
         {
             var page = await _t.AdminGetAsync<GrantUses>(path, UsesQuery(limit, before), ct).ConfigureAwait(false);
             foreach (var use in page.Uses) yield return use;
-            if (page.NextBefore is not { } next) yield break;
+            if (page.NextBefore is not { } next || page.Uses.Count == 0) yield break;
             if (next == before) throw new InvalidOperationException("genesismesh: the use chain's cursor did not advance");
             before = next;
         }
@@ -281,10 +281,10 @@ public sealed class GrantsClient
     public async Task<JsonElement> RequestTimeToken(TimeTokenRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var answer = await _t.PublicPostAsync<TimeTokenAnswer>("/grants/time-tokens",
+        var answer = await _t.PublicPostAsync<TimeTokenAnswer?>("/grants/time-tokens",
             new Dictionary<string, object?> { ["request"] = request }, idempotent: true, ct).ConfigureAwait(false);
         // The NA answered but its answer holds no token: it may have issued one, as for a body that could not be read.
-        return answer.TimeToken.ValueKind == JsonValueKind.Object
+        return answer is { TimeToken.ValueKind: JsonValueKind.Object }
             ? answer.TimeToken
             : throw new NetworkException("the NA's answer holds no time token", null, connectFailed: false,
                 NetworkException.ResponseBodyUnreadable, 201);
@@ -301,13 +301,13 @@ public sealed class GrantsClient
     /// <param name="use">The signed use.</param>
     /// <param name="ct">Cancels the request.</param>
     /// <exception cref="ValidationException">
-    /// The NA refused the use, with a code of <see cref="GrantUseRejectionCodes.All"/>. One it keeps
-    /// (<see cref="GrantUseRejectionCodes.Quarantined"/>) names its quarantine entry in the details
-    /// (<c>quarantine_id</c>), the same one when the use is sent again; <c>grant_use_chain_gap</c> asks for the earlier
-    /// uses first, and <c>grant_use_in_future</c> to send it again later.
+    /// The NA refused the use, with a code of <see cref="GrantUseRejectionCodes.All"/>, <c>grant_not_found</c> for a grant
+    /// it does not hold among them. An authentic use refused for good (<see cref="GrantUseRejectionCodes.Quarantined"/>)
+    /// is kept as a quarantine entry the details name (<c>quarantine_id</c>), the same one when the use is sent again;
+    /// <c>grant_use_chain_gap</c> asks for the earlier uses first, and <c>grant_use_in_future</c> to send it again later.
     /// </exception>
     /// <exception cref="ConflictException">Another use took its place in the chain (<c>grant_use_conflict</c>).</exception>
-    /// <exception cref="NotFoundException">No such grant (<c>grant_not_found</c>).</exception>
+    /// <exception cref="NotFoundException">The NA's grants are off (<c>grants_disabled</c>).</exception>
     public async Task<RecordSubmission> SubmitGrantUse(GrantExecutionEvidence use, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(use);

@@ -152,7 +152,15 @@ public class GrantsLiveTests
         var submitted = await device.Grants.SubmitGrantUse(first);
         Check("grant_use_submit", submitted);
         Assert.Equal(("recorded", 1L), (submitted.Status, submitted.ResourceSequence));
-        Assert.Equal("duplicate", (await device.Grants.SubmitGrantUse(first)).Status);
+        // Sent again: a duplicate, whose position is its entry's.
+        var duplicate = await device.Grants.SubmitGrantUse(first);
+        Assert.Equal(("duplicate", (long?)null, (long?)1), (duplicate.Status, duplicate.ResourceSequence, duplicate.Entry.ResourceSequence));
+        // A use of a grant the NA does not hold: refused (422), not a missing route.
+        var stray = JsonSerializer.Deserialize<CapabilityGrant>(JsonSerializer.Serialize(issued.Grant))!;
+        stray.GrantId = "no-such-grant";
+        var unknown = await Assert.ThrowsAsync<ValidationException>(async () =>
+            await device.Grants.SubmitGrantUse(await GrantRecords.SignUse(Use(1, issued.TimeToken, null) with { Grant = stray }, bearer)));
+        Assert.Equal((422, "grant_not_found"), (unknown.Status, unknown.Code));
 
         // A fresh time token, naming the chain's head.
         var request = await GrantRecords.SignTimeTokenRequest(
