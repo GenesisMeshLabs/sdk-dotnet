@@ -23,7 +23,7 @@ public class CompletenessTests
     private static string Normalized(object value) => Canonical.FromJson(JsonSerializer.Serialize(value));
 
     [Fact]
-    public void HoldsTheCases() => Assert.Equal(145, CaseIds().Count());
+    public void HoldsTheCases() => Assert.Equal(171, CaseIds().Count());
 
     [Theory]
     [MemberData(nameof(CaseIds))]
@@ -91,8 +91,14 @@ public class CompletenessTests
         Assert.Throws<ArgumentException>(() => OfflineVerifier.CheckCompleteness([change with { ChangedAt = "soon" }], [], [], options));
         Assert.Throws<ArgumentException>(() => OfflineVerifier.CheckCompleteness([null!], [], [], options));
         Assert.Throws<ArgumentException>(() => OfflineVerifier.CheckCompleteness([change], [null!], [], options));
-        Assert.Throws<ArgumentException>(() => OfflineVerifier.CheckCompleteness([change], [], [],
-            new CompletenessOptions { From = DateTimeOffset.UnixEpoch, To = DateTimeOffset.UnixEpoch, Tolerance = TimeSpan.FromSeconds(-1) }));
+        // A negative tolerance pairs nothing by time and narrows the period, as the reference reads it.
+        var narrowed = OfflineVerifier.CheckCompleteness([change], [], [], new CompletenessOptions
+        {
+            From = DateTimeOffset.Parse("2026-03-01T11:00:00Z", CultureInfo.InvariantCulture),
+            To = DateTimeOffset.Parse("2026-03-01T12:00:30Z", CultureInfo.InvariantCulture),
+            Tolerance = TimeSpan.FromSeconds(-60),
+        });
+        Assert.Equal((-60L, 0, 1), (narrowed.ToleranceSeconds, narrowed.UnmatchedChanges.Count, narrowed.OutsidePeriod.Count));
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.CheckCompleteness(null!, [], [], options));
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.ParseChanges(null!));
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.ParseRfc3339(null!));

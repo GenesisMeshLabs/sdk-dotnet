@@ -544,7 +544,7 @@ public sealed partial class EvidenceStoreClient
     /// nothing is sent.
     /// </exception>
     public Task<AnchorPage> Anchors(AnchorPageParams? page = null, CancellationToken ct = default) =>
-        _t.AdminGetAsync<AnchorPage>("/admin/evidence/anchors", AnchorQuery(page?.AfterAnchor, page?.Limit), ct);
+        _t.AdminGetAsync<AnchorPage>("/admin/evidence/anchors", AnchorQuery(page?.AfterAnchor, page?.Limit, nameof(page)), ct);
 
     /// <summary>
     /// Every store anchor after <paramref name="afterAnchor"/>, following the pages (read tier): the copies an auditor keeps
@@ -557,11 +557,11 @@ public sealed partial class EvidenceStoreClient
     /// <exception cref="InvalidOperationException">The NA's cursor did not advance.</exception>
     public async Task<IReadOnlyList<StoreAnchor>> AllAnchors(long afterAnchor = 0, CancellationToken ct = default)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(afterAnchor);
+        AnchorQuery(afterAnchor, null, nameof(afterAnchor));
         var anchors = new List<StoreAnchor>();
         for (long? after = afterAnchor; after is { } cursor;)
         {
-            var page = await _t.AdminGetAsync<AnchorPage>("/admin/evidence/anchors", AnchorQuery(cursor, MaxAnchorPage), ct)
+            var page = await _t.AdminGetAsync<AnchorPage>("/admin/evidence/anchors", AnchorQuery(cursor, MaxAnchorPage, nameof(afterAnchor)), ct)
                 .ConfigureAwait(false);
             if (page.NextAfterAnchor is { } next && next <= cursor)
                 throw new InvalidOperationException("genesismesh: the anchor page cursor did not advance");
@@ -629,7 +629,7 @@ public sealed partial class EvidenceStoreClient
     /// POST /admin/evidence/archives
     /// </summary>
     /// <param name="manifest">The pack's manifest as the NA signed it: <see cref="AuditPackResponse.Manifest"/>, or <c>manifest.json</c> read back.</param>
-    /// <param name="location">Where the pack is kept, 1 to 1024 characters.</param>
+    /// <param name="location">Where the pack is kept, 1 to 1024 characters (code points, as the NA counts them).</param>
     /// <param name="ct">Cancels the request.</param>
     /// <exception cref="ArgumentException">
     /// <paramref name="manifest"/> is not a JSON object, or <paramref name="location"/> is not 1 to 1024 characters:
@@ -646,7 +646,7 @@ public sealed partial class EvidenceStoreClient
         if (manifest.ValueKind != JsonValueKind.Object)
             throw new ArgumentException("genesismesh: the manifest is a JSON object", nameof(manifest));
         ArgumentNullException.ThrowIfNull(location);
-        if (location.Length is < 1 or > 1024)
+        if (location.EnumerateRunes().Count() is < 1 or > 1024)
             throw new ArgumentException("genesismesh: the location is 1 to 1024 characters", nameof(location));
         var body = new Dictionary<string, object?> { ["manifest"] = manifest, ["location"] = location };
         return await _t.AdminPostAsync<ArchiveResult>("/admin/evidence/archives", body, idempotent: true, ct).ConfigureAwait(false);
@@ -1065,13 +1065,13 @@ public sealed partial class EvidenceStoreClient
     }
 
     /// <summary>The query of a page of changes; throws for a value out of range.</summary>
-    private static Dictionary<string, string>? AnchorQuery(long? afterAnchor, int? limit)
+    private static Dictionary<string, string>? AnchorQuery(long? afterAnchor, int? limit, string argument)
     {
-        if (afterAnchor is { } a) ArgumentOutOfRangeException.ThrowIfNegative(a, nameof(afterAnchor));
+        if (afterAnchor is { } a) ArgumentOutOfRangeException.ThrowIfNegative(a, argument);
         if (limit is { } l)
         {
-            ArgumentOutOfRangeException.ThrowIfLessThan(l, 1, nameof(limit));
-            ArgumentOutOfRangeException.ThrowIfGreaterThan(l, MaxAnchorPage, nameof(limit));
+            ArgumentOutOfRangeException.ThrowIfLessThan(l, 1, argument);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(l, MaxAnchorPage, argument);
         }
         var query = new Dictionary<string, string>(StringComparer.Ordinal);
         if (afterAnchor is not null) query["after_anchor"] = afterAnchor.Value.ToString(CultureInfo.InvariantCulture);

@@ -95,7 +95,7 @@ public class AuditPackTests
     }
 
     [Fact]
-    public void HoldsTheCases() => Assert.Equal(315, CaseIds().Count());
+    public void HoldsTheCases() => Assert.Equal(318, CaseIds().Count());
 
     private static readonly Lazy<JsonElement> GrantPacks = new(() => JsonDocument.Parse(File.ReadAllText(
         Path.Combine(AppContext.BaseDirectory, "testdata", "audit", "grant_packs.json"))).RootElement);
@@ -250,6 +250,14 @@ public class AuditPackTests
         Assert.Equal([6L, 7, 8, 9, 10, 11], digests.Keys.Order());
         var entries = OfflineVerifier.ParseExportLines(Encoding.UTF8.GetString(files[OfflineVerifier.EntriesFile]));
         Assert.Equal(entries[^1].EntryDigest, digests[11]);
+        // A position held twice keeps its last entry, as the reference's dict does.
+        var lines = Encoding.UTF8.GetString(files[OfflineVerifier.EntriesFile]).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var twice = new Dictionary<string, byte[]>(files)
+        {
+            [OfflineVerifier.EntriesFile] = Encoding.UTF8.GetBytes(string.Join("\n", [.. lines[..^1], lines[^1].Replace("\"recorded_at\":\"2026-01-14T00:00:00Z\"", "\"recorded_at\":\"2026-01-14T00:00:01Z\"", StringComparison.Ordinal), lines[^1]]) + "\n"),
+        };
+        Assert.NotEqual(lines[^1], Encoding.UTF8.GetString(twice[OfflineVerifier.EntriesFile]).Split('\n')[^3]);
+        Assert.Equal(entries[^1].EntryDigest, OfflineVerifier.PackEntryDigests(twice)[11]);
         files.Remove(OfflineVerifier.EntriesFile);
         Assert.Throws<ArgumentException>(() => OfflineVerifier.PackEntryDigests(files));
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.PackEntryDigests(null!));
@@ -323,6 +331,13 @@ public class AuditPackTests
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.VerifyAuditPack(null!, options));
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.VerifyAuditPack(Frozen(), null!));
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.VerifyAuditPack(Frozen(), new VerifyAuditPackOptions { RootPublicKey = null! }));
+        Assert.Throws<ArgumentNullException>(() => OfflineVerifier.VerifyAuditPack(Frozen(), new VerifyAuditPackOptions { RootPublicKey = RootKey(), ExecutorKeys = null! }));
+        Assert.Throws<ArgumentException>(() => OfflineVerifier.VerifyAuditPack(Frozen(), new VerifyAuditPackOptions { RootPublicKey = RootKey(), ExecutorKeys = [null!] }));
+        Assert.Throws<ArgumentException>(() => OfflineVerifier.VerifyAuditPack(Frozen(), new VerifyAuditPackOptions
+        {
+            RootPublicKey = RootKey(),
+            ExecutorKeys = [new ExecutorKeyRecord { KeyId = null!, PublicKey = "k", ExecutorSovereignId = "s" }],
+        }));
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.ReadAuditPackDirectory(null!));
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.PackReasons(null!));
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.RegistryKeys(null!, History()));
@@ -334,5 +349,8 @@ public class AuditPackTests
         using var checks = JsonDocument.Parse("{}");
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.RenderReport(null!, [], checks.RootElement));
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.RenderReport(OfflineVerifier.ReportHeaderOf(new AuditPackManifest()), null!, checks.RootElement));
+        using var notAnObject = JsonDocument.Parse("[]");
+        Assert.Throws<ArgumentException>(() => OfflineVerifier.RenderReport(OfflineVerifier.ReportHeaderOf(new AuditPackManifest()), [], notAnObject.RootElement));
+        Assert.Throws<ArgumentException>(() => OfflineVerifier.RenderReport(OfflineVerifier.ReportHeaderOf(new AuditPackManifest()), [], default));
     }
 }

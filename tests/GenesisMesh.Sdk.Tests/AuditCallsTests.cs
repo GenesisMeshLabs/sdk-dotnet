@@ -67,8 +67,9 @@ public class AuditCallsTests
     {
         var sent = new List<Sent>();
         using var gm = Client(sent, _ => Answer(200, Page(null)));
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => gm.EvidenceStore.Anchors(new AnchorPageParams { Limit = limit, AfterAnchor = after }));
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => gm.EvidenceStore.AllAnchors(-1));
+        Assert.Equal("page", (await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            gm.EvidenceStore.Anchors(new AnchorPageParams { Limit = limit, AfterAnchor = after }))).ParamName);
+        Assert.Equal("afterAnchor", (await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => gm.EvidenceStore.AllAnchors(-1))).ParamName);
         Assert.Empty(sent);
         await gm.EvidenceStore.Anchors(new AnchorPageParams { Limit = 1000 });
         Assert.Equal("/admin/evidence/anchors?limit=1000", sent[0].Path);
@@ -211,9 +212,13 @@ public class AuditCallsTests
         await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.RecordArchive(manifest.RootElement, ""));
         await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.RecordArchive(manifest.RootElement, new string('x', 1025)));
         await Assert.ThrowsAsync<ArgumentNullException>(() => gm.EvidenceStore.RecordArchive(manifest.RootElement, null!));
+        // The NA counts code points: 1024 of them in 2048 UTF-16 units are sent, 1025 are not.
+        var emoji = string.Concat(Enumerable.Repeat("\U0001F600", 1025));
+        await Assert.ThrowsAsync<ArgumentException>(() => gm.EvidenceStore.RecordArchive(manifest.RootElement, emoji));
         Assert.Empty(sent);
         await gm.EvidenceStore.RecordArchive(manifest.RootElement, new string('x', 1024));
-        Assert.Single(sent);
+        await gm.EvidenceStore.RecordArchive(manifest.RootElement, emoji[2..]);
+        Assert.Equal(2, sent.Count);
     }
 
     [Fact]

@@ -21,7 +21,10 @@ public sealed record Change
     [JsonPropertyName("action")]
     public required string Action { get; init; }
 
-    /// <summary>When it was made: RFC 3339 with an offset (<see cref="OfflineVerifier.ParseChanges"/> writes it in UTC).</summary>
+    /// <summary>
+    /// When it was made: a timestamp the evidence store reads (an upper-case <c>T</c>, at most six fraction digits; no
+    /// offset reads as UTC). <see cref="OfflineVerifier.ParseChanges"/> writes it in UTC, as <see cref="OfflineVerifier.ParseRfc3339"/> does.
+    /// </summary>
     [JsonPropertyName("changed_at")]
     public required string ChangedAt { get; init; }
 
@@ -288,64 +291,130 @@ public static partial class OfflineVerifier
         return value[start..end];
     }
 
-    /// <summary>RFC 4180 rows of a CSV text, as Python's <c>csv</c> module reads them; an empty line is a row of no fields.</summary>
+    private enum CsvState { StartRecord, StartField, InField, InQuotedField, QuoteInQuotedField, EatCrnl }
+
+    /// <summary>Python's <c>csv.field_size_limit()</c>: the longest field it reads, in code points.</summary>
+    private const int CsvFieldLimit = 131072;
+
+    /// <summary>
+    /// The rows of a CSV text as Python's <c>csv.reader</c> reads it (the excel dialect, not strict) from lines split at
+    /// LF, as <c>io.StringIO</c> splits them: a <c>"</c> opens a quoted field only at the start of a field, a doubled one
+    /// inside a quoted field is one, and a quote closing a field followed by other text joins it. An empty line is a row of
+    /// no fields. Where Python raises <c>csv.Error</c>, a refusal: a carriage return not followed by the end of its line
+    /// outside quotes, and a field longer than 131072 code points.
+    /// </summary>
     private static List<List<string>> CsvRows(string input)
     {
+        const int Eol = -1;
+        var lines = new List<string>();
+        for (var at = 0; at < input.Length;)
+        {
+            var lf = input.IndexOf('\n', at);
+            var next = lf < 0 ? input.Length : lf + 1;
+            lines.Add(input[at..next]);
+            at = next;
+        }
         var rows = new List<List<string>>();
-        var row = new List<string>();
-        var field = new StringBuilder();
-        var (quoted, touched) = (false, false);
-        void EndRow()
+        var line = 0;
+        while (line < lines.Count)
         {
-            if (touched || row.Count > 0) row.Add(field.ToString());
-            rows.Add(row);
-            row = [];
-            field.Clear();
-            touched = false;
-        }
-        for (var i = 0; i < input.Length; i++)
-        {
-            var ch = input[i];
-            if (quoted)
+            var fields = new List<string>();
+            var field = new StringBuilder();
+            var length = 0;
+            var state = CsvState.StartRecord;
+            void Save()
             {
-                if (ch == '"' && i + 1 < input.Length && input[i + 1] == '"')
-                {
-                    field.Append('"');
-                    i++;
-                }
-                else if (ch == '"')
-                {
-                    quoted = false;
-                }
-                else
-                {
-                    field.Append(ch);
-                }
-            }
-            else if (ch == '"')
-            {
-                quoted = true;
-                touched = true;
-            }
-            else if (ch == ',')
-            {
-                row.Add(field.ToString());
+                fields.Add(field.ToString());
                 field.Clear();
-                touched = true;
+                length = 0;
             }
-            else if (ch is '\n' or '\r')
+            void Add(char c)
             {
-                if (ch == '\r' && i + 1 < input.Length && input[i + 1] == '\n') i++;
-                EndRow();
+                // Code points, as Python counts them: the second half of a surrogate pair adds none.
+                if (!(char.IsLowSurrogate(c) && field.Length > 0 && char.IsHighSurrogate(field[^1])) && ++length > CsvFieldLimit)
+                    throw new FormatException($"a CSV field is longer than {CsvFieldLimit} characters");
+                field.Append(c);
             }
-            else
+            void EndField(int c)
             {
-                field.Append(ch);
-                touched = true;
+                Save();
+                state = c == Eol ? CsvState.StartRecord : CsvState.EatCrnl;
             }
+            void Process(int c)
+            {
+                switch (state)
+                {
+                    case CsvState.StartRecord:
+                        if (c == Eol) return;
+                        if (c is '\n' or '\r')
+                        {
+                            state = CsvState.EatCrnl;
+                            return;
+                        }
+                        state = CsvState.StartField;
+                        goto case CsvState.StartField;
+                    case CsvState.StartField:
+                        if (c is '\n' or '\r' or Eol) EndField(c);
+                        else if (c == '"') state = CsvState.InQuotedField;
+                        else if (c == ',') Save();
+                        else
+                        {
+                            Add((char)c);
+                            state = CsvState.InField;
+                        }
+                        return;
+                    case CsvState.InField:
+                        if (c is '\n' or '\r' or Eol) EndField(c);
+                        else if (c == ',')
+                        {
+                            Save();
+                            state = CsvState.StartField;
+                        }
+                        else Add((char)c);
+                        return;
+                    case CsvState.InQuotedField:
+                        if (c == '"') state = CsvState.QuoteInQuotedField;
+                        else if (c != Eol) Add((char)c);
+                        return;
+                    case CsvState.QuoteInQuotedField:
+                        if (c == '"')
+                        {
+                            Add('"');
+                            state = CsvState.InQuotedField;
+                        }
+                        else if (c == ',')
+                        {
+                            Save();
+                            state = CsvState.StartField;
+                        }
+                        else if (c is '\n' or '\r' or Eol) EndField(c);
+                        else
+                        {
+                            Add((char)c);
+                            state = CsvState.InField;
+                        }
+                        return;
+                    default:
+                        if (c == Eol) state = CsvState.StartRecord;
+                        else if (c is not ('\n' or '\r'))
+                            throw new FormatException("a carriage return inside a CSV line, outside quotes");
+                        return;
+                }
+            }
+            do
+            {
+                // The text ends inside a quoted field: the field ends with it.
+                if (line == lines.Count)
+                {
+                    Save();
+                    break;
+                }
+                foreach (var c in lines[line++]) Process(c);
+                Process(Eol);
+            }
+            while (state != CsvState.StartRecord);
+            rows.Add(fields);
         }
-        // The end of the text ends no row of its own.
-        if (touched || row.Count > 0) EndRow();
         return rows;
     }
 
@@ -393,7 +462,7 @@ public static partial class OfflineVerifier
     private static string PythonStr(JsonElement? value) => value switch
     {
         null => "None",
-        { ValueKind: JsonValueKind.Null } => "None",
+        { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } => "None",
         { ValueKind: JsonValueKind.True } => "True",
         { ValueKind: JsonValueKind.False } => "False",
         { ValueKind: JsonValueKind.String } v => v.GetString()!,
@@ -554,7 +623,7 @@ public static partial class OfflineVerifier
     /// <param name="cited">The pack's cited entries: their judgements say which observation matched which record.</param>
     /// <param name="options">The period the records cover, and the tolerance.</param>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    /// <exception cref="ArgumentException">An argument holds a null, a change's time is not a timestamp, or the tolerance is negative.</exception>
+    /// <exception cref="ArgumentException">An argument holds a null, or a change's time is not a timestamp.</exception>
     public static CompletenessReport CheckCompleteness(IReadOnlyList<Change> changes, IReadOnlyList<EvidenceEvent> entries,
         IReadOnlyList<EvidenceEvent> cited, CompletenessOptions options)
     {
@@ -564,7 +633,6 @@ public static partial class OfflineVerifier
         ArgumentNullException.ThrowIfNull(options);
         if (changes.Any(c => c is null)) throw new ArgumentException("changes holds a null", nameof(changes));
         if (entries.Concat(cited).Any(e => e?.Entry is null)) throw new ArgumentException("the entries hold a null", nameof(entries));
-        if (options.Tolerance < TimeSpan.Zero) throw new ArgumentException("the tolerance is negative", nameof(options));
         var at = new Dictionary<Change, long>(ReferenceEqualityComparer.Instance);
         foreach (var c in changes)
             at[c] = TryReadTimestamp(c.ChangedAt, out var t) ? t : throw new ArgumentException($"change {c.Index}: changed_at is not a timestamp", nameof(changes));

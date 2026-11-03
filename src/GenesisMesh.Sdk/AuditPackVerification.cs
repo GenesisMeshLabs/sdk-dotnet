@@ -506,7 +506,10 @@ public static partial class OfflineVerifier
     {
         ArgumentNullException.ThrowIfNull(files);
         if (!files.TryGetValue(EntriesFile, out var body)) throw new ArgumentException("the pack holds no entries.jsonl", nameof(files));
-        return PackEvents(body).ToDictionary(e => e.Entry.StoreSequence, e => EntryDigest(e.Entry));
+        // A position held twice keeps its last entry, as the reference's dict does.
+        var digests = new Dictionary<long, string>();
+        foreach (var e in PackEvents(body)) digests[e.Entry.StoreSequence] = EntryDigest(e.Entry);
+        return digests;
     }
 
     /// <summary>The failure reason codes of a pack's verification, once each, sorted (what two verifiers compare).</summary>
@@ -782,7 +785,7 @@ public static partial class OfflineVerifier
     /// <c>manifest_file_missing</c>, <c>manifest_digest_mismatch</c>, <c>manifest_unlisted_file</c>), signed as received
     /// by the NA key valid at its <c>created_at</c> (<c>manifest_invalid_signature</c>): a pack whose manifest fails is
     /// not checked further;</item>
-    /// <item>the key history, from the root key down (<c>genesis_*</c>, <c>succession_*</c>, <c>key_history_invalid</c>);</item>
+    /// <item>the key history, from the root key down (the reasons of <see cref="VerifyKeyHistory"/>, or <c>key_history_invalid</c> for files that cannot be read);</item>
     /// <item>the anchors (the anchor reasons, <c>pack_end_anchor_mismatch</c>, <c>pack_end_anchor_not_held</c>,
     /// <c>pack_start_not_tied</c>, <c>manifest_backdated</c>, <c>anchor_mismatch</c>, <c>anchor_entry_missing</c>,
     /// <c>export_not_linked_to_anchors</c>; without held anchors the warning <c>no_held_anchors</c>), and each cited
@@ -807,14 +810,17 @@ public static partial class OfflineVerifier
     /// <param name="options">The root key and anchors held, and what else to check.</param>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">
-    /// A held anchor is not well formed, or a key or change given is not one (as <see cref="VerifyEvidenceEvents"/> and
-    /// <see cref="CheckCompleteness"/> refuse them).
+    /// A held anchor is not well formed, an executor key is null or has no key ID, or a key or change given is not one
+    /// (as <see cref="VerifyEvidenceEvents"/> and <see cref="CheckCompleteness"/> refuse them).
     /// </exception>
     public static PackVerification VerifyAuditPack(IReadOnlyDictionary<string, byte[]> files, VerifyAuditPackOptions options)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(options.RootPublicKey, nameof(options));
+        ArgumentNullException.ThrowIfNull(options.ExecutorKeys, nameof(options));
+        if (options.ExecutorKeys.Any(k => k?.KeyId is null))
+            throw new ArgumentException("an executor key is null or has no key ID", nameof(options));
         var result = new PackVerification();
         var run = new PackRun(result);
         var (manifest, manifestRaw) = CheckManifest(files, run);
@@ -968,7 +974,7 @@ public static partial class OfflineVerifier
         foreach (var (name, count) in VerificationCounts(verification)) result.Counts[name] = count;
 
         // 5. What the records cite outside the store.
-        CheckCitedTrust(files, entries, cited, fromSequence, history, run);
+        CheckCitedTrust(files, entries, cited, first, history, run);
 
         // 6. The report renders from the pack's own files.
         CheckReport(files, manifest, entries, run);
@@ -1350,14 +1356,16 @@ public static partial class OfflineVerifier
     /// </summary>
     /// <param name="header">The manifest, as <see cref="ReportHeaderOf"/> reads it.</param>
     /// <param name="entries">The range's entries.</param>
-    /// <param name="checks">The NA's own verification at pack time (<c>checks.json</c>).</param>
+    /// <param name="checks">The NA's own verification at pack time (<c>checks.json</c>): a JSON object.</param>
     /// <param name="states">The NA's remediation states by subject; null for none.</param>
     /// <param name="notices">When each actor was told; null for none.</param>
+    /// <exception cref="ArgumentException"><paramref name="checks"/> is not a JSON object.</exception>
     public static string RenderReport(ReportHeader header, IReadOnlyList<EvidenceEvent> entries, JsonElement checks, JsonElement? states = null,
         JsonElement? notices = null)
     {
         ArgumentNullException.ThrowIfNull(header);
         ArgumentNullException.ThrowIfNull(entries);
+        if (checks.ValueKind != JsonValueKind.Object) throw new ArgumentException("checks is a JSON object", nameof(checks));
         var judgements = new Dictionary<(string, string), JsonElement>();
         foreach (var e in entries)
             if (e.Entry.EntryKind == "judgement")
