@@ -50,6 +50,18 @@ public sealed record RemediationTransition(string? State, string? Refusal, strin
 /// <param name="Detail">What is wrong.</param>
 public sealed record RemediationProblem(string Code, string Detail);
 
+/// <summary>A forward rotation a remediation record cites, and the change it replaces (<see cref="RemediationRules.RotationProblem"/>).</summary>
+/// <param name="RotationExecutor">The executor sovereign of the rotation's execution evidence.</param>
+/// <param name="RotationSequence">The rotation's store position.</param>
+/// <param name="RotationExecutedAt">When the rotation was executed.</param>
+/// <param name="RecordExecutor">The executor sovereign of the remediation record.</param>
+/// <param name="ChangeSequence">The change's store position; null when it is not known.</param>
+/// <param name="ChangedAt">When the change was made (a judgement's <c>evaluated_as_of</c>, or the execution's time); null when it is not known.</param>
+/// <param name="AlreadyCited">True when another remediation record already cites the rotation.</param>
+public sealed record RotationFacts(
+    string RotationExecutor, long RotationSequence, DateTimeOffset RotationExecutedAt, string RecordExecutor,
+    long? ChangeSequence, DateTimeOffset? ChangedAt, bool AlreadyCited);
+
 /// <summary>
 /// The rules the NA applies to remediations and reviews (v1.4.0; 1.9.0 in this SDK), as pure functions with the
 /// reference's codes (the <c>remediation</c> conformance suite). Since 1.4.0 a judged DENY leads somewhere: the NA states
@@ -465,6 +477,26 @@ public static partial class RemediationRules
         return FormProblem(doc.RootElement) is { } form ? new("remediation_malformed", form) : Check(doc.RootElement, key);
     }
 
+    /// <summary>
+    /// Why the forward rotation a remediation record cites cannot carry it, or null: it was executed by the record's own
+    /// executor sovereign (<c>remediation_rotation_other_executor</c>), after the change it replaces, in store order and in
+    /// time (<c>remediation_rotation_before_change</c>), and no other remediation cites it
+    /// (<c>remediation_rotation_reused</c>). The first that fails wins. That the rotation is of the record's resource is
+    /// checked apart (<c>remediation_rotation_mismatch</c>).
+    /// </summary>
+    /// <param name="rotation">The rotation and the change.</param>
+    public static RemediationProblem? RotationProblem(RotationFacts rotation)
+    {
+        ArgumentNullException.ThrowIfNull(rotation);
+        if (rotation.RotationExecutor != rotation.RecordExecutor)
+            return new("remediation_rotation_other_executor",
+                $"the rotation was executed by {rotation.RotationExecutor}, not by {rotation.RecordExecutor}");
+        if (rotation.RotationSequence <= rotation.ChangeSequence || rotation.RotationExecutedAt < rotation.ChangedAt)
+            return new("remediation_rotation_before_change", "the rotation was made before the change it replaces");
+        if (rotation.AlreadyCited) return new("remediation_rotation_reused", "another remediation already cites this rotation");
+        return null;
+    }
+
     // ── Reviews ─────────────────────────────────────────────────────────────
 
     /// <summary>The route a review is requested on.</summary>
@@ -667,6 +699,12 @@ public static partial class RemediationRules
     private static partial Regex Parameter();
 
     /// <summary>
+    /// White space as Python's <c>str.strip()</c> removes it, which the reference's <c>stands_for</c> check uses: .NET's
+    /// white space and U+001C to U+001F.
+    /// </summary>
+    private static bool PythonSpace(char c) => char.IsWhiteSpace(c) || c is >= '\u001c' and <= '\u001f';
+
+    /// <summary>
     /// The issues the NA finds in a policy's 1.4.0 sections (the codes of <c>validate_boundary_policy</c>): remediation
     /// guidance names a gate of the policy or <c>"*"</c> (<c>invalid_remediation</c>); an emergency policy selects one
     /// exact capability, other than the one it stands for, which is exact too (no <c>*</c>, not blank), with a valid
@@ -709,7 +747,7 @@ public static partial class RemediationRules
             issues.Add(new PolicyIssue { Code = "invalid_emergency", Message = "an emergency policy selects exactly one capability by its exact ID" });
         else if (capabilities[0] == standsFor)
             issues.Add(new PolicyIssue { Code = "invalid_emergency", Message = "the emergency capability must differ from the capability it stands for" });
-        if (standsFor.Contains('*') || string.IsNullOrWhiteSpace(standsFor))
+        if (standsFor.Contains('*') || standsFor.All(PythonSpace))
             issues.Add(new PolicyIssue { Code = "invalid_emergency", Message = "stands_for is an exact capability ID" });
         var parameter = Text(emergency, "justification_parameter") ?? "";
         if (!Parameter().IsMatch(parameter))

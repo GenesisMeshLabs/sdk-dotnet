@@ -48,18 +48,19 @@ public sealed class EvidenceVerifyOptions
 public static partial class OfflineVerifier
 {
     /// <summary>
-    /// The entry kinds this SDK verifies (1.9.0): those a governed store holds, and the records of changes outside the
-    /// governed path. The store's other kinds (remediation, reviews, key successions, archives and grants) fail as
-    /// <c>unknown_entry_kind</c>, as a kind from a later release does; their envelopes still chain.
+    /// The entry kinds this SDK verifies (1.9.0): those a governed store holds, the records of changes outside the
+    /// governed path, and remediation and review records. The store's other kinds (key successions, archives and grants)
+    /// fail as <c>unknown_entry_kind</c>, as a kind from a later release does; their envelopes still chain.
     /// </summary>
     internal static readonly string[] VerifiedEntryKinds =
     [
         "decision", "justification", "execution", "retention_checkpoint",
         "observation", "break_glass", "judgement", "quarantine", "registry",
+        "remediation", "review",
     ];
 
     /// <summary>The kinds the NA signs among the records of changes outside the governed path; an observer or executor key signs the others.</summary>
-    private static readonly HashSet<string> NASignedOutOfBandKinds = new(StringComparer.Ordinal) { "judgement", "quarantine", "registry" };
+    private static readonly HashSet<string> NASignedOutOfBandKinds = new(StringComparer.Ordinal) { "judgement", "quarantine", "registry", "review" };
 
     /// <summary>v1.3.0: a kind whose record the store holds exactly as signed: a record of a change outside the governed path.</summary>
     private static bool IsOutOfBand(string kind) => EnvelopeFields.ContainsKey(kind);
@@ -82,6 +83,8 @@ public static partial class OfflineVerifier
         ["judgement"] = "judgement_id",
         ["quarantine"] = "quarantine_id",
         ["registry"] = "registry_record_id",
+        ["remediation"] = "remediation_id",
+        ["review"] = "review_id",
     };
 
     /// <summary>The model each kind's payload holds; a decision payload wraps two, its decision and its context.</summary>
@@ -95,6 +98,8 @@ public static partial class OfflineVerifier
         ["judgement"] = "JudgementRecord",
         ["quarantine"] = "QuarantineRecord",
         ["registry"] = "RegistryRecord",
+        ["remediation"] = "RemediationRecord",
+        ["review"] = "ReviewRecord",
     };
 
     /// <summary>
@@ -122,6 +127,17 @@ public static partial class OfflineVerifier
         ],
         ["quarantine"] = [("record_id", "quarantine_id"), ("resource_id", "resource_id"), ("outcome", "rejection_code")],
         ["registry"] = [("record_id", "registry_record_id"), ("outcome", "event")],
+        // v1.4.0
+        ["remediation"] =
+        [
+            ("record_id", "remediation_id"), ("subject_id", "subject_id"), ("resource_id", "resource_id"),
+            ("executor_sovereign_id", "executor_sovereign_id"), ("outcome", "outcome"),
+        ],
+        ["review"] =
+        [
+            ("record_id", "review_id"), ("subject_id", "subject_id"), ("resource_id", "resource_id"), ("capability", "capability"),
+            ("outcome", "verdict"),
+        ],
     };
 
     /// <summary>
@@ -130,7 +146,11 @@ public static partial class OfflineVerifier
     /// checkpoints, judgements, quarantine and registry records; the executor's on execution evidence and break-glass
     /// records; the observer's on observations), each execution record against its decision, and the decision, resource
     /// and observation chains. A judgement names its subject as stored, once, and a record it matches at most once; a
-    /// quarantine entry holds the record it names. Pass an export (<see cref="ParseExportLines(string)"/>,
+    /// quarantine entry holds the record it names. A remediation record (signed by an executor key of its sovereign) is
+    /// the one of its judgement or decision, of the change, resource and version that judgement names, and cites a
+    /// forward rotation of that resource by its own executor, made after the change, once; a review (signed by the NA)
+    /// is proved by the requests it embeds, signed with the keys and holders the holder registry records, decided by a
+    /// second holder, of its subject as stored, and no waiver follows a remediation. Pass an export (<see cref="ParseExportLines(string)"/>,
     /// <see cref="EvidenceStoreClient.ExportAll"/>) or, with <see cref="EvidenceVerifyOptions.Contiguous"/> false, a
     /// history. Nothing is thrown for a bad entry, or an event built by hand that is not one: each finding is a failure,
     /// with the reason codes every implementation uses.
@@ -138,15 +158,14 @@ public static partial class OfflineVerifier
     /// <remarks>
     /// This SDK verifies the kinds a governed store holds (<c>decision</c>, <c>justification</c>, <c>execution</c>,
     /// <c>retention_checkpoint</c>) and, from 1.9.0, the records of changes outside the governed path
-    /// (<c>observation</c>, <c>break_glass</c>, <c>judgement</c>, <c>quarantine</c>, <c>registry</c>). Any other kind
-    /// fails as <c>unknown_entry_kind</c>; verify such a store with the TypeScript or Rust SDK, or the core's
-    /// <c>genesis-mesh audit verify</c>. Anchors are not checked here, nor where the store placed an executor key
-    /// (an audit pack's registry records).
+    /// (<c>observation</c>, <c>break_glass</c>, <c>judgement</c>, <c>quarantine</c>, <c>registry</c>) and remediation
+    /// and review records (<c>remediation</c>, <c>review</c>). Any other kind fails as <c>unknown_entry_kind</c>; verify
+    /// such a store with the TypeScript or Rust SDK, or the core's <c>genesis-mesh audit verify</c>. Anchors are not
+    /// checked here, nor where the store placed an executor key (an audit pack's registry records).
     /// <para>
-    /// A judgement may match a grant use, and execution evidence may rest on a remediation record. With those kinds
-    /// unknown, this SDK reports what it can see, a match it does not hold or nothing, where the TypeScript SDK names the
-    /// later kind's failure; either way the run does not verify. A break-glass record sharing a grant use's ID is not
-    /// named as a duplicate.
+    /// A judgement may match a grant use. With grants unknown, this SDK reports what it can see, a match it does not hold
+    /// or nothing, where the TypeScript SDK names the grant's failure; either way the run does not verify. A break-glass
+    /// record sharing a grant use's ID is not named as a duplicate.
     /// </para>
     /// </remarks>
     /// <param name="events">The entries, in store order.</param>
@@ -236,6 +255,18 @@ public static partial class OfflineVerifier
         private readonly HashSet<string> _notDecisions = new(StringComparer.Ordinal);
         /// <summary>v1.3.1: the records a judgement can match: execution evidence and break-glass records held so far.</summary>
         private readonly HashSet<string> _matchable = new(StringComparer.Ordinal);
+        /// <summary>v1.4.0: judgements and decisions by ID, as a remediation or review checks its subject.</summary>
+        private readonly Dictionary<string, JudgedSubject> _judgedRecords = new(StringComparer.Ordinal);
+        /// <summary>v1.4.0: execution evidence by ID, as a remediation checks its change or rotation.</summary>
+        private readonly Dictionary<string, HeldExecution> _executed = new(StringComparer.Ordinal);
+        /// <summary>v1.4.0: the subjects a remediation record was held for.</summary>
+        private readonly HashSet<string> _remediated = new(StringComparer.Ordinal);
+        /// <summary>v1.4.0: the version each observation or break-glass record names (<see cref="SubjectKey"/>); null for none.</summary>
+        private readonly Dictionary<string, string?> _versions = new(StringComparer.Ordinal);
+        /// <summary>v1.4.0: the forward rotations remediation records cite.</summary>
+        private readonly HashSet<string> _cited = new(StringComparer.Ordinal);
+        /// <summary>v1.4.0: each operator key's holder records the NA signed (<c>operator_key_holder</c>), in store order.</summary>
+        private readonly Dictionary<string, List<HolderRecord>> _operatorKeys = new(StringComparer.Ordinal);
         private long? _firstSequence;
         private bool _fromStart;
         private JsonElement? _previous;
@@ -489,6 +520,8 @@ public static partial class OfflineVerifier
             "break_glass" => Shapes.BreakGlass(payload),
             "judgement" => Shapes.Judgement(payload),
             "quarantine" => Shapes.Quarantine(payload),
+            "remediation" => Shapes.Remediation(payload),
+            "review" => Shapes.Review(payload),
             _ => Shapes.Registry(payload),
         };
 
@@ -571,11 +604,145 @@ public static partial class OfflineVerifier
                     case "quarantine":
                         Quarantine();
                         break;
+                    case "remediation":
+                        Remediation(recordId);
+                        break;
+                    case "review":
+                        Review(recordId);
+                        break;
                     default:
-                        // A registry record: the NA's, as its key history is.
-                        NASignature(keys => OutOfBandSignedBy(record, keys), "RegistryRecord");
+                        Registry();
                         break;
                 }
+            }
+
+            /// <summary>
+            /// A registry record: the NA's, as its key history is. One the NA signed that names an operator key's holder
+            /// (v1.4.0) is what a review's embedded requests are checked against.
+            /// </summary>
+            private void Registry()
+            {
+                var failures = Result.Failures.Count;
+                NASignature(keys => OutOfBandSignedBy(record, keys), "RegistryRecord");
+                if (Result.Failures.Count != failures || Str(payload, "event") != "operator_key_holder" || Str(payload, "key_id") is not { } keyId)
+                    return;
+                if (!run._operatorKeys.TryGetValue(keyId, out var records)) run._operatorKeys[keyId] = records = [];
+                records.Add(new(Str(payload, "effective_at") is { } effective && TryReadTimestamp(effective, out var at) ? at : null,
+                    Str(payload, "public_key"), Str(payload, "holder")));
+            }
+
+            /// <summary>
+            /// A remediation record (v1.4.0): signed by an executor key of its sovereign, as execution evidence is; one per
+            /// judgement or decision (<c>duplicate_remediation</c>), of its subject's change, resource and the version that
+            /// change made (<c>remediation_subject_mismatch</c>), after a forward rotation of the same resource
+            /// (<c>remediation_rotation_mismatch</c>) that <see cref="RemediationRules.RotationProblem"/> accepts. In a run
+            /// from its start (entry 1, or right after the checkpoint) its subject and rotation are held before it
+            /// (<c>remediation_subject_missing</c>, <c>remediation_rotation_missing</c>).
+            /// </summary>
+            private void Remediation(string remediationId)
+            {
+                var key = run.FittingKey(kind, payload);
+                Signature(key is not null && OutOfBandSignedBy(payload, [key.PublicKey]), "RemediationRecord");
+                Result.Remediations++;
+                run._notDecisions.Add(remediationId);
+                var heldFromStart = run._contiguous && run._fromStart;
+                var subjectId = Str(payload, "subject_id")!;
+                var resource = Str(payload, "resource_id");
+                var changeKind = Str(payload, "change_kind")!;
+                var changeId = Str(payload, "change_id")!;
+                if (!run._remediated.Add(subjectId)) Fail("duplicate_remediation", subjectId);
+                long? changeSequence = null;
+                long? changedAt = null;
+                if (!run._judgedRecords.TryGetValue(subjectId, out var subject))
+                {
+                    if (heldFromStart) Fail("remediation_subject_missing", subjectId);
+                }
+                else if (Str(payload, "subject_kind") == "judgement")
+                {
+                    var version = run._versions.GetValueOrDefault(SubjectKey(changeKind, changeId));
+                    var disabled = Str(payload, "disabled_version_id");
+                    if (subject.Resource != resource || changeKind != subject.ChangeKind || changeId != subject.ChangeId
+                        || (disabled is not null && version is not null && disabled != version))
+                        Fail("remediation_subject_mismatch", subjectId);
+                    changeSequence = subject.ChangeSequence;
+                    changedAt = subject.ChangedAt;
+                }
+                else if (changeId != subjectId)
+                {
+                    // A decision's change is its execution evidence (or, never executed, the decision itself).
+                    var executed = run._executed.TryGetValue(changeId, out var change);
+                    if (changeKind != "execution" || (executed && (change!.DecisionId != subjectId || change.Resource != resource)))
+                    {
+                        Fail("remediation_subject_mismatch", subjectId);
+                    }
+                    else if (executed)
+                    {
+                        changeSequence = change!.Sequence;
+                        changedAt = change.ExecutedAt;
+                    }
+                }
+                if (Str(payload, "rotation_evidence_id") is not { } rotation) return;
+                if (run._executed.TryGetValue(rotation, out var held))
+                {
+                    if (held.Resource != resource) Fail("remediation_rotation_mismatch", rotation);
+                    if (RemediationRules.RotationProblem(new(held.Executor, held.Sequence, Instant(held.ExecutedAt),
+                            Str(payload, "executor_sovereign_id")!, changeSequence, changedAt is { } c ? Instant(c) : null,
+                            run._cited.Contains(rotation))) is { } problem)
+                        Fail(problem.Code, rotation);
+                }
+                else if (heldFromStart)
+                {
+                    Fail("remediation_rotation_missing", rotation);
+                }
+                else if (run._cited.Contains(rotation))
+                {
+                    Fail("remediation_rotation_reused", rotation);
+                }
+                run._cited.Add(rotation);
+            }
+
+            /// <summary>
+            /// A review (v1.4.0), signed by the NA: its embedded requests prove it offline (<c>review_approval_invalid</c>,
+            /// <see cref="RemediationRules.ReviewApprovalProblem"/>), each signed with the public key and holder the holder
+            /// registry last recorded for its operator key by then, when the run holds a record for that key
+            /// (<c>review_approval_key_mismatch</c>); a second holder decided it (<c>review_same_holder</c>); it names its
+            /// subject's digest (<c>review_subject_mismatch</c>; <c>review_subject_missing</c> in a run from its start); and
+            /// no waiver follows a remediation record (<c>review_waiver_after_remediation</c>).
+            /// </summary>
+            private void Review(string reviewId)
+            {
+                NASignature(keys => OutOfBandSignedBy(record, keys), "ReviewRecord");
+                Result.Reviews++;
+                run._notDecisions.Add(reviewId);
+                var review = payload.Deserialize<ReviewRecord>()!;
+                if (RemediationRules.ReviewApprovalProblem(review, run._allNaKeys) is { } problem) Fail("review_approval_invalid", problem);
+                foreach (var (keyId, approval, holder, at) in new[]
+                         {
+                             (review.DecidedBy, review.Approval, review.DeciderHolder, review.DecidedAt),
+                             (review.RequestedBy, review.RequestApproval, review.RequesterHolder, review.RequestedAt),
+                         })
+                {
+                    if (keyId is null || approval is null || !run._operatorKeys.TryGetValue(keyId, out var records)) continue;
+                    // The latest record at or before the time (the first of equal times, as the reference picks it).
+                    HolderRecord? latest = null;
+                    if (TryReadTimestamp(at, out var when))
+                        foreach (var r in records)
+                            if (r.At is { } effective && effective <= when && (latest is null || effective > latest.At))
+                                latest = r;
+                    if (latest is null || latest.PublicKey != approval.PublicKey || latest.Holder != holder)
+                        Fail("review_approval_key_mismatch", keyId);
+                }
+                if (RemediationRules.ReviewHolderProblem(review) is not null) Fail("review_same_holder", review.DecidedBy);
+                if (!run._judgedRecords.TryGetValue(review.SubjectId, out var subject))
+                {
+                    if (run._contiguous && run._fromStart) Fail("review_subject_missing", review.SubjectId);
+                }
+                else if (subject.Digest != review.SubjectDigest)
+                {
+                    Fail("review_subject_mismatch", review.SubjectId);
+                }
+                if (review.Verdict == ReviewVerdicts.WaiveUntil && run._remediated.Contains(review.SubjectId))
+                    Fail("review_waiver_after_remediation", review.SubjectId);
             }
 
             /// <summary>
@@ -589,6 +756,10 @@ public static partial class OfflineVerifier
                 var key = run.FittingKey(kind, payload);
                 Signature(key is not null && OutOfBandSignedBy(payload, [key.PublicKey]), model);
                 run._subjects[SubjectKey(kind, recordId)] = (Str(entry, "payload_digest")!, seq);
+                // v1.4.0: the version the change made, which a remediation of it disables.
+                var version = kind == "observation" ? Str(payload, "version_id")
+                    : IsObject(payload, "execution_parameters", out var parameters) ? Str(parameters, "version_id") : null;
+                run._versions[SubjectKey(kind, recordId)] = version is { Length: > 0 } ? version : null;
                 run._notDecisions.Add(recordId);
                 if (kind == "break_glass")
                 {
@@ -614,6 +785,9 @@ public static partial class OfflineVerifier
                 Result.Judgements++;
                 run._notDecisions.Add(judgementId);
                 var subjectId = Str(payload, "subject_id")!;
+                TryReadTimestamp(Str(payload, "evaluated_as_of")!, out var evaluatedAsOf);
+                run._judgedRecords[judgementId] = new(Str(entry, "payload_digest")!, Str(payload, "resource_id"), Str(payload, "subject_kind"),
+                    subjectId, PayloadInteger(payload, "subject_store_sequence"), evaluatedAsOf);
                 var key = SubjectKey(Str(payload, "subject_kind")!, subjectId);
                 if (!run._judged.Add(key)) Fail("duplicate_judgement", subjectId);
                 var subjectSequence = PayloadInteger(payload, "subject_store_sequence");
@@ -653,6 +827,7 @@ public static partial class OfflineVerifier
                     Fail("decision_outlives_key", decisionId);
                 Result.Decisions++;
                 run._decisions[decisionId] = record.Clone();
+                run._judgedRecords[decisionId] = new(Str(entry, "payload_digest")!, null, null, null, null, null);
                 if (payload.TryGetProperty("context", out var context) && Shapes.Context(context))
                     run._contexts[decisionId] = context.Clone();
                 else
@@ -693,6 +868,9 @@ public static partial class OfflineVerifier
                 }
                 run._lastExecution[decisionId] = payload.Clone();
                 run._matchable.Add(Str(payload, "evidence_id")!);
+                TryReadTimestamp(Str(payload, "executed_at")!, out var executed);
+                run._executed[Str(payload, "evidence_id")!] = new(Str(payload, "resource_id"), seq, executed,
+                    Str(payload, "executor_sovereign_id")!, decisionId);
                 if (Str(payload, "resource_id") is { } resourceId)
                 {
                     var hasHead = run._resourceHeads.TryGetValue(resourceId, out var head);
@@ -732,6 +910,18 @@ public static partial class OfflineVerifier
             }
         }
     }
+
+    /// <summary>
+    /// v1.4.0: what a remediation or review checks of its judgement or decision: the payload's digest, and for a judgement
+    /// its resource, change (kind, ID, store position) and when it was evaluated (microseconds).
+    /// </summary>
+    private sealed record JudgedSubject(string Digest, string? Resource, string? ChangeKind, string? ChangeId, long? ChangeSequence, long? ChangedAt);
+
+    /// <summary>v1.4.0: what a remediation checks of execution evidence (<c>executed_at</c> in microseconds).</summary>
+    private sealed record HeldExecution(string? Resource, long Sequence, long ExecutedAt, string Executor, string DecisionId);
+
+    /// <summary>v1.4.0: an <c>operator_key_holder</c> registry record: when it took effect (null when unreadable), the key and its holder.</summary>
+    private sealed record HolderRecord(long? At, string? PublicKey, string? Holder);
 
     /// <summary>The digest a record links to: <see cref="ExecutionDigest"/> of the record as received.</summary>
     private static string ExecutionDigestOf(JsonElement record) => Sha256Hex(ReceivedCanonical("ExecutionEvidence", record));

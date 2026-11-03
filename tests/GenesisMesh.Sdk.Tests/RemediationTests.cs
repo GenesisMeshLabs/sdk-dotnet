@@ -20,11 +20,10 @@ public class RemediationTests
     {
         "policy_canonical", "policy_validation", "remediation_plan", "due_time", "transition", "decision_plan", "rfc3339",
         "emergency_map", "review_request", "canonical_form", "verify_record", "remediation_check", "steps_problem",
-        "admin_approval", "review_approval", "review_holders",
+        "admin_approval", "review_approval", "review_holders", "verify_export",
     };
 
-    /// <summary><c>verify_export</c>: an export's remediation and review entries are verified offline in a later step of 1.9.0.</summary>
-    private static readonly HashSet<string> KindsNotRun = new() { "verify_export" };
+    private static readonly HashSet<string> KindsNotRun = new();
 
     // The zero seed's public key.
     private const string ZeroKey = "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=";
@@ -51,6 +50,7 @@ public class RemediationTests
         Assert.Equal("remediation", suite.GetProperty("suite").GetString());
         Assert.Equal("1.4.0", suite.GetProperty("version").GetString());
         Assert.Equal(340, suite.GetProperty("vectors").GetArrayLength());
+        Assert.Equal(340, VectorIds().Count());
     }
 
     private static string? Str(JsonElement o, string name) =>
@@ -206,6 +206,9 @@ public class RemediationTests
                     Actor = Str(input, "actor"),
                     ActorHolder = Str(input, "actor_holder"),
                 })?.Code);
+                break;
+            case "verify_export":
+                OutOfBandTests.VerifiesTheExport(input, expected);
                 break;
             default:
                 throw new InvalidOperationException($"unknown vector kind {v.GetProperty("kind").GetString()}");
@@ -892,12 +895,60 @@ public class RemediationTests
     [InlineData("secret.*.rotate")]
     [InlineData("secret.rotate*")]
     [InlineData("   ")]
+    [InlineData("")]
+    [InlineData("\t\n\u000b\u000c\r")]
+    // Python's str.strip() removes these too, which .NET does not count as white space.
+    [InlineData("\u001c")]
+    [InlineData("\u001d\u001e\u001f")]
+    [InlineData("\u0085\u00a0\u1680\u2000\u200a\u2028\u2029\u202f\u205f\u3000")]
     public void StandsForIsAnExactCapability(string standsFor)
     {
         var node = JsonNode.Parse(Vector("validation-emergency-valid").GetProperty("record").GetRawText())!.AsObject();
         Assert.Empty(RemediationRules.PolicySectionIssues(node.Deserialize<BoundaryPolicy>()!));
         node["emergency"]!["stands_for"] = standsFor;
         Assert.Equal(["invalid_emergency"], RemediationRules.PolicySectionIssues(node.Deserialize<BoundaryPolicy>()!).Select(i => i.Code));
+    }
+
+    [Theory]
+    // Not white space to Python: a capability ID the selector rules may still refuse, but not blank.
+    [InlineData("\ufeff")]
+    [InlineData("\u180e")]
+    [InlineData("\u200b")]
+    [InlineData(" secret.read ")]
+    public void StandsForIsNotBlankWhenPythonKeepsACharacter(string standsFor)
+    {
+        var node = JsonNode.Parse(Vector("validation-emergency-valid").GetProperty("record").GetRawText())!.AsObject();
+        node["emergency"]!["stands_for"] = standsFor;
+        Assert.Empty(RemediationRules.PolicySectionIssues(node.Deserialize<BoundaryPolicy>()!));
+    }
+
+    // ── The forward rotation a remediation cites ────────────────────────────
+
+    private static readonly DateTimeOffset Changed = new(2026, 1, 1, 0, 1, 0, TimeSpan.Zero);
+
+    private static RotationFacts Cited(string executor = "sovereign-b", long sequence = 11, DateTimeOffset? at = null,
+        long? changeSequence = 6, DateTimeOffset? changedAt = null, bool cited = false, bool changeKnown = true) =>
+        new(executor, sequence, at ?? Changed.AddMinutes(3), "sovereign-b", changeKnown ? changeSequence : null,
+            changeKnown ? changedAt ?? Changed : null, cited);
+
+    [Fact]
+    public void ARotationCarriesTheRemediationOfItsOwnExecutorAfterTheChangeOnce()
+    {
+        Assert.Null(RemediationRules.RotationProblem(Cited()));
+        Assert.Equal("remediation_rotation_other_executor", RemediationRules.RotationProblem(Cited(executor: "sovereign-d"))?.Code);
+        // After the change in store order and in time: at the same time is after, at the same position or earlier is not.
+        Assert.Null(RemediationRules.RotationProblem(Cited(at: Changed)));
+        Assert.Equal("remediation_rotation_before_change", RemediationRules.RotationProblem(Cited(at: Changed.AddTicks(-10)))?.Code);
+        Assert.Null(RemediationRules.RotationProblem(Cited(sequence: 7)));
+        Assert.Equal("remediation_rotation_before_change", RemediationRules.RotationProblem(Cited(sequence: 6))?.Code);
+        Assert.Equal("remediation_rotation_before_change", RemediationRules.RotationProblem(Cited(sequence: 5))?.Code);
+        Assert.Equal("remediation_rotation_reused", RemediationRules.RotationProblem(Cited(cited: true))?.Code);
+        // A change the run does not hold bounds nothing.
+        Assert.Null(RemediationRules.RotationProblem(Cited(sequence: 1, at: Changed.AddYears(-1), changeKnown: false)));
+        // The first that fails wins, in the reference's order.
+        Assert.Equal("remediation_rotation_other_executor",
+            RemediationRules.RotationProblem(Cited(executor: "sovereign-d", sequence: 1, cited: true))?.Code);
+        Assert.Equal("remediation_rotation_before_change", RemediationRules.RotationProblem(Cited(sequence: 1, cited: true))?.Code);
     }
 
     [Theory]
