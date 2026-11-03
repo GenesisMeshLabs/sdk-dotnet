@@ -629,7 +629,9 @@ var problem = RemediationRules.ReviewApprovalProblem(review, naPublicKeys);
   - `ReviewApprovalProblem` checks the operators' signed requests the review
     embeds, offline: the decider signed exactly the verdict, waiver end and
     note it records, for this NA, within 300 seconds of the decision, and so
-    did a requester for the subject and justification.
+    did a requester for the subject and justification. It reads the review's
+    recorded times first, each a UTC timestamp in the form the NA writes
+    (`Z`, `+00:00` or `-00:00`).
   - `ReviewHolderProblem` and `ReviewRequestProblem` say whether a second
     holder decided it, and whether the change's actor asked for it.
   - `Rfc3339` is the one grammar of the timestamps a review embeds.
@@ -643,8 +645,10 @@ var problem = RemediationRules.ReviewApprovalProblem(review, naPublicKeys);
   - A due time refuses a date that does not exist, such as February 29 of a
     common year, as the reference does. TypeScript's date reading moves it to
     the next month.
-  - `ReviewApprovalProblem` refuses a review whose recorded time it cannot
-    read; TypeScript skips the 300-second bound then.
+  - `ReviewApprovalProblem` refuses a review whose recorded time is not a
+    UTC timestamp; TypeScript skips the 300-second bound for a time it cannot
+    read. The reference's model also reads spellings the NA never writes (a
+    space, a lower-case `t`, `+0000`); this SDK does not.
   - `PolicySectionIssues` refuses a `stands_for` with a `*` anywhere, or a
     blank one, as the reference does; TypeScript checks only for a final
     `.*`.
@@ -1355,8 +1359,8 @@ bool kept = OfflineVerifier.VerifyRetentionCheckpoint(checkpointJson, [naKey]);
     (`remediation_rotation_reused`);
   - each review: proved by the requests it embeds
     (`review_approval_invalid`), signed with the public key and holder the
-    holder registry recorded for each operator key
-    (`review_approval_key_mismatch`), decided by a second holder
+    holder registry recorded for each operator key, when the run holds a
+    holder record for that key (`review_approval_key_mismatch`), decided by a second holder
     (`review_same_holder`), of its subject as stored
     (`review_subject_mismatch`, `review_subject_missing`), and no waiver
     after a remediation (`review_waiver_after_remediation`).

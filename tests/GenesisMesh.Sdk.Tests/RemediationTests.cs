@@ -914,6 +914,7 @@ public class RemediationTests
     [InlineData("\ufeff")]
     [InlineData("\u180e")]
     [InlineData("\u200b")]
+    [InlineData("\u001b")]
     [InlineData(" secret.read ")]
     public void StandsForIsNotBlankWhenPythonKeepsACharacter(string standsFor)
     {
@@ -955,7 +956,8 @@ public class RemediationTests
     [InlineData("not a time")]
     [InlineData("2026-01-01 00:09:00Z")]
     [InlineData("")]
-    // Read by the SDK's reader, but not a UTC time: the review's model reads none of these.
+    // Not a UTC time in the form the NA writes. The reference's model reads the lower-case spelling as UTC; this SDK
+    // reads only the forms the NA writes.
     [InlineData("2026-01-01T00:09:00")]
     [InlineData("2026-01-01T01:09:00+01:00")]
     [InlineData("2026-01-01T00:10:00+00:01")]
@@ -973,6 +975,26 @@ public class RemediationTests
         Assert.Equal("the review's decided_at is not a UTC timestamp", RemediationRules.ReviewApprovalProblem(review, [Audience]));
         review = Review(decided, request);
         review.RequestedAt = at;
+        Assert.Equal("the review's requested_at is not a UTC timestamp", RemediationRules.ReviewApprovalProblem(review, [Audience]));
+    }
+
+    [Fact]
+    public async Task TheRecordedTimesAreReadBeforeAnythingElse()
+    {
+        // As the review's model reads them first: before the signatures, the routes and the audiences.
+        var decided = await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z");
+        var review = Review(decided);
+        review.Approval!.AdminSignature = "AAAA";
+        Assert.Equal("the decider's signature does not verify over its request", RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        review.DecidedAt = "2026-01-01T00:09:00";
+        Assert.Equal("the review's decided_at is not a UTC timestamp", RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        review.DecidedAt = "2026-01-01T00:09:00Z";
+        review.RequestedAt = "2026-01-01T00:08:00";
+        Assert.Equal("the review's requested_at is not a UTC timestamp", RemediationRules.ReviewApprovalProblem(review, ["another NA"]));
+        // A review the NA opened has no request, and its requested_at is read too.
+        review = Review(await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z"));
+        Assert.Null(RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        review.RequestedAt = "not a time";
         Assert.Equal("the review's requested_at is not a UTC timestamp", RemediationRules.ReviewApprovalProblem(review, [Audience]));
     }
 
@@ -996,6 +1018,8 @@ public class RemediationTests
         Assert.Throws<ArgumentException>(() => RemediationRules.DueAfterDenial("2026-03-01T00:00:30Z", "9999-12-31T23:59:59Z", 60));
         Assert.Equal("9999-12-31T23:59:59.999999Z", RemediationRules.DueAfterDenial(null, "9999-12-31T23:59:58.999999Z", 1));
         Assert.Equal("2026-03-01T00:01:00Z", RemediationRules.DueAfterDenial("9999-12-31T23:59:59.999999Z", "2026-03-01T00:00:00Z", 60));
+        // The current due time is only compared: past 9999 in UTC, it stands aside for the decision's.
+        Assert.Equal("2026-01-01T00:01:00Z", RemediationRules.DueAfterDenial("9999-12-31T23:59:59-01:00", "2026-01-01T00:00:00Z", 60));
         Assert.Throws<ArgumentException>(() => RemediationRules.DueAt("0001-01-01T00:00:59.999999+00:01", 0));
     }
 

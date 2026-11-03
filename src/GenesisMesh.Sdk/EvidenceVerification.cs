@@ -8,7 +8,8 @@ public sealed class EvidenceVerifyOptions
 {
     /// <summary>
     /// The NA's keys (base64 Ed25519), valid at every time: they sign decisions, justification proofs, retention
-    /// checkpoints, and judgement, quarantine and registry records. Or give <see cref="KeyHistory"/>.
+    /// checkpoints, and judgement, quarantine, registry and review records; a review's embedded requests name one of
+    /// them as their audience. Or give <see cref="KeyHistory"/>.
     /// </summary>
     public IReadOnlyList<string> NAPublicKeys { get; init; } = [];
 
@@ -150,7 +151,8 @@ public static partial class OfflineVerifier
     /// the one of its judgement or decision, of the change, resource and version that judgement names, and cites a
     /// forward rotation of that resource by its own executor, made after the change, once; a review (signed by the NA)
     /// is proved by the requests it embeds, signed with the keys and holders the holder registry records, decided by a
-    /// second holder, of its subject as stored, and no waiver follows a remediation. Pass an export (<see cref="ParseExportLines(string)"/>,
+    /// second holder, of its subject as stored, and no waiver follows a remediation (the holder registry is checked for an
+    /// operator key when the run holds a holder record for it). Pass an export (<see cref="ParseExportLines(string)"/>,
     /// <see cref="EvidenceStoreClient.ExportAll"/>) or, with <see cref="EvidenceVerifyOptions.Contiguous"/> false, a
     /// history. Nothing is thrown for a bad entry, or an event built by hand that is not one: each finding is a failure,
     /// with the reason codes every implementation uses.
@@ -685,9 +687,9 @@ public static partial class OfflineVerifier
                 if (run._executed.TryGetValue(rotation, out var held))
                 {
                     if (held.Resource != resource) Fail("remediation_rotation_mismatch", rotation);
-                    if (RemediationRules.RotationProblem(new(held.Executor, held.Sequence, Instant(held.ExecutedAt),
-                            Str(payload, "executor_sovereign_id")!, changeSequence, changedAt is { } c ? Instant(c) : null,
-                            run._cited.Contains(rotation))) is { } problem)
+                    // In microseconds as read: a time near the year 1 or 9999 is not clamped before it is compared.
+                    if (RemediationRules.RotationProblemAt(held.Executor, held.Sequence, held.ExecutedAt,
+                            Str(payload, "executor_sovereign_id")!, changeSequence, changedAt, run._cited.Contains(rotation)) is { } problem)
                         Fail(problem.Code, rotation);
                 }
                 else if (heldFromStart)

@@ -328,7 +328,9 @@ public static partial class RemediationRules
 
     /// <summary>
     /// When a remediation a review denied is due: the grace from the decision, never later than it was already due (a
-    /// review holds a remediation, it does not extend it).
+    /// review holds a remediation, it does not extend it). A decision whose grace runs past the year 9999 is refused,
+    /// whenever the change was due before; the times are reckoned in UTC (the reference reckons a time with an offset in
+    /// that offset, which can differ within hours of the year 10000; the NA writes its times in UTC).
     /// </summary>
     /// <param name="currentDue">When it was due; null when it was not due yet. Read as <see cref="DueAt"/> reads a time.</param>
     /// <param name="decidedAt">When the review was decided.</param>
@@ -360,7 +362,7 @@ public static partial class RemediationRules
     [GeneratedRegex(@"(T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6})[0-9]+", RegexOptions.CultureInvariant)]
     private static partial Regex FinerFraction();
 
-    /// <summary>A recorded time's instant when it is in UTC (<c>Z</c> or <c>+00:00</c>), as a review's model reads its times; null otherwise.</summary>
+    /// <summary>A recorded time's instant when it is in UTC in the form the NA writes (<c>Z</c>, <c>+00:00</c> or <c>-00:00</c>); null otherwise.</summary>
     private static long? RecordedUtcMicros(string? value) => value is not null && UtcZone().IsMatch(value) ? RecordedMicros(value) : null;
 
     [GeneratedRegex(@"(?:Z|[+-]00:00)\z", RegexOptions.CultureInvariant)]
@@ -496,12 +498,22 @@ public static partial class RemediationRules
     public static RemediationProblem? RotationProblem(RotationFacts rotation)
     {
         ArgumentNullException.ThrowIfNull(rotation);
-        if (rotation.RotationExecutor != rotation.RecordExecutor)
-            return new("remediation_rotation_other_executor",
-                $"the rotation was executed by {rotation.RotationExecutor}, not by {rotation.RecordExecutor}");
-        if (rotation.RotationSequence <= rotation.ChangeSequence || rotation.RotationExecutedAt < rotation.ChangedAt)
+        return RotationProblemAt(rotation.RotationExecutor, rotation.RotationSequence, rotation.RotationExecutedAt.UtcTicks / 10,
+            rotation.RecordExecutor, rotation.ChangeSequence, rotation.ChangedAt?.UtcTicks / 10, rotation.AlreadyCited);
+    }
+
+    /// <summary>
+    /// <see cref="RotationProblem(RotationFacts)"/> over instants in microseconds from 0001-01-01, as an export's
+    /// entries are read: an instant beyond the years 1 to 9999 (a time read with its offset) is compared as it is.
+    /// </summary>
+    internal static RemediationProblem? RotationProblemAt(string rotationExecutor, long rotationSequence, long rotationExecutedAt,
+        string recordExecutor, long? changeSequence, long? changedAt, bool alreadyCited)
+    {
+        if (rotationExecutor != recordExecutor)
+            return new("remediation_rotation_other_executor", $"the rotation was executed by {rotationExecutor}, not by {recordExecutor}");
+        if (rotationSequence <= changeSequence || rotationExecutedAt < changedAt)
             return new("remediation_rotation_before_change", "the rotation was made before the change it replaces");
-        if (rotation.AlreadyCited) return new("remediation_rotation_reused", "another remediation already cites this rotation");
+        if (alreadyCited) return new("remediation_rotation_reused", "another remediation already cites this rotation");
         return null;
     }
 
@@ -634,10 +646,12 @@ public static partial class RemediationRules
     /// keys (the audience): the decider signed <c>POST /admin/evidence/reviews/&lt;review_id&gt;/decide</c>, without a
     /// query, as <c>decided_by</c>, with exactly the verdict, waiver end and note the review records, within 300
     /// seconds of <c>decided_at</c>; a requester signed <c>POST /admin/evidence/reviews</c> with exactly the subject and
-    /// justification it records, within 300 seconds of <c>requested_at</c>. A recorded time that is not a UTC timestamp
-    /// (<c>Z</c> or <c>+00:00</c>, as the review's model reads it) refuses the review
-    /// (<c>the review's decided_at is not a UTC timestamp</c>). Whether each public key is the operator key's is for the
-    /// holder registry to say.
+    /// justification it records, within 300 seconds of <c>requested_at</c>. Both recorded times are read first, as the
+    /// review's model reads them before anything else: each must be a UTC timestamp in the form the NA writes
+    /// (<c>YYYY-MM-DDTHH:MM:SS</c>, a fraction, and <c>Z</c>, <c>+00:00</c> or <c>-00:00</c>), or the review is refused
+    /// (<c>the review's decided_at is not a UTC timestamp</c>). The reference's model also reads lenient spellings the NA
+    /// never writes (a space, a lower-case <c>t</c> or <c>z</c>, <c>+0000</c>); this SDK does not. Whether each public
+    /// key is the operator key's is for the holder registry to say.
     /// </summary>
     /// <param name="review">The review record.</param>
     /// <param name="naPublicKeys">The NA's public keys: the audiences the requests may name.</param>
@@ -645,6 +659,8 @@ public static partial class RemediationRules
     {
         ArgumentNullException.ThrowIfNull(review);
         ArgumentNullException.ThrowIfNull(naPublicKeys);
+        foreach (var (field, at) in new[] { ("decided_at", review.DecidedAt), ("requested_at", review.RequestedAt) })
+            if (RecordedUtcMicros(at) is null) return $"the review's {field} is not a UTC timestamp";
         var approval = review.Approval ?? new AdminApproval();
         if (ApprovalProblem(approval, "decider", review.DecidedBy, ReviewDecisionPath(review.ReviewId), naPublicKeys, review.DecidedAt, "decided_at") is { } problem)
             return problem;
