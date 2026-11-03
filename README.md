@@ -647,6 +647,56 @@ var problem = RemediationRules.ReviewApprovalProblem(review, naPublicKeys);
   - A guidance entry's grace may be written as `600.0`, as the reference
     reads it; an entry its model would not take gives no guidance.
 
+With the NA's remediation records on (`EVIDENCE_REMEDIATION=on`, which needs
+its out-of-band records; otherwise 404 `remediation_disabled`), the store has
+the calls:
+
+```csharp
+// The due queue: the open remediations, oldest first.
+await foreach (var due in client.EvidenceStore.AllRemediations())
+{
+    await client.EvidenceStore.MarkNotified(due.SubjectId, "email");   // the actor is told, before the due time
+    // ... carry out due.Steps, then record it:
+    var record = await executor.SignRemediation(RemediationInput.For(due, due.Steps) with { DisabledVersionId = deniedVersionId });
+    await client.EvidenceStore.EnqueueRecord(record);                   // or SubmitRemediation, without a record outbox
+}
+
+// A second holder's review: one holder asks, another decides.
+var requested = await requester.EvidenceStore.RequestReview(new ReviewRequest
+{
+    SubjectKind = RemediationSubjectKinds.Judgement, SubjectId = judgementId, Justification = "Planned with the vendor",
+});
+var decided = await decider.EvidenceStore.DecideReview(requested.ReviewId!, new ReviewDecision { Verdict = ReviewVerdicts.Deny });
+var proved = RemediationRules.ReviewApprovalProblem(decided.Review.Payload, [naPublicKey]) is null;
+```
+
+- **The due queue:** `Remediations` reads a page (read tier) and
+  `AllRemediations` follows the pages. Without a filter they list the open
+  changes: due, overdue and waived, and those with a pending review that are
+  not remediated. A filter takes one of `RemediationStates.Kept`, or
+  `review_pending`. `Remediation` reads one subject's state with its reviews
+  and stored records.
+- **Notices:** `MarkNotified` (standard tier) records an audit event, and the
+  first notice's time and key. It is not retried: each call is another
+  notice.
+- **Reviews:**
+  - `RequestReview` (standard tier) needs a named holder for the client's
+    operator key, and the requester may not be the change's actor. The NA
+    embeds the signed request in the review.
+  - `DecideReview` (privileged tier) is for another holder than the
+    requester's and the actor's. A `ReviewDecision.WaiveUntil` is given exactly
+    for a waiver.
+  - `Review` reads a review, with its record once decided.
+  - Neither a request nor a decision is retried.
+- **Remediation records:**
+  - `SubmitRemediation` is public (the executor key's signature authenticates
+    it) and safe to retry.
+  - The NA admits a forward rotation's record once it holds the rotation's
+    execution evidence. `EnqueueRecord` keeps the record in the record outbox,
+    so flush the evidence outbox first.
+  - `RemediationInput.For` takes the subject, change and resource from a
+    state; a decision never executed names itself as its change.
+
 ### Governed actions
 
 From 1.9 `Governance.GovernedAction` makes one governed change, as the

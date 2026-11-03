@@ -112,6 +112,21 @@ public sealed partial class EvidenceStoreClient
     }
 
     /// <summary>
+    /// Keeps a signed remediation record (<see cref="ExecutionRecorder.SignRemediation"/>) in the record outbox and
+    /// submits it, as <see cref="EnqueueRecord(ObservationRecord, CancellationToken)"/> does an observation. The NA admits
+    /// it once it holds the forward rotation's execution evidence it names: flush the evidence outbox first.
+    /// </summary>
+    /// <exception cref="OutboxException">
+    /// No record outbox is configured (<c>record_outbox_required</c>), or it cannot be read.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">The record outbox holds another record with the same ID.</exception>
+    public async Task<RecordDelivery> EnqueueRecord(RemediationRecord record, CancellationToken ct = default)
+    {
+        var outbox = RequireRecordOutbox();
+        return await Enqueued(outbox, EvidenceOutbox.RecordEntry(record), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Submits the record outbox's pending records: break-glass records first, then grant uses, then observations up
     /// to 100 at a time, then remediation records, each in the order they were added. A batch the NA refuses whole (a
     /// record it cannot read) or that is larger than it takes is split in halves until the record it refuses is tried

@@ -3479,6 +3479,14 @@ public sealed class RecordSubmission
     [JsonPropertyName("judgement")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JudgementSubmission? Judgement { get; set; }
+
+    /// <summary>
+    /// v1.4.0, for a remediation record the NA recorded: the subject's remediation state, now
+    /// <see cref="RemediationStates.Remediated"/>.
+    /// </summary>
+    [JsonPropertyName("remediation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RemediationStatus? Remediation { get; set; }
 }
 
 /// <summary>One observation's answer in a batch (<see cref="EvidenceStoreClient.SubmitObservations"/>).</summary>
@@ -4219,6 +4227,325 @@ public sealed class ReviewRecord
     public JsonElement Signature { get; set; }
 }
 
+/// <summary>A review as the NA summarises it: in a remediation state while it is pending, and in a subject's detail.</summary>
+public sealed class ReviewSummary
+{
+    /// <summary>The review's ID.</summary>
+    [JsonPropertyName("review_id")]
+    public string ReviewId { get; set; } = "";
+
+    /// <summary>The judgement or decision reviewed.</summary>
+    [JsonPropertyName("subject_id")]
+    public string SubjectId { get; set; } = "";
+
+    /// <summary>A value of <see cref="ReviewOpenedFor"/>.</summary>
+    [JsonPropertyName("opened_for")]
+    public string OpenedFor { get; set; } = "";
+
+    /// <summary>For a requested review: the requester's operator key.</summary>
+    [JsonPropertyName("requested_by")]
+    public string? RequestedBy { get; set; }
+
+    /// <summary>For a requested review: the requester's holder.</summary>
+    [JsonPropertyName("requester_holder")]
+    public string? RequesterHolder { get; set; }
+
+    /// <summary>For a requested review: why it was asked for.</summary>
+    [JsonPropertyName("justification")]
+    public string? Justification { get; set; }
+
+    /// <summary>When the review was opened.</summary>
+    [JsonPropertyName("requested_at")]
+    public string RequestedAt { get; set; } = "";
+
+    /// <summary>When it was decided; null while pending.</summary>
+    [JsonPropertyName("decided_at")]
+    public string? DecidedAt { get; set; }
+
+    /// <summary>A value of <see cref="ReviewVerdicts"/>; null while pending.</summary>
+    [JsonPropertyName("verdict")]
+    public string? Verdict { get; set; }
+}
+
+/// <summary>
+/// One change's remediation state, as the NA's routes return it (1.9.0; protocol 1.4.0): its identity, the plan, the
+/// due times and the links. Times are UTC with six digits of microseconds and <c>+00:00</c>.
+/// </summary>
+public class RemediationStatus
+{
+    /// <summary>A value of <see cref="RemediationSubjectKinds"/>.</summary>
+    [JsonPropertyName("subject_kind")]
+    public string SubjectKind { get; set; } = "";
+
+    /// <summary>The judgement (or decision) the state is about.</summary>
+    [JsonPropertyName("subject_id")]
+    public string SubjectId { get; set; } = "";
+
+    /// <summary>A value of <see cref="ChangeKinds"/>; null for a decision before its execution evidence is known.</summary>
+    [JsonPropertyName("change_kind")]
+    public string? ChangeKind { get; set; }
+
+    /// <summary>The record of the change; null for a decision before its execution evidence is known.</summary>
+    [JsonPropertyName("change_id")]
+    public string? ChangeId { get; set; }
+
+    /// <summary>The version the change made, as recorded when the state was armed.</summary>
+    [JsonPropertyName("change_version_id")]
+    public string? ChangeVersionId { get; set; }
+
+    /// <summary>The resource.</summary>
+    [JsonPropertyName("resource_id")]
+    public string? ResourceId { get; set; }
+
+    /// <summary>The capability.</summary>
+    [JsonPropertyName("capability")]
+    public string? Capability { get; set; }
+
+    /// <summary>
+    /// The change's actor: the observed actor as the source reported it (not proof of who acted), or, for a decision,
+    /// the operator key that asked for it.
+    /// </summary>
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    /// <summary>The actor's holder: mapped when a review is decided, or the requesting key's holder for a decision.</summary>
+    [JsonPropertyName("actor_holder")]
+    public string? ActorHolder { get; set; }
+
+    /// <summary>The judgement's verdict.</summary>
+    [JsonPropertyName("verdict")]
+    public string? Verdict { get; set; }
+
+    /// <summary>A value of <see cref="RemediationStates"/>.</summary>
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "";
+
+    /// <summary>True while a review is pending: a flag beside the state, which stops no clock.</summary>
+    [JsonPropertyName("review_pending")]
+    public bool ReviewPending { get; set; }
+
+    /// <summary>A value of <see cref="RemediationModes"/>.</summary>
+    [JsonPropertyName("mode")]
+    public string Mode { get; set; } = "";
+
+    /// <summary>A value of <see cref="RemediationSteps"/> but <c>delete</c>.</summary>
+    [JsonPropertyName("steps")]
+    public string Steps { get; set; } = "";
+
+    /// <summary>A value of <see cref="RemediationFallbacks"/>, when a <c>cancel</c> fell back to an alert.</summary>
+    [JsonPropertyName("fallback")]
+    public string? Fallback { get; set; }
+
+    /// <summary>How long after the judgement the remediation is due, in seconds.</summary>
+    [JsonPropertyName("grace_seconds")]
+    public int GraceSeconds { get; set; }
+
+    /// <summary>A value of <see cref="GuidanceSources"/>.</summary>
+    [JsonPropertyName("guidance_source")]
+    public string GuidanceSource { get; set; } = "";
+
+    /// <summary>When the remediation is due; null while the change stands.</summary>
+    [JsonPropertyName("remediation_due_at")]
+    public string? RemediationDueAt { get; set; }
+
+    /// <summary>When an emergency change's lifetime ends.</summary>
+    [JsonPropertyName("lifetime_ends_at")]
+    public string? LifetimeEndsAt { get; set; }
+
+    /// <summary>When a waiver ends.</summary>
+    [JsonPropertyName("waived_until")]
+    public string? WaivedUntil { get; set; }
+
+    /// <summary>The latest review.</summary>
+    [JsonPropertyName("review_id")]
+    public string? ReviewId { get; set; }
+
+    /// <summary>The remediation record.</summary>
+    [JsonPropertyName("remediation_id")]
+    public string? RemediationId { get; set; }
+
+    /// <summary>The first notice recorded (<see cref="EvidenceStoreClient.MarkNotified"/>).</summary>
+    [JsonPropertyName("notified_at")]
+    public string? NotifiedAt { get; set; }
+
+    /// <summary>The operator key that recorded the first notice.</summary>
+    [JsonPropertyName("notified_by")]
+    public string? NotifiedBy { get; set; }
+
+    /// <summary>When the remediation became overdue.</summary>
+    [JsonPropertyName("overdue_since")]
+    public string? OverdueSince { get; set; }
+
+    /// <summary>When the state was created.</summary>
+    [JsonPropertyName("created_at")]
+    public string CreatedAt { get; set; } = "";
+
+    /// <summary>When the state last changed.</summary>
+    [JsonPropertyName("updated_at")]
+    public string UpdatedAt { get; set; } = "";
+
+    /// <summary>With <see cref="ReviewPending"/>: the pending review's summary.</summary>
+    [JsonPropertyName("review")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ReviewSummary? Review { get; set; }
+}
+
+/// <summary>A store entry as the NA returns it with its payload.</summary>
+/// <typeparam name="TPayload">The payload's type: <see cref="JsonElement"/> for any kind, or the record's model.</typeparam>
+public sealed class StoredRecord<TPayload>
+{
+    /// <summary>The store's envelope of the record.</summary>
+    [JsonPropertyName("entry")]
+    public EvidenceStoreEntry Entry { get; set; } = new();
+
+    /// <summary>The entry's digest.</summary>
+    [JsonPropertyName("entry_digest")]
+    public string EntryDigest { get; set; } = "";
+
+    /// <summary>The record, as stored.</summary>
+    [JsonPropertyName("payload")]
+    public TPayload Payload { get; set; } = default!;
+}
+
+/// <summary>One page of the due queue (<see cref="EvidenceStoreClient.Remediations"/>).</summary>
+public sealed class RemediationQueuePage
+{
+    /// <summary>The filter asked for; null for the default (due, overdue and waived changes, and those with a pending review).</summary>
+    [JsonPropertyName("state")]
+    public string? State { get; set; }
+
+    /// <summary>The states on this page.</summary>
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
+    /// <summary>The states, oldest first.</summary>
+    [JsonPropertyName("remediations")]
+    public IReadOnlyList<RemediationStatus> Remediations { get; set; } = [];
+
+    /// <summary>The next page's <see cref="RemediationQueueParams.After"/>; null on the last page.</summary>
+    [JsonPropertyName("next_after")]
+    public string? NextAfter { get; set; }
+}
+
+/// <summary>Which page of the due queue to read (<see cref="EvidenceStoreClient.Remediations"/>).</summary>
+public sealed class RemediationQueueParams
+{
+    /// <summary>
+    /// A state the NA keeps (<see cref="RemediationStates.Kept"/>), or <c>review_pending</c> for every change with a
+    /// pending review whatever its state. Null for the default: the due, overdue and waived changes, and those with a
+    /// pending review that are not remediated.
+    /// </summary>
+    public string? State { get; set; }
+
+    /// <summary>States a page, 1 to 500; null for the NA's default (100).</summary>
+    public int? Limit { get; set; }
+
+    /// <summary>The previous page's <see cref="RemediationQueuePage.NextAfter"/>.</summary>
+    public string? After { get; set; }
+}
+
+/// <summary>One subject's remediation state with its newest reviews and stored records (<see cref="EvidenceStoreClient.Remediation"/>).</summary>
+public sealed class RemediationDetail : RemediationStatus
+{
+    /// <summary>Its reviews, oldest first; at most the NA's limit.</summary>
+    [JsonPropertyName("reviews")]
+    public IReadOnlyList<ReviewSummary> Reviews { get; set; } = [];
+
+    /// <summary>True when the subject has more reviews than <see cref="Reviews"/> holds.</summary>
+    [JsonPropertyName("reviews_truncated")]
+    public bool ReviewsTruncated { get; set; }
+
+    /// <summary>Its stored remediation and review records, oldest first; at most the NA's limit.</summary>
+    [JsonPropertyName("records")]
+    public IReadOnlyList<StoredRecord<JsonElement>> Records { get; set; } = [];
+
+    /// <summary>True when the subject has more stored records than <see cref="Records"/> holds.</summary>
+    [JsonPropertyName("records_truncated")]
+    public bool RecordsTruncated { get; set; }
+}
+
+/// <summary>What <see cref="EvidenceStoreClient.RequestReview"/> asks for.</summary>
+public sealed class ReviewRequest
+{
+    /// <summary>A value of <see cref="RemediationSubjectKinds"/>.</summary>
+    [JsonPropertyName("subject_kind")]
+    public string SubjectKind { get; set; } = "";
+
+    /// <summary>The judgement's (or decision's) ID.</summary>
+    [JsonPropertyName("subject_id")]
+    public string SubjectId { get; set; } = "";
+
+    /// <summary>Why the change should be reviewed: 1 to 1024 characters, embedded in the review as signed.</summary>
+    [JsonPropertyName("justification")]
+    public string Justification { get; set; } = "";
+}
+
+/// <summary>A review: pending, or decided with its stored record (<see cref="EvidenceStoreClient.Review"/>).</summary>
+public sealed class ReviewDetail
+{
+    /// <summary>The review's ID.</summary>
+    [JsonPropertyName("review_id")]
+    public string ReviewId { get; set; } = "";
+
+    /// <summary>The judgement or decision reviewed.</summary>
+    [JsonPropertyName("subject_id")]
+    public string SubjectId { get; set; } = "";
+
+    /// <summary>A value of <see cref="ReviewOpenedFor"/>.</summary>
+    [JsonPropertyName("opened_for")]
+    public string OpenedFor { get; set; } = "";
+
+    /// <summary>For a requested review: the requester's operator key.</summary>
+    [JsonPropertyName("requested_by")]
+    public string? RequestedBy { get; set; }
+
+    /// <summary>For a requested review: the requester's holder.</summary>
+    [JsonPropertyName("requester_holder")]
+    public string? RequesterHolder { get; set; }
+
+    /// <summary>For a requested review: why it was asked for.</summary>
+    [JsonPropertyName("justification")]
+    public string? Justification { get; set; }
+
+    /// <summary>When the review was opened.</summary>
+    [JsonPropertyName("requested_at")]
+    public string RequestedAt { get; set; } = "";
+
+    /// <summary>When it was decided; null while pending.</summary>
+    [JsonPropertyName("decided_at")]
+    public string? DecidedAt { get; set; }
+
+    /// <summary>A value of <see cref="ReviewVerdicts"/>; null while pending.</summary>
+    [JsonPropertyName("verdict")]
+    public string? Verdict { get; set; }
+
+    /// <summary>Once decided: the review record the NA signed and stored; absent while pending.</summary>
+    [JsonPropertyName("record")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public StoredRecord<ReviewRecord>? Record { get; set; }
+}
+
+/// <summary>What <see cref="EvidenceStoreClient.DecideReview"/> decides.</summary>
+public sealed class ReviewDecision
+{
+    /// <summary>A value of <see cref="ReviewVerdicts"/>.</summary>
+    public string Verdict { get; set; } = "";
+
+    /// <summary>For <c>waive_until</c> only: when the waiver ends (after now; within the NA's longest waiver).</summary>
+    public DateTimeOffset? WaiveUntil { get; set; }
+
+    /// <summary>A note: 1 to 1024 characters.</summary>
+    public string? Note { get; set; }
+}
+
+/// <summary>The subject's remediation state once a review is decided, with the review record the NA signed and stored.</summary>
+public sealed class ReviewDecided : RemediationStatus
+{
+    /// <summary>The review record, as stored.</summary>
+    [JsonPropertyName("review")]
+    public new StoredRecord<ReviewRecord> Review { get; set; } = new();
+}
+
 // ── The evidence outbox (1.9.0) ───────────────────────────────────────────────
 
 /// <summary>The states of an outbox entry (<see cref="OutboxEntry.State"/>).</summary>
@@ -4368,17 +4695,15 @@ public static class RecordOutboxKinds
     public const string Observation = "observation";
     /// <summary>A break-glass record (<see cref="BreakGlassRecord"/>).</summary>
     public const string BreakGlass = "break_glass";
-    /// <summary>
-    /// A remediation record. This SDK does not sign them yet; one in an outbox another SDK wrote is submitted.
-    /// </summary>
+    /// <summary>A remediation record (<see cref="RemediationRecord"/>).</summary>
     public const string Remediation = "remediation";
     /// <summary>A grant use. This SDK does not sign them yet; one in an outbox another SDK wrote is submitted.</summary>
     public const string GrantExecution = "grant_execution";
 }
 
 /// <summary>
-/// One signed record in the record outbox (1.9.0), until the NA admits it: an observation or a break-glass record, or
-/// a remediation record or grant use another SDK kept. The TypeScript and Rust SDKs read and write the same JSON.
+/// One signed record in the record outbox (1.9.0), until the NA admits it: an observation, a break-glass record or a
+/// remediation record, or a grant use another SDK kept. The TypeScript and Rust SDKs read and write the same JSON.
 /// Entries do not change: the client stores a new one (<c>with</c>) for each attempt.
 /// </summary>
 public sealed record RecordOutboxEntry : IOutboxEntry

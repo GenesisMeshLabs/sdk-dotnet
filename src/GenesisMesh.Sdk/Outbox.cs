@@ -245,6 +245,13 @@ public static class EvidenceOutbox
         return RecordEntry(RecordOutboxKinds.BreakGlass, record.BreakGlassId, record, now);
     }
 
+    /// <summary>A new pending record outbox entry for a signed remediation record (1.9.0).</summary>
+    public static RecordOutboxEntry RecordEntry(RemediationRecord record, DateTimeOffset? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return RecordEntry(RecordOutboxKinds.Remediation, record.RemediationId, record, now);
+    }
+
     private static RecordOutboxEntry RecordEntry(string kind, string id, object record, DateTimeOffset? now) => new()
     {
         Id = id,
@@ -377,8 +384,8 @@ public sealed class FileOutbox : IOutbox<OutboxEntry>
 }
 
 /// <summary>
-/// The default record outbox (1.9.0): signed observations and break-glass records, and the remediation records and
-/// grant uses another SDK kept, stored as <see cref="FileOutbox"/> stores execution records, in a directory of its own
+/// The default record outbox (1.9.0): signed observations, break-glass records and remediation records, and the grant
+/// uses another SDK kept, stored as <see cref="FileOutbox"/> stores execution records, in a directory of its own
 /// (<c>gm.evidence.record-outbox.v1</c>). The TypeScript and Rust SDKs read and write the same files. Each record is
 /// kept as it was read, fields this SDK does not know included, so it still matches its signature. A file of another
 /// kind of record is moved aside, as an unreadable file is.
