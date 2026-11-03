@@ -23,7 +23,7 @@ public class GrantRuleCasesTests
     {
         var kinds = Data.Value.GetProperty("cases").EnumerateArray().GroupBy(c => c.GetProperty("kind").GetString()!).ToDictionary(g => g.Key, g => g.Count());
         Assert.Equal(["env", "param", "rec", "sec", "use"], kinds.Keys.Order(StringComparer.Ordinal));
-        Assert.True(kinds.Values.Sum() > 1400);
+        Assert.True(kinds.Values.Sum() > 1500);
     }
 
     [Theory]

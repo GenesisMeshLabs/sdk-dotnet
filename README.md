@@ -1520,7 +1520,7 @@ var problem = GrantRules.UseProblem(use, new UseCheck { Grant = grant, TokenKeys
 
 The SDK runs the shared `grants` suite's signed-form, signature, envelope,
 envelope parameter and use vectors
-(`tests/GenesisMesh.Sdk.Tests/testdata/conformance/grants.json`), and 1,453
+(`tests/GenesisMesh.Sdk.Tests/testdata/conformance/grants.json`), and 1,510
 further cases the Python reference judged
 (`tests/GenesisMesh.Sdk.Tests/testdata/grants/rule_cases.json`).
 

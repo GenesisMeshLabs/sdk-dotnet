@@ -39,6 +39,9 @@ public class GrantRulesTests
     [InlineData("-9223372036854775808", "-9223372036854775808")]
     [InlineData("9007199254740993", "9007199254740993")]
     [InlineData("9007199254740993.0", "9007199254740992")]
+    [InlineData("1e-7", "1e-07")]
+    [InlineData("1.5E-10", "1.5e-10")]
+    [InlineData("123456.75", "123456.75")]
     public void ANumberIsReadAsTheReferenceReadsIt(string json, string read)
     {
         Assert.True(GrantNumber.TryRead(Json(json), out var n));
@@ -117,6 +120,10 @@ public class GrantRulesTests
     [InlineData("\"a\"", "\"a\"", true)]
     [InlineData("[1]", "[1]", false)]
     [InlineData("{}", "{}", false)]
+    [InlineData("\"\\u00e9\"", "\"é\"", true)]
+    [InlineData("\"é\"", "\"e\\u0301\"", false)]
+    [InlineData("18446744073709551616", "18446744073709551617", false)]
+    [InlineData("18446744073709551616", "18446744073709551616", true)]
     public void ScalarsCompareTypeStrictly(string a, string b, bool equal) => Assert.Equal(equal, GrantRules.ScalarEquals(Json(a), Json(b)));
 
     [Theory]
@@ -128,6 +135,8 @@ public class GrantRulesTests
     [InlineData("""{"number_type": "integer", "minimum": 1, "maximum": 18446744073709551615, "exclusive_maximum": true}""", "18446744073709551615", false)]
     [InlineData("""{"number_type": "number", "minimum": 0.5, "maximum": 1}""", "0.5", true)]
     [InlineData("""{"number_type": "number", "minimum": 0.5, "maximum": 1, "exclusive_minimum": true}""", "0.5", false)]
+    [InlineData("""{"number_type": "number", "minimum": 0.5, "maximum": 1, "exclusive_maximum": true}""", "1", false)]
+    [InlineData("""{"number_type": "number", "minimum": 0.5, "maximum": 1, "exclusive_maximum": true}""", "0.75", true)]
     [InlineData("""{"number_type": "number", "minimum": 0, "maximum": 1}""", "true", false)]
     [InlineData("""{"number_type": "number", "minimum": 0, "maximum": 1}""", "\"1\"", false)]
     public void ARangeHoldsWhatItSays(string rangeJson, string value, bool inside)
@@ -187,6 +196,7 @@ public class GrantRulesTests
         Assert.Equal("request_parameters.r is not a scalar", GrantRules.EnvelopeProblem(envelope, Json("""{"n": 1, "r": [1]}""")));
         Assert.Equal("request_parameters.tags is not a list of strings", GrantRules.EnvelopeProblem(envelope, Json("""{"n": 1, "r": 1, "tags": "a"}""")));
         Assert.Equal("request_parameters.tags has an item outside its set", GrantRules.EnvelopeProblem(envelope, Json("""{"n": 1, "r": 1, "tags": ["c"]}""")));
+        Assert.Equal("request_parameters.tags has an item outside its set", GrantRules.EnvelopeProblem(envelope, Json("""{"n": 1, "r": 1, "tags": ["A"]}""")));
         Assert.Equal("parameter_envelope.x is not an envelope parameter",
             GrantRules.EnvelopeProblem(Json("""{"x": {"one_of": []}}"""), Json("{}")));
     }
@@ -197,9 +207,13 @@ public class GrantRulesTests
         Assert.Null(GrantRules.EnvelopeShapeProblem(Json("{}")));
         Assert.Equal("parameter_envelope is an object of parameter names", GrantRules.EnvelopeShapeProblem(Json("[]")));
         Assert.Equal("envelope parameter names match [A-Za-z0-9_-]{1,64}", GrantRules.EnvelopeShapeProblem(Json("""{"a.b": {"one_of": [1]}}""")));
+        // The reference's pattern (`$`) takes a name ending in a newline; every SDK refuses it.
+        Assert.Equal("envelope parameter names match [A-Za-z0-9_-]{1,64}", GrantRules.EnvelopeShapeProblem(Json("""{"a\n": {"one_of": [1]}}""")));
         Assert.Equal("x: invalid envelope parameter: one_of repeats a value", GrantRules.EnvelopeShapeProblem(Json("""{"x": {"one_of": [1, 1]}}""")));
         var many = new JsonObject();
-        for (var i = 0; i < 65; i++) many["p" + i] = new JsonObject { ["one_of"] = new JsonArray(1) };
+        for (var i = 0; i < 64; i++) many["p" + i] = new JsonObject { ["one_of"] = new JsonArray(1) };
+        Assert.Null(GrantRules.EnvelopeShapeProblem(JsonSerializer.SerializeToElement(many)));
+        many["p64"] = new JsonObject { ["one_of"] = new JsonArray(1) };
         Assert.Equal("at most 64 envelope parameters", GrantRules.EnvelopeShapeProblem(JsonSerializer.SerializeToElement(many)));
     }
 
@@ -391,6 +405,32 @@ public class GrantRulesTests
         Assert.Null(GrantRules.UseProblem(later, named with { TokenHead = named.TokenHead! with { ExecutedAt = RoundTrip(11, ticks: 9) } }));
         Assert.Equal("grant_time_token_mismatch",
             GrantRules.UseProblem(later, named with { TokenHead = named.TokenHead! with { ExecutedAt = RoundTrip(11, ticks: 10) } })?.Code);
+    }
+
+    [Fact]
+    public async Task TheTimeTokenIsTheNAsForThisUse()
+    {
+        // A token the NA signed for another grant: its signature verifies, its grant does not match.
+        var (use, check) = UseVector("use-admitted");
+        var na = new SeedSigner(Convert.ToBase64String(Enumerable.Range(64, 32).Select(i => (byte)i).ToArray()), "na-key");
+        var token = JsonNode.Parse(use.TimeToken.GetRawText())!.AsObject();
+        token["grant_id"] = "00000000-0000-4000-8000-000000000011";
+        token.Remove("signature");
+        token["signature"] = JsonNode.Parse((await OutOfBandRecords.Sign(JsonSerializer.SerializeToElement(token), na, CancellationToken.None)).GetRawText());
+        var other = JsonSerializer.SerializeToElement(token);
+        Assert.True(OfflineVerifier.TokenSignatureValid(other, check.TokenKeys));
+        var original = use.TimeToken;
+        use.TimeToken = other;
+        Assert.Equal("grant_time_token_invalid", GrantRules.UseProblem(use, check)?.Code);
+        // The token as received, when the caller gives it, is the one checked.
+        use.TimeToken = original;
+        var changed = JsonNode.Parse(original.GetRawText())!.AsObject();
+        changed["issued_by"] = "another-key";
+        Assert.Equal("grant_time_token_invalid", GrantRules.UseProblem(use, check with { RawToken = JsonSerializer.SerializeToElement(changed) })?.Code);
+        Assert.Null(GrantRules.UseProblem(use, check with { RawToken = original }));
+        // A capability is matched exactly.
+        use.Capability = use.Capability.ToUpperInvariant();
+        Assert.Equal("grant_capability_mismatch", GrantRules.UseProblem(use, check)?.Code);
     }
 
     [Fact]
