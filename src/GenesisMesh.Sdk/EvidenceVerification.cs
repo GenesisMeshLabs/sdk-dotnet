@@ -9,8 +9,9 @@ public sealed class EvidenceVerifyOptions
 {
     /// <summary>
     /// The NA's keys (base64 Ed25519), valid at every time: they sign decisions, justification proofs, retention
-    /// checkpoints, and judgement, quarantine, registry and review records; a review's embedded requests name one of
-    /// them as their audience. Or give <see cref="KeyHistory"/>.
+    /// checkpoints, and judgement, quarantine, registry, review and archive records, grants and their revocations; a
+    /// review's embedded requests name one of them as their audience, and a key succession's outgoing key is one of them.
+    /// Or give <see cref="KeyHistory"/>.
     /// </summary>
     public IReadOnlyList<string> NAPublicKeys { get; init; } = [];
 
@@ -19,7 +20,8 @@ public sealed class EvidenceVerifyOptions
     /// (<see cref="OfflineVerifier.VerifyKeyHistoryResponse"/>). Each record must then be signed by the key valid at its
     /// entry's <c>recorded_at</c>, and at the latest earlier time of the run (<c>na_key_not_valid_at_time</c> for another
     /// key of the history), and a decision may stay valid no longer than its key vouches for
-    /// (<c>decision_outlives_key</c>).
+    /// (<c>decision_outlives_key</c>). With its root key, a key succession entry must also be signed by the root key and
+    /// be one of the history's successions (<see cref="NAKeyHistory.SuccessionDigests"/>).
     /// </summary>
     public NAKeyHistory? KeyHistory { get; init; }
 
@@ -50,7 +52,7 @@ public sealed class EvidenceVerifyOptions
     /// v1.5.0: an audit pack's cited entries (<c>cited.jsonl</c>), outside the run; null (the default) for none. They
     /// seed what the run's records rest on (their decisions, subjects and matched records, the grants of their uses,
     /// and the heads of the chains the run continues) and are verified for authenticity, not as a run: their failures
-    /// fail the run, named <c>cited …</c>, and their counts do not count. The run then holds every chain from its
+    /// fail the run, with the reason found and the detail prefixed <c>cited</c>, and their counts do not count. The run then holds every chain from its
     /// start, and a record it cites that neither holds is <c>cited_record_missing</c>.
     /// </summary>
     public IReadOnlyList<EvidenceEvent>? Prior { get; init; }
@@ -83,11 +85,11 @@ public static partial class OfflineVerifier
     };
 
     /// <summary>
-    /// v1.3.0: a kind whose record the store holds exactly as signed: a record of a change outside the governed path
-    /// (v1.4.0: a remediation or review record, v1.5.0: an archive record, v1.6.0: a grant, a use or a revocation). A key
-    /// succession's envelope names its ID too, but the record is the key history's, signed as one.
+    /// v1.3.0: a kind whose record the store holds exactly as signed, its envelope naming what it says: a record of a
+    /// change outside the governed path (v1.4.0: a remediation or review record, v1.5.0: a key succession or an archive
+    /// record, v1.6.0: a grant, a use or a revocation).
     /// </summary>
-    private static bool IsOutOfBand(string kind) => EnvelopeFields.ContainsKey(kind) && kind != "key_succession";
+    private static bool IsOutOfBand(string kind) => EnvelopeFields.ContainsKey(kind);
 
     /// <summary>v1.5.0: how long before it takes effect the store records a key succession at the latest, in microseconds.</summary>
     private const long SuccessionMinLead = 60_000_000;
@@ -231,7 +233,8 @@ public static partial class OfflineVerifier
     /// </exception>
     /// <exception cref="ArgumentException">
     /// Both <see cref="EvidenceVerifyOptions.NAPublicKeys"/> and <see cref="EvidenceVerifyOptions.KeyHistory"/> are given, or
-    /// <see cref="EvidenceVerifyOptions.ExecutorKeys"/> holds a null.
+    /// <see cref="EvidenceVerifyOptions.ExecutorKeys"/> holds a null or a key whose placement time
+    /// (<see cref="ExecutorKeyRecord.RegisteredAtTime"/>, <see cref="ExecutorKeyRecord.RetiredAtTime"/>) is not a timestamp.
     /// </exception>
     /// <exception cref="StrictJsonException"><see cref="EvidenceVerifyOptions.Checkpoint"/> is not strict JSON.</exception>
     public static EvidenceStoreVerification VerifyEvidenceEvents(IEnumerable<EvidenceEvent> events, EvidenceVerifyOptions options)
@@ -244,6 +247,8 @@ public static partial class OfflineVerifier
             throw new ArgumentException("pass NAPublicKeys or KeyHistory, not both", nameof(options));
         if (options.ExecutorKeys.Any(k => k is null))
             throw new ArgumentException("ExecutorKeys holds a null", nameof(options));
+        // A placement time that cannot be read would place nothing: refused before anything is verified.
+        foreach (var key in options.ExecutorKeys) PlacementTimes(key);
         using var checkpoint = options.Checkpoint is { } json ? StrictJsonReader.Parse(json) : null;
         var run = new EventRun(options, checkpoint?.RootElement);
         if (run.CheckpointAccepted())
@@ -351,6 +356,8 @@ public static partial class OfflineVerifier
         private bool _carrying;
         /// <summary>v1.5.0: an audit pack's run, given its cited entries (<see cref="EvidenceVerifyOptions.Prior"/>).</summary>
         private readonly bool _pack;
+        /// <summary>v1.5.0: the key history's root key; null without one (an empty one is none, as TypeScript reads it).</summary>
+        private readonly string? _root;
         /// <summary>v1.5.0: the digests of the successions a key history with its root key holds; null without one.</summary>
         private readonly HashSet<string>? _successions;
         /// <summary>Where findings and counts go: the result, or the cited entries' own while they are visited.</summary>
@@ -367,7 +374,8 @@ public static partial class OfflineVerifier
             _contiguous = options.Contiguous;
             _checkpoint = checkpoint?.Clone();
             _pack = options.Prior is not null;
-            _successions = _history is { RootPublicKey: not null } held ? held.SuccessionDigests.ToHashSet(StringComparer.Ordinal) : null;
+            _root = _history?.RootPublicKey is { Length: > 0 } root ? root : null;
+            _successions = _root is not null ? _history!.SuccessionDigests.ToHashSet(StringComparer.Ordinal) : null;
             _target = Result;
         }
 
@@ -555,7 +563,7 @@ public static partial class OfflineVerifier
                 Warn(seq, "unsigned_field", string.Join(", ", unsignedUnknown));
                 // v1.3.0: the reference stores the records of changes outside the governed path exactly as signed, and
                 // (v1.5.0) a key succession and a retention checkpoint: a field outside the signature is no part of one.
-                if (kind is "retention_checkpoint" or "key_succession" || IsOutOfBand(kind))
+                if (kind == "retention_checkpoint" || IsOutOfBand(kind))
                 {
                     Fail(seq, "payload_invalid", string.Join(", ", unsignedUnknown));
                     return;
@@ -632,7 +640,7 @@ public static partial class OfflineVerifier
         private List<string> SuccessionSigners(JsonElement record)
         {
             var keys = new List<string>(_allNaKeys);
-            if (_history?.RootPublicKey is { } root) keys.Add(root);
+            if (_root is not null) keys.Add(_root);
             if (Str(record, "new_public_key") is { } newKey) keys.Add(newKey);
             return keys;
         }
@@ -814,10 +822,11 @@ public static partial class OfflineVerifier
             {
                 const string model = "KeySuccessionRecord";
                 Result.KeySuccessions++;
-                var root = run._history?.RootPublicKey;
+                var root = run._root;
+                // Its unknown fields were refused or set aside already: what is left is its form.
                 if (StrictRefusal(model, payload, run.SuccessionSigners(payload)) is { } refusal)
                 {
-                    Fail(refusal == "unknown_field" ? "invalid_signature" : refusal, kind);
+                    Fail(refusal, kind);
                     return;
                 }
                 var previousKey = Str(payload, "previous_public_key")!;
@@ -1279,22 +1288,39 @@ public static partial class OfflineVerifier
     /// registry record backfilled at an upgrade or carried past retention) only after it is
     /// <c>evidence_unknown_executor</c>, and one it retired before it <c>evidence_executor_key_retired</c>. A key given
     /// without a registration position or time (<see cref="ExecutorKeyRecord.RegisteredSequence"/>,
-    /// <see cref="ExecutorKeyRecord.RegisteredAtTime"/>) is not placed: null.
+    /// <see cref="ExecutorKeyRecord.RegisteredAtTime"/>) is not placed: null. Times are read as the references read
+    /// them: a fraction past six digits (.NET's <c>"o"</c> format) is cut to microseconds.
     /// </summary>
     /// <param name="key">The executor or observer key, as an audit pack's registry records place it.</param>
     /// <param name="storeSequence">The record's store position.</param>
     /// <param name="recordedAt">The record's <c>recorded_at</c>.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> or <paramref name="recordedAt"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="recordedAt"/>, or a placement time of a placed key, is not a timestamp: a time that cannot be read
+    /// never places a key, nor leaves a retired one unretired.
+    /// </exception>
     public static string? KeyPlacementProblem(ExecutorKeyRecord key, long storeSequence, string recordedAt)
     {
         ArgumentNullException.ThrowIfNull(key);
-        if (key.RegisteredSequence is null && key.RegisteredAtTime is null) return null;
-        var hasAt = TryReadTimestamp(recordedAt, out var at);
-        bool Before(long? sequence, string? time) =>
-            (sequence is { } s && s < storeSequence)
-            || (hasAt && time is not null && TryReadTimestamp(time, out var placed) && placed <= at);
-        if (!Before(key.RegisteredSequence, key.RegisteredAtTime)) return "evidence_unknown_executor";
-        return Before(key.RetiredSequence, key.RetiredAtTime) ? "evidence_executor_key_retired" : null;
+        ArgumentNullException.ThrowIfNull(recordedAt);
+        var (registeredAt, retiredAt) = PlacementTimes(key);
+        if (key.RegisteredSequence is null && registeredAt is null) return null;
+        var at = PlacementTime(recordedAt, "recordedAt");
+        bool Before(long? sequence, long? time) => (sequence is { } s && s < storeSequence) || time <= at;
+        if (!Before(key.RegisteredSequence, registeredAt)) return "evidence_unknown_executor";
+        return Before(key.RetiredSequence, retiredAt) ? "evidence_executor_key_retired" : null;
     }
+
+    /// <summary>A key's placement times in microseconds, null for none.</summary>
+    /// <exception cref="ArgumentException">One is not a timestamp.</exception>
+    private static (long? RegisteredAt, long? RetiredAt) PlacementTimes(ExecutorKeyRecord key) =>
+        (key.RegisteredAtTime is { } registered ? PlacementTime(registered, $"{key.KeyId}.RegisteredAtTime") : null,
+            key.RetiredAtTime is { } retired ? PlacementTime(retired, $"{key.KeyId}.RetiredAtTime") : null);
+
+    /// <summary>A time in microseconds, read as the references read one.</summary>
+    /// <exception cref="ArgumentException">It is not a timestamp.</exception>
+    private static long PlacementTime(string value, string field) =>
+        TimestampMicros(GrantRules.SixDigits(value)) ?? throw new ArgumentException($"{field} is not a timestamp: {value}");
 
     /// <summary>
     /// v1.4.0: what a remediation or review checks of its judgement or decision: the payload's digest, and for a judgement

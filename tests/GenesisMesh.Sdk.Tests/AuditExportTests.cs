@@ -18,7 +18,7 @@ public class AuditExportTests
         Data.Value.GetProperty("cases").EnumerateArray().Select(c => new object[] { c.GetProperty("id").GetString()! });
 
     [Fact]
-    public void HoldsTheCases() => Assert.Equal(170, CaseIds().Count());
+    public void HoldsTheCases() => Assert.Equal(180, CaseIds().Count());
 
     [Theory]
     [MemberData(nameof(CaseIds))]
@@ -61,5 +61,59 @@ public class AuditExportTests
         Assert.Equal(expected.GetProperty("counts").EnumerateObject().Select(p => (p.Name, p.Value.GetInt64())).OrderBy(p => p.Name, StringComparer.Ordinal),
             counts.Where(p => p.Value != 0).Select(p => (p.Key, p.Value)).OrderBy(p => p.Key, StringComparer.Ordinal));
         Assert.Equal(r.Failures.Count == 0, r.Verified);
+    }
+
+    // ── Key histories built by hand ─────────────────────────────────────────
+
+    /// <summary>The suite's whole store, its executor keys, its key history as verified, and its one succession as received.</summary>
+    private static (IReadOnlyList<EvidenceEvent> Events, List<ExecutorKeyRecord> Keys, NAKeyHistory History, string Succession) Store()
+    {
+        var data = Data.Value;
+        var c = data.GetProperty("cases").EnumerateArray().Single(x => x.GetProperty("id").GetString() == "base");
+        var pool = data.GetProperty("lines");
+        var events = OfflineVerifier.ParseExportLines(string.Join("\n", c.GetProperty("lines").EnumerateArray().Select(i => pool[i.GetInt32()].GetString())));
+        var held = data.GetProperty("key_histories")[c.GetProperty("history").GetInt32()];
+        var history = OfflineVerifier.VerifyKeyHistory(held.GetProperty("genesis").GetRawText(), held.GetProperty("successions").GetRawText(),
+            held.GetProperty("root_public_key").GetString()!).History!;
+        return (events, data.GetProperty("executor_key_sets")[c.GetProperty("executor_keys").GetInt32()].Deserialize<List<ExecutorKeyRecord>>()!,
+            history, held.GetProperty("successions")[0].GetRawText());
+    }
+
+    private static List<(long?, string)> Failures(IReadOnlyList<EvidenceEvent> events, List<ExecutorKeyRecord> keys, NAKeyHistory history) =>
+        OfflineVerifier.VerifyEvidenceEvents(events, new EvidenceVerifyOptions { KeyHistory = history, ExecutorKeys = keys })
+            .Failures.Select(f => (f.StoreSequence, f.Reason)).ToList();
+
+    [Fact]
+    public void AVerifiedHistoryHoldsTheDigestsOfItsSuccessions_AndKeepsThemWithAShorterGrace()
+    {
+        var (events, keys, history, succession) = Store();
+        Assert.Equal([OfflineVerifier.SuccessionDigest(succession)], history.SuccessionDigests);
+        Assert.Empty(Failures(events, keys, history));
+        var shorter = history.WithVouchingGrace(TimeSpan.FromHours(1));
+        Assert.Equal(history.SuccessionDigests, shorter.SuccessionDigests);
+        Assert.Empty(Failures(events, keys, shorter));
+        Assert.Throws<ArgumentException>(() => OfflineVerifier.SuccessionDigest("[]"));
+    }
+
+    [Fact]
+    public void AHistoryBuiltByHandWithItsRootKey_VerifiesASuccessionEntryOnlyWithItsDigest()
+    {
+        var (events, keys, history, succession) = Store();
+        var bare = new NAKeyHistory(history.SovereignId, history.RootPublicKey, history.Keys);
+        Assert.Equal([((long?)6, "succession_not_in_history")], Failures(events, keys, bare));
+        var withDigest = new NAKeyHistory(history.SovereignId, history.RootPublicKey, history.Keys)
+        {
+            SuccessionDigests = [OfflineVerifier.SuccessionDigest(succession)],
+        };
+        Assert.Empty(Failures(events, keys, withDigest));
+    }
+
+    [Fact]
+    public void AHistoryBuiltByHandWithoutARootKey_ChecksNoRootSignatureNorItsSuccessions()
+    {
+        // As TypeScript reads it, an empty root key is none.
+        var (events, keys, history, _) = Store();
+        Assert.Empty(Failures(events, keys, new NAKeyHistory(history.SovereignId, null, history.Keys)));
+        Assert.Empty(Failures(events, keys, new NAKeyHistory(history.SovereignId, "", history.Keys)));
     }
 }

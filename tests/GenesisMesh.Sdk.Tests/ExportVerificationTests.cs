@@ -366,11 +366,23 @@ public class ExportVerificationTests
         Assert.Equal("evidence_unknown_executor", Problem(new ExecutorKeyRecord { RegisteredAtTime = "2026-01-01T00:10:00.000001Z" }));
         Assert.Null(Problem(new ExecutorKeyRecord { RegisteredSequence = 9, RegisteredAtTime = at }));
         Assert.Equal("evidence_executor_key_retired", Problem(new ExecutorKeyRecord { RegisteredSequence = 1, RetiredAtTime = at }));
-        // A time that cannot be read places nothing before the record.
-        Assert.Equal("evidence_unknown_executor", Problem(new ExecutorKeyRecord { RegisteredAtTime = "yesterday" }));
-        Assert.Equal("evidence_unknown_executor",
+        // Read as the references read a time: .NET's "o" format, seven fraction digits, is cut to microseconds.
+        var retired = new DateTimeOffset(2026, 1, 1, 0, 9, 0, TimeSpan.Zero).ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal("evidence_executor_key_retired", Problem(new ExecutorKeyRecord { RegisteredSequence = 1, RetiredAtTime = retired }));
+        Assert.Null(Problem(new ExecutorKeyRecord { RegisteredAtTime = "2026-01-01T00:10:00.0000009Z" }));
+        // A time that cannot be read is refused: it never places a key, nor leaves a retired one unretired.
+        Assert.Throws<ArgumentException>(() => Problem(new ExecutorKeyRecord { RegisteredAtTime = "yesterday" }));
+        Assert.Throws<ArgumentException>(() => Problem(new ExecutorKeyRecord { RegisteredSequence = 1, RetiredAtTime = "2026-01-01 00:09:00Z" }));
+        Assert.Throws<ArgumentException>(() => Problem(new ExecutorKeyRecord { RegisteredSequence = 9, RetiredSequence = 1, RetiredAtTime = "soon" }));
+        Assert.Throws<ArgumentException>(() =>
             OfflineVerifier.KeyPlacementProblem(new ExecutorKeyRecord { RegisteredAtTime = at }, 5, "not a time"));
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.KeyPlacementProblem(null!, 5, at));
+        Assert.Throws<ArgumentNullException>(() => OfflineVerifier.KeyPlacementProblem(new ExecutorKeyRecord(), 5, null!));
+        // VerifyEvidenceEvents refuses such a key before it verifies anything.
+        Assert.Throws<ArgumentException>(() => OfflineVerifier.VerifyEvidenceEvents([], new EvidenceVerifyOptions
+        {
+            ExecutorKeys = [new ExecutorKeyRecord { KeyId = "executor-b", RegisteredSequence = 1, RetiredAtTime = "soon" }],
+        }));
     }
 
     [Fact]

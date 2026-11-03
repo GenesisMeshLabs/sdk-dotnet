@@ -590,7 +590,7 @@ public static partial class GrantRules
     /// A time with the digits past the sixth of its fraction dropped, as TypeScript and Python read one (.NET's round-trip
     /// format, <c>"o"</c>, writes seven).
     /// </summary>
-    private static string SixDigits(string value) =>
+    internal static string SixDigits(string value) =>
         LongFraction().Match(value) is { Success: true } m ? value.Remove(m.Index + 7, m.Length - 7) : value;
 
     [GeneratedRegex(@"\.[0-9]{7,}", RegexOptions.CultureInvariant)]

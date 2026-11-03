@@ -42,8 +42,9 @@ From 1.5 it reads the NA's key history (see
 [NA key history](#na-key-history)), so decisions and agreements signed before
 and after a key succession keep verifying. Audit packs and their
 verification are not part of this SDK yet: they live in the core
-(`genesis-mesh audit pack`, `genesis-mesh audit verify`) and in the Rust
-SDK's standalone verifier `genesis-mesh-verify`.
+(`genesis-mesh audit pack`, `genesis-mesh audit verify`), the TypeScript SDK
+(`verifyAuditPack`) and the Rust SDK's standalone verifier
+`genesis-mesh-verify`.
 
 From 1.9 a client can serve several NA instances with failover, retry
 idempotent requests, and sign with a key it does not hold (see
@@ -1376,11 +1377,13 @@ bool kept = OfflineVerifier.VerifyRetentionCheckpoint(checkpointJson, [naKey]);
     grant held; and no grant use sharing another record's ID
     (`duplicate_record`);
   - each key succession (1.9.0): signed by its outgoing key and its new key
-    and, given the key history, by the root key
-    (`succession_invalid_root_signature`), one of the history's successions
-    (`succession_not_in_history`), recorded at least a minute before it takes
-    effect (`succession_backdated`); each archive record signed by the NA;
-  - with executor keys the store placed (`RegisteredSequence` or
+    (`succession_invalid_new_key_signature`) and, given the key history with
+    its root key, by the root key (`succession_invalid_root_signature`), one
+    of the history's successions (`succession_not_in_history`;
+    `NAKeyHistory.SuccessionDigests`, which `VerifyKeyHistory` fills), not
+    issued after it takes effect and recorded at least a minute before
+    (`succession_backdated`); each archive record signed by the NA;
+  - with executor and observer keys the store placed (`RegisteredSequence` or
     `RegisteredAtTime`, as an audit pack's registry records place them), each
     record signed by a key registered before it (`evidence_unknown_executor`)
     and not retired before it (`evidence_executor_key_retired`).
@@ -1396,8 +1399,8 @@ bool kept = OfflineVerifier.VerifyRetentionCheckpoint(checkpointJson, [naKey]);
   Store anchors are not checked.
 - For a range of an audit pack, pass its cited entries as `Prior`: they seed
   what the range rests on and are checked as records, not as a run (their
-  failures are named `cited …`); a record the range cites that neither holds
-  is `cited_record_missing`.
+  failures keep their reason, the detail prefixed `cited`); a record the range
+  cites that neither holds is `cited_record_missing`.
 - For an export that starts after a retention, pass `Checkpoint`, the
   NA-signed checkpoint as received: the run continues from its last removed
   entry, and each resource and observation chain from its head.
