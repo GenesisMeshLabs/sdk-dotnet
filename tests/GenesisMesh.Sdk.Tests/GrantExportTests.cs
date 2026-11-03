@@ -26,7 +26,7 @@ public class GrantExportTests
         Data.Value.GetProperty(list).EnumerateArray().Select(c => new object[] { c.GetProperty("id").GetString()! });
 
     [Fact]
-    public void HoldsTheCases() => Assert.Equal((136, 6), (CaseIds().Count(), SpellingCaseIds().Count()));
+    public void HoldsTheCases() => Assert.Equal((163, 6), (CaseIds().Count(), SpellingCaseIds().Count()));
 
     [Theory]
     [MemberData(nameof(CaseIds))]

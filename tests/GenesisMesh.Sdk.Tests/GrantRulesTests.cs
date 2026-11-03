@@ -111,6 +111,18 @@ public class GrantRulesTests
         Assert.Equal("", GrantRules.NextPreviousUse(use).TimeTokenIssuedAt);
     }
 
+    [Fact]
+    public void ATimeTokenWhoseIntegerIsWrittenWithAFractionIsRead()
+    {
+        // As JavaScript reads it (1.9.0): the token is read, not taken for no token.
+        var use = Record("signature-GrantExecutionEvidence-signer").Deserialize<GrantExecutionEvidence>()!;
+        var token = JsonNode.Parse(use.TimeToken.GetRawText())!.AsObject();
+        token["use_sequence"] = JsonNode.Parse(use.TimeToken.GetProperty("use_sequence").GetInt32() + ".0");
+        use.TimeToken = JsonSerializer.SerializeToElement(token);
+        Assert.Contains(".0,", use.TimeToken.GetRawText(), StringComparison.Ordinal);
+        Assert.Equal(token["issued_at"]!.GetValue<string>(), GrantRules.NextPreviousUse(use).TimeTokenIssuedAt);
+    }
+
     [Theory]
     [InlineData("true", "1", false)]
     [InlineData("\"1\"", "1", false)]
