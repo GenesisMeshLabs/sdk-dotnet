@@ -281,6 +281,14 @@ public static partial class OfflineVerifier
             ("signature", Optional(Signature)),
         ], exact: true);
 
+        // v1.2.0: a store anchor, as the reference reads one (no field it does not have).
+        private static readonly Check AnchorFields = Shape(
+        [
+            ("anchor_sequence", Positive), ("sovereign_id", Text), ("store_sequence", Positive), ("entry_digest", Text),
+            ("anchored_at", Utc), ("previous_anchor_digest", Absent(Text)), ("issued_by", Text), ("signature", Optional(Signature)),
+        ], exact: true);
+
+        public static bool Anchor(JsonElement value) => AnchorFields(value);
         public static bool KeySuccession(JsonElement value) => KeySuccessionFields(value);
         public static bool Archive(JsonElement value) => ArchiveFields(value);
 

@@ -13,8 +13,8 @@ namespace GenesisMesh.Sdk.Tests;
 /// (genesismesh/conformance/generate_vectors.py audit) and copied here unchanged. This SDK runs the vectors of what
 /// it verifies: the signed forms of the new records, the NA key history, the keys valid at a time, the time a record
 /// read alone is placed at, decisions judged with a history, and (1.9.0) exports across a succession, with keys placed
-/// by the store's registry, and ranges with an audit pack's cited entries. Audit packs (and their report cells and
-/// changes files), registry keys, anchors and the completeness check are verified by the core and genesis-mesh-verify.
+/// by the store's registry, ranges with an audit pack's cited entries, and store anchors. Audit packs (and their report
+/// cells and changes files), registry keys and the completeness check are verified by the core and genesis-mesh-verify.
 /// Then decisions and agreements signed before and after a succession built here.
 /// </summary>
 public class KeyHistoryTests
@@ -24,10 +24,11 @@ public class KeyHistoryTests
     private static readonly HashSet<string> KindsRun = new()
     {
         "canonical_form", "key_history", "key_at", "decision_at_record_time", "record_time", "verify_export", "verify_range",
+        "verify_anchors",
     };
     private static readonly HashSet<string> KindsNotRun = new()
     {
-        "pack", "verify_anchors", "completeness", "registry_keys", "report_cell", "changes_file",
+        "pack", "completeness", "registry_keys", "report_cell", "changes_file",
     };
 
     private static JsonElement.ArrayEnumerator Vectors() =>
@@ -144,6 +145,21 @@ public class KeyHistoryTests
                     got = range
                         ? new Dictionary<string, object> { ["failures"] = Found(r.Failures) }
                         : new Dictionary<string, object> { ["failures"] = Found(r.Failures), ["warnings"] = Found(r.Warnings ?? []) };
+                    break;
+                }
+            case "verify_anchors":
+                {
+                    var input = v.GetProperty("input");
+                    var r = OfflineVerifier.VerifyStoreAnchors(OfflineVerifier.ParseAnchors(input.GetProperty("anchors").GetRawText()),
+                        new AnchorVerifyOptions
+                        {
+                            KeyHistory = HistoryOf(input),
+                            SovereignId = input.GetProperty("genesis").GetProperty("network_name").GetString(),
+                        });
+                    got = new Dictionary<string, object>
+                    {
+                        ["failures"] = r.Failures.Select(f => new Dictionary<string, object?> { ["anchor_sequence"] = f.AnchorSequence, ["reason"] = f.Reason }).ToList(),
+                    };
                     break;
                 }
             case "record_time":

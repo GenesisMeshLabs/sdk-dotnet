@@ -222,8 +222,8 @@ public static partial class OfflineVerifier
     /// governed path (<c>observation</c>, <c>break_glass</c>, <c>judgement</c>, <c>quarantine</c>, <c>registry</c>),
     /// remediation and review records (<c>remediation</c>, <c>review</c>), key successions and archive records
     /// (<c>key_succession</c>, <c>archive</c>), and pre-issued grants (<c>grant</c>, <c>grant_execution</c>,
-    /// <c>grant_revocation</c>). A kind from a later release fails as <c>unknown_entry_kind</c>. Store anchors are not
-    /// checked here.
+    /// <c>grant_revocation</c>). A kind from a later release fails as <c>unknown_entry_kind</c>. Check the run against
+    /// the store anchors you hold with <see cref="CheckEventsAgainstAnchors"/>.
     /// </remarks>
     /// <param name="events">The entries, in store order.</param>
     /// <param name="options">The keys, and what the run is.</param>

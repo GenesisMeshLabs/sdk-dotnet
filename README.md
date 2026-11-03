@@ -32,9 +32,8 @@ rotating forward and urgent changes (see
 [Remediation and reviews](#remediation-and-reviews)), and verifies their
 entries in an export. It verifies every entry kind of the store in an
 export, key successions and archive records included, and a range of an
-audit pack with its cited entries. Not yet here: store anchors, which live in
-the [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript) and
-the [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust).
+audit pack with its cited entries, and checks an export against the store
+anchors an auditor holds (see [Store anchors](#store-anchors)).
 A boundary policy with the 1.4.0 sections (`remediation`, `review_required`,
 `emergency`) verifies here like any other.
 
@@ -1396,7 +1395,8 @@ bool kept = OfflineVerifier.VerifyRetentionCheckpoint(checkpointJson, [naKey]);
   records), remediation and review records, key successions and archive
   records, and pre-issued grants, their uses and revocations. A kind from a
   later release fails as `unknown_entry_kind`; its envelope still chains.
-  Store anchors are not checked.
+  Check the run against the store anchors you hold with
+  `CheckEventsAgainstAnchors` (see [Store anchors](#store-anchors)).
 - For a range of an audit pack, pass its cited entries as `Prior`: they seed
   what the range rests on and are checked as records, not as a run (their
   failures keep their reason, the detail prefixed `cited`); a record the range
@@ -1408,6 +1408,46 @@ bool kept = OfflineVerifier.VerifyRetentionCheckpoint(checkpointJson, [naKey]);
   vectors, the `out_of_band`, `remediation`, `grants` and `audit` suites'
   `verify_export` vectors and the `audit` suite's `verify_range` vectors, and
   gives the reference's own verification of its export.
+
+### Store anchors
+
+The store chain is hashed, not signed: whoever can write the NA's database can
+remove entries and rebuild the links. A store anchor is the NA's signed
+statement of the store's head (its position and entry digest), and anchors
+form their own chain. An auditor keeps copies of the anchors out of the
+operator's reach and checks an export against them (1.9.0, as the reference's
+`verify_store_anchors` and `check_events_against_anchors`):
+
+```csharp
+var anchors = OfflineVerifier.ParseAnchors(heldAnchorsJson);  // the copies you hold, in order
+var chain = OfflineVerifier.VerifyStoreAnchors(anchors, new AnchorVerifyOptions
+{
+    KeyHistory = history,          // each anchor signed by the key valid at its anchored_at
+    SovereignId = "sovereign-c",   // whose anchors these are
+});
+var run = OfflineVerifier.VerifyEvidenceEvents(events, options);
+OfflineVerifier.CheckEventsAgainstAnchors(events, anchors, run);
+// run.Anchors: how many anchors matched, where the anchored part of the run ends.
+```
+
+- `VerifyStoreAnchors` checks each signature (`anchor_invalid_signature`;
+  `na_key_not_valid_at_time` under a key history), the sovereign
+  (`anchor_sovereign_mismatch`), the anchor chain (`anchor_sequence_gap`,
+  `anchor_chain_break`) and heads that only move forward
+  (`anchor_not_increasing`), in `anchor_sequence` order. The run may start
+  after anchor 1. It needs the NA's keys or key history, or `SkipSignatures`
+  for a check of the database without them. `ParseAnchors` reads an array of
+  anchors or a page of the anchors route, and refuses an anchor that is not
+  well formed.
+- `CheckEventsAgainstAnchors` ties the run at its start (entry 1, a retention
+  checkpoint in the run, or with `FromAnchor` a held anchor its first entry
+  continues from; otherwise `export_not_linked_to_anchors`) and at its end
+  (`export_ends_before_anchor`), and checks each anchor inside it against its
+  entry (`anchor_mismatch`, `anchor_entry_missing`). `Partial` checks a
+  deliberate slice, without its ends.
+- `StartingCheckpoint` finds the retention checkpoint that explains where a run
+  starts, to pass as `EvidenceVerifyOptions.Checkpoint`.
+- It runs the shared `audit` suite's `verify_anchors` vectors.
 
 ### NA key history
 

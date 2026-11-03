@@ -2665,7 +2665,8 @@ public sealed class EvidenceStoreVerification
 
     /// <summary>
     /// v1.2.0: how the entries tie to the NA's store anchors. Sent with the whole store's verification
-    /// (<see cref="EvidenceStoreClient.Verify"/>), not with a history.
+    /// (<see cref="EvidenceStoreClient.Verify"/>), not with a history; offline, <see cref="OfflineVerifier.CheckEventsAgainstAnchors"/>
+    /// fills it.
     /// </summary>
     [JsonPropertyName("anchors")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -2701,11 +2702,14 @@ public sealed class AnchorSummary
     [JsonPropertyName("anchors_checked")]
     public long AnchorsChecked { get; set; }
 
-    /// <summary>The anchors that name an entry of the run by its digest.</summary>
+    /// <summary>
+    /// The anchors that name an entry of the run by its digest, the anchor of the entry right before the run included
+    /// when the run continues from it.
+    /// </summary>
     [JsonPropertyName("anchors_matched")]
     public long AnchorsMatched { get; set; }
 
-    /// <summary>The anchors before the run's first entry.</summary>
+    /// <summary>The anchors of entries before the run, but the one of the entry right before its first.</summary>
     [JsonPropertyName("anchors_before_export")]
     public long AnchorsBeforeExport { get; set; }
 
@@ -2713,7 +2717,10 @@ public sealed class AnchorSummary
     [JsonPropertyName("anchors_after_export")]
     public long AnchorsAfterExport { get; set; }
 
-    /// <summary>True when the run starts at entry 1, or right after a retention checkpoint it holds.</summary>
+    /// <summary>
+    /// True when the run starts at entry 1, right after a retention checkpoint it holds, or (offline, with
+    /// <see cref="AnchorCheckOptions.FromAnchor"/>) right after a held anchor it continues from.
+    /// </summary>
     [JsonPropertyName("linked_start")]
     public bool LinkedStart { get; set; }
 
@@ -2730,6 +2737,49 @@ public sealed class AnchorSummary
     [JsonPropertyName("chain")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AnchorVerification? Chain { get; set; }
+}
+
+/// <summary>
+/// A signed statement of the evidence store's head (<c>GET /admin/evidence/anchors</c>, v1.2.0): the NA signs the head's
+/// store position and entry digest, and anchors form their own chain. Copies kept out of the operator's reach prove an
+/// export holds every entry they cover (<see cref="OfflineVerifier.VerifyStoreAnchors"/>,
+/// <see cref="OfflineVerifier.CheckEventsAgainstAnchors"/>).
+/// </summary>
+public sealed class StoreAnchor
+{
+    /// <summary>The anchor's gap-free position in the anchor chain, from 1.</summary>
+    [JsonPropertyName("anchor_sequence")]
+    public long AnchorSequence { get; set; }
+
+    /// <summary>The NA's sovereign: its genesis block's <c>network_name</c>.</summary>
+    [JsonPropertyName("sovereign_id")]
+    public string SovereignId { get; set; } = "";
+
+    /// <summary>The anchored head's <c>store_sequence</c>.</summary>
+    [JsonPropertyName("store_sequence")]
+    public long StoreSequence { get; set; }
+
+    /// <summary>The anchored head's entry digest.</summary>
+    [JsonPropertyName("entry_digest")]
+    public string EntryDigest { get; set; } = "";
+
+    /// <summary>When the NA signed the anchor (UTC), as received.</summary>
+    [JsonPropertyName("anchored_at")]
+    public string AnchoredAt { get; set; } = "";
+
+    /// <summary>The previous anchor's digest (<see cref="OfflineVerifier.AnchorDigest"/>); null for the first.</summary>
+    [JsonPropertyName("previous_anchor_digest")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PreviousAnchorDigest { get; set; }
+
+    /// <summary>The NA key's ID.</summary>
+    [JsonPropertyName("issued_by")]
+    public string IssuedBy { get; set; } = "";
+
+    /// <summary>The NA's signature over <see cref="OfflineVerifier.AnchorCanonical"/>, as received.</summary>
+    [JsonPropertyName("signature")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Signature { get; set; }
 }
 
 /// <summary>A run of store anchors verified as a chain: signatures, links and heads that never go back (v1.2.0).</summary>
@@ -2753,7 +2803,7 @@ public sealed class AnchorVerification
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public long? LastAnchorSequence { get; set; }
 
-    /// <summary>The store position the last anchor signs; null without anchors.</summary>
+    /// <summary>The highest store position the anchors sign; null without anchors.</summary>
     [JsonPropertyName("anchored_through_sequence")]
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public long? AnchoredThroughSequence { get; set; }
@@ -2771,7 +2821,7 @@ public sealed class AnchorFailure
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public long? AnchorSequence { get; set; }
 
-    /// <summary>Why, such as <c>anchor_chain_break</c> or <c>invalid_signature</c>.</summary>
+    /// <summary>Why, such as <c>anchor_chain_break</c> or <c>anchor_invalid_signature</c>.</summary>
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = "";
 
