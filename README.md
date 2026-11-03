@@ -557,6 +557,86 @@ var flushed = await client.EvidenceStore.FlushRecords();  // at startup and on a
   for your own `IOutbox<RecordOutboxEntry>`, and
   `MemoryOutbox<RecordOutboxEntry>` is for tests.
 
+#### Remediation and reviews
+
+From 1.9 the SDK has the NA's rules for what a judged DENY leads to (1.4.0 of
+the protocol), as pure functions in `RemediationRules`. They are offline and
+take the reference's codes:
+- the NA states what is to be done and by when;
+- the controller does it and records it in a remediation record it signs;
+- a second holder may review the change, in a review record the NA signs.
+
+```csharp
+// What a denied change leads to, from the judgement's policies and the record of the change.
+var plan = RemediationRules.Plan(judgement.Verdict, policies, gateEvaluations,
+    RemediationRules.FactsOf(ChangeKinds.Observation, observationPayload));
+var due = RemediationRules.DueAt(judgement.JudgedAt, plan.GraceSeconds);
+if (plan.Steps == RemediationSteps.RotateForwardThenDisable) { /* rotate under a governed decision, then disable */ }
+
+// The record of what was done, signed by the executor key.
+var record = await executor.SignRemediation(new RemediationInput
+{
+    SubjectKind = RemediationSubjectKinds.Judgement, SubjectId = judgement.JudgementId,
+    ChangeKind = ChangeKinds.Observation, ChangeId = observation.ObservationId, ResourceId = observation.ResourceId,
+    Steps = plan.Steps, RotationEvidenceId = rotation.EvidenceId, VersionId = "v3", DisabledVersionId = "v2",
+});
+var mismatch = RemediationRules.StepsProblem(plan.Mode, plan.Steps, record);   // null: it carries out the plan
+
+// A review the NA signed, and whether its embedded requests prove it.
+var verified = OfflineVerifier.VerifyReviewRecord(reviewJson, naKeyHistory);
+var problem = RemediationRules.ReviewApprovalProblem(review, naPublicKeys);
+```
+
+- **The state table:** `NextState` gives the state after an event, or the
+  NA's refusal (`review_not_pending`, `review_already_pending`,
+  `remediation_not_due` and the others). A pending review is a flag beside
+  the state; it stops no clock. `JudgementState` says where a judged change
+  enters the table.
+- **Plans:**
+  - `Guidance` takes the guidance of each failing enforce-mode gate, then a
+    policy's `"*"`, then the NA's defaults. `cancel` wins over `alert_only`,
+    and the shortest grace of the winning mode applies.
+  - `Plan` turns a `cancel` into steps: a created resource is disabled; a
+    rotated or updated one with a version is rotated forward, then the denied
+    version disabled. Otherwise the plan falls back to an alert
+    (`RemediationFallbacks`). An indeterminate judgement always alerts.
+  - `DecisionPlan` does the same for a decision a review denied.
+- **Due times:** `DueAt`, `DueAfterDenial` (a review never extends a
+  remediation) and `DueAfterWaiver`, printed as the reference prints a time.
+- **Remediation records:** `ExecutionRecorder.SignRemediation` refuses what
+  the NA would refuse before anything is signed (`OutOfBandRecordException`):
+  - `remediation_malformed`: a field missing, empty or too long, or steps that
+    do not fit the outcome and versions. An alert changes nothing; a forward
+    rotation names its evidence, the version it issued and another one it
+    disabled.
+  - `remediation_secret_material`: secret material in a version or the detail.
+
+  `RecordProblem` checks a received record as the NA admits one: its exact
+  form, then its signature against the registered key as `ListExecutorKeys`
+  returns it, the key's role, retirement and prefix, and secret material.
+  `OfflineVerifier.VerifyRemediationRecord` checks a record's form and
+  signature alone.
+- **Reviews:**
+  - `OfflineVerifier.VerifyReviewRecord` checks a review's form and the NA's
+    signature, under its key history at `decided_at`.
+  - `ReviewApprovalProblem` checks the operators' signed requests the review
+    embeds, offline: the decider signed exactly the verdict, waiver end and
+    note it records, for this NA, within 300 seconds of the decision, and so
+    did a requester for the subject and justification.
+  - `ReviewHolderProblem` and `ReviewRequestProblem` say whether a second
+    holder decided it, and whether the change's actor asked for it.
+  - `Rfc3339` is the one grammar of the timestamps a review embeds.
+- **Policies:** `PolicySectionIssues` checks a policy's 1.4.0 sections
+  (remediation guidance, the emergency capability) as the NA does.
+  `EmergencyMap` maps each emergency capability to the one it stands for.
+- **Where this SDK differs:**
+  - `Rfc3339` returns null for a time that falls outside the years 1 to 9999
+    in UTC. TypeScript prints one, and the reference cannot convert one to
+    UTC.
+  - A due time refuses a date that does not exist, such as February 29 of a
+    common year, as the reference does. TypeScript's date reading moves it to
+    the next month.
+
 ### Governed actions
 
 From 1.9 `Governance.GovernedAction` makes one governed change, as the

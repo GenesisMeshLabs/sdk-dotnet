@@ -169,6 +169,27 @@ public sealed class ExecutionRecorder
         return record;
     }
 
+    /// <summary>
+    /// A signed remediation record (1.9.0): what the controller did about a change whose remediation the NA made due,
+    /// signed by its executor key (registered with role <c>executor</c> for this sovereign). Refused before signing as
+    /// the NA would refuse it, in its order: a value it could not read, a record its model does not take, then secret
+    /// material. Whether it carries out the NA's plan is <see cref="RemediationRules.StepsProblem"/>.
+    /// </summary>
+    /// <exception cref="OutOfBandRecordException">
+    /// <c>remediation_malformed</c>: a field is missing, empty, too long (a detail over 1024 characters) or not one the
+    /// NA takes, or the steps do not fit the outcome and versions (an alert changes nothing; a forward rotation names its
+    /// evidence, the version it issued and another one it disabled). <c>remediation_secret_material</c>: a version or the
+    /// detail holds secret material.
+    /// </exception>
+    /// <exception cref="StrictJsonException">The record holds a value the NA would refuse as <c>invalid_json</c>.</exception>
+    public async Task<RemediationRecord> SignRemediation(RemediationInput input, CancellationToken ct = default)
+    {
+        var record = OutOfBandRecords.RemediationOf(input, ExecutorSovereignId);
+        var unsigned = OutOfBandRecords.CheckRemediation(record);
+        record.Signature = await OutOfBandRecords.Sign(unsigned, _signer, ct).ConfigureAwait(false);
+        return record;
+    }
+
     /// <summary>The record's <c>digest()</c>, as the next record links to it (<see cref="OfflineVerifier.ExecutionDigest"/>).</summary>
     public static string Digest(ExecutionEvidence evidence)
     {
