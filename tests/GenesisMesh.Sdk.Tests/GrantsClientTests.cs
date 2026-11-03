@@ -420,6 +420,29 @@ public class GrantsClientTests
         Assert.Empty(flushed.DeadLettered);
     }
 
+    /// <summary>A record outbox whose listing fails after the first.</summary>
+    private sealed class ListsOnce(MemoryOutbox<RecordOutboxEntry> inner) : IOutbox<RecordOutboxEntry>
+    {
+        private int _lists;
+
+        public Task Add(RecordOutboxEntry entry, CancellationToken ct = default) => inner.Add(entry, ct);
+        public Task Update(RecordOutboxEntry entry, CancellationToken ct = default) => inner.Update(entry, ct);
+        public Task Remove(string id, CancellationToken ct = default) => inner.Remove(id, ct);
+        public Task<IReadOnlyList<RecordOutboxEntry>> List(CancellationToken ct = default) =>
+            Interlocked.Increment(ref _lists) == 1 ? inner.List(ct) : throw new IOException("the disk went away");
+    }
+
+    [Fact]
+    public async Task AGapIsRetriedWhenTheOutboxCannotBeReadToLookBehindIt()
+    {
+        var inner = new MemoryOutbox<RecordOutboxEntry>();
+        await inner.Add(DeadLetter(UseAt(1), "grant_use_invalid_signature", null));
+        await inner.Add(EvidenceOutbox.RecordEntry(UseAt(2)));
+        using var gm = Client([], NA(_ => Refused(422, "grant_use_chain_gap")), outbox: new ListsOnce(inner));
+        var flushed = await gm.EvidenceStore.FlushRecords(new FlushOptions { IgnoreBackoff = true });
+        Assert.Equal(["grant_use_chain_gap"], flushed.Pending.Select(e => e.LastError!.Code));
+    }
+
     [Fact]
     public async Task AGrantsUsesAreSentInTheirChainsOrder()
     {
