@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GenesisMesh;
+using NSec.Cryptography;
 using Xunit;
 
 namespace GenesisMesh.Sdk.Tests;
@@ -95,7 +96,64 @@ public class AuditPackTests
     }
 
     [Fact]
-    public void HoldsTheCases() => Assert.Equal(318, CaseIds().Count());
+    public void HoldsTheCases() => Assert.Equal(343, CaseIds().Count());
+
+    private static readonly Lazy<JsonElement> Registry = new(() => JsonDocument.Parse(File.ReadAllText(
+        Path.Combine(AppContext.BaseDirectory, "testdata", "audit", "registry_cases.json"))).RootElement);
+
+    public static IEnumerable<object[]> RegistryIds() =>
+        Registry.Value.GetProperty("cases").EnumerateArray().Select(c => new object[] { c.GetProperty("id").GetString()! });
+
+    /// <summary>
+    /// The keys registry records place, as a pack reads them: a record counts when the NA key valid at its entry's time
+    /// signed it as received; it places a key by store position, or by its <c>effective_at</c> when reconstructed or
+    /// carried past retention; a key's first registration and first retirement count, and another public key replaces it.
+    /// The reference placed each.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(RegistryIds))]
+    public void RegistryRecordsPlaceKeysAsTheReferenceDid(string id)
+    {
+        var c = Registry.Value.GetProperty("cases").EnumerateArray().Single(x => x.GetProperty("id").GetString() == id);
+        static string? At(string? value) => value is null ? null : Canonical.Timestamp(OfflineVerifier.ParseTimestamp(value));
+        var got = new JsonObject();
+        foreach (var (keyId, k) in OfflineVerifier.RegistryKeys(OfflineVerifier.ParseExportLines(c.GetProperty("lines").GetString()!), History()))
+        {
+            got[keyId] = new JsonObject
+            {
+                ["public_key"] = k.PublicKey,
+                ["executor_sovereign_id"] = k.ExecutorSovereignId,
+                ["role"] = k.Role,
+                ["resource_prefix"] = k.ResourcePrefix,
+                ["registered_sequence"] = k.RegisteredSequence,
+                ["registered_at"] = At(k.RegisteredAtTime),
+                ["retired"] = k.RetiredSequence is not null || k.RetiredAtTime is not null,
+                ["retired_sequence"] = k.RetiredSequence,
+                ["retired_at"] = At(k.RetiredAtTime),
+            };
+        }
+        Assert.Equal(Canonical.FromJson(c.GetProperty("keys").GetRawText()), Canonical.FromJson(got.ToJsonString()));
+    }
+
+    [Fact]
+    public void AHeldAnchorIsComparedByItsTimeNotItsSpelling()
+    {
+        // As the reference compares anchors as models: one held with +00:00 for Z is the pack's anchor (no
+        // anchor_mismatch), though its signature, over the form received, fails.
+        var held = Case("frozen").GetProperty("options").GetProperty("held_anchors").EnumerateArray().Select(a =>
+        {
+            var o = JsonNode.Parse(a.GetRawText())!.AsObject();
+            o["anchored_at"] = o["anchored_at"]!.GetValue<string>().Replace("Z", "+00:00", StringComparison.Ordinal);
+            return (JsonNode?)o;
+        }).ToArray();
+        var r = OfflineVerifier.VerifyAuditPack(Frozen(), new VerifyAuditPackOptions
+        {
+            RootPublicKey = RootKey(),
+            HeldAnchors = OfflineVerifier.ParseAnchors(new JsonArray(held).ToJsonString()),
+        });
+        Assert.Contains("anchor_invalid_signature", OfflineVerifier.PackReasons(r));
+        Assert.DoesNotContain("anchor_mismatch", OfflineVerifier.PackReasons(r));
+    }
 
     private static readonly Lazy<JsonElement> GrantPacks = new(() => JsonDocument.Parse(File.ReadAllText(
         Path.Combine(AppContext.BaseDirectory, "testdata", "audit", "grant_packs.json"))).RootElement);
@@ -294,6 +352,20 @@ public class AuditPackTests
         var node = JsonNode.Parse(archive)!;
         node["location"] = "elsewhere";
         Assert.False(OfflineVerifier.VerifyArchiveRecord(node.ToJsonString(), history));
+        // Signed again by the NA key (na-2, the world's seed 192..223): one with a field this SDK does not know, or a time
+        // not in canonical form, is refused all the same.
+        using var na2 = Key.Import(SignatureAlgorithm.Ed25519, Enumerable.Range(192, 32).Select(i => (byte)i).ToArray(), KeyBlobFormat.RawPrivateKey);
+        string Resigned(Action<JsonObject> change)
+        {
+            var o = JsonNode.Parse(archive)!.AsObject();
+            change(o);
+            var body = OfflineVerifier.OutOfBandCanonical(JsonSerializer.SerializeToElement(o));
+            o["signature"]!["sig"] = Convert.ToBase64String(SignatureAlgorithm.Ed25519.Sign(na2, Encoding.UTF8.GetBytes(body)));
+            return o.ToJsonString();
+        }
+        Assert.True(OfflineVerifier.VerifyArchiveRecord(Resigned(_ => { }), history));
+        Assert.False(OfflineVerifier.VerifyArchiveRecord(Resigned(o => o["note"] = "x"), history));
+        Assert.False(OfflineVerifier.VerifyArchiveRecord(Resigned(o => o["archived_at"] = "2026-01-14T00:00:00.000000Z"), history));
         node = JsonNode.Parse(archive)!;
         node["note"] = "x";
         Assert.False(OfflineVerifier.VerifyArchiveRecord(node.ToJsonString(), history));
@@ -318,10 +390,33 @@ public class AuditPackTests
         manifest.PeriodUntil = "2026-01-03T00:00:00.5Z";
         var header = OfflineVerifier.ReportHeaderOf(manifest);
         Assert.Equal(("2026-01-02T00:00:00Z", "2026-01-03T00:00:00.500000Z"), (header.PeriodFrom, header.PeriodUntil));
+        // As the reference's report_header writes created_at (its microseconds, in Z).
+        foreach (var (created, written) in new[]
+        {
+            ("2026-01-16T00:00:00.000000Z", "2026-01-16T00:00:00Z"), ("2026-01-16T00:00:00+00:00", "2026-01-16T00:00:00Z"),
+            ("2026-01-16T00:00:00-00:00", "2026-01-16T00:00:00Z"), ("2026-01-16T00:00:00.5Z", "2026-01-16T00:00:00.500000Z"),
+        })
+        {
+            manifest.CreatedAt = created;
+            Assert.Equal(written, OfflineVerifier.ReportHeaderOf(manifest).CreatedAt);
+        }
         Assert.Equal(manifest.PackId, header.PackId);
         Assert.Equal(OfflineVerifier.PackFormat, manifest.Format);
         Assert.Throws<ArgumentNullException>(() => OfflineVerifier.ReportHeaderOf(null!));
         Assert.Equal("", OfflineVerifier.ReportCell(null));
+    }
+
+    [Fact]
+    public void AnIntegerMinusZeroNamesWhatZeroNames()
+    {
+        // Strict JSON refuses -0, but a record a caller read leniently may hold it: as Python reads it (0, whose str is
+        // "0"), it names the state of subject "0".
+        using var payload = JsonDocument.Parse("""{"decision_id": -0, "resource_id": "kv:a"}""");
+        var entry = new EvidenceEvent { Entry = new EvidenceStoreEntry { StoreSequence = 1, EntryKind = "execution" }, Payload = payload.RootElement };
+        using var checks = JsonDocument.Parse("{}");
+        using var states = JsonDocument.Parse("""{"0": {"state": "zeroed"}}""");
+        var report = OfflineVerifier.RenderReport(OfflineVerifier.ReportHeaderOf(new AuditPackManifest()), [entry], checks.RootElement, states.RootElement);
+        Assert.Contains("| 1 | execution | kv:a |  |  | prior_decision | zeroed |  |", report, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -557,7 +557,6 @@ public sealed partial class EvidenceStoreClient
     /// <exception cref="InvalidOperationException">The NA's cursor did not advance.</exception>
     public async Task<IReadOnlyList<StoreAnchor>> AllAnchors(long afterAnchor = 0, CancellationToken ct = default)
     {
-        AnchorQuery(afterAnchor, null, nameof(afterAnchor));
         var anchors = new List<StoreAnchor>();
         for (long? after = afterAnchor; after is { } cursor;)
         {
@@ -1064,7 +1063,7 @@ public sealed partial class EvidenceStoreClient
         return await _t.AdminPostAsync<ReviewDecided>(path, body, ct).ConfigureAwait(false);
     }
 
-    /// <summary>The query of a page of changes; throws for a value out of range.</summary>
+    /// <summary>The query of a page of anchors; throws for a value out of range (named <paramref name="argument"/>).</summary>
     private static Dictionary<string, string>? AnchorQuery(long? afterAnchor, int? limit, string argument)
     {
         if (afterAnchor is { } a) ArgumentOutOfRangeException.ThrowIfNegative(a, argument);

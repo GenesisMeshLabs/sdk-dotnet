@@ -23,7 +23,7 @@ public class CompletenessTests
     private static string Normalized(object value) => Canonical.FromJson(JsonSerializer.Serialize(value));
 
     [Fact]
-    public void HoldsTheCases() => Assert.Equal(171, CaseIds().Count());
+    public void HoldsTheCases() => Assert.Equal(182, CaseIds().Count());
 
     [Theory]
     [MemberData(nameof(CaseIds))]

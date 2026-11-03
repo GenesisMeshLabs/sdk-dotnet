@@ -18,3 +18,4 @@
 
 - A manifest or held anchor written in a form the reference's models coerce (`6.0` or `"6"` for an integer, `true` for 1, `+00:00` for `Z`) is refused by its shape or signature, as TypeScript refuses it; the reference reads the coerced value and also names `non_canonical_form`.
 - A decision entry whose `decision` is not an object fails the entry's checks; the reference raises (`AttributeError`) while rendering the report.
+- `ReportHeaderOf` keeps a manifest time it does not read (one with more than six fraction digits) as given; the reference truncates it to microseconds. Such a manifest is not in canonical form, and both refuse the pack.
