@@ -38,7 +38,7 @@ public class AnchorTests
         .Select(f => (f[0].ValueKind == JsonValueKind.Null ? (long?)null : f[0].GetInt64(), f[1].GetString()!));
 
     [Fact]
-    public void HoldsTheCases() => Assert.Equal(86, CaseIds().Count());
+    public void HoldsTheCases() => Assert.Equal(88, CaseIds().Count());
 
     [Theory]
     [MemberData(nameof(CaseIds))]
@@ -138,6 +138,27 @@ public class AnchorTests
     }
 
     [Fact]
+    public void ARunNotTiedAtItsStartSaysWhy()
+    {
+        // Right after a held anchor: verify it as an export since that anchor. Elsewhere: export from entry 1.
+        string Why(string id)
+        {
+            var c = Case(id);
+            var events = Events(c);
+            var result = OfflineVerifier.VerifyEvidenceEvents(events, new EvidenceVerifyOptions
+            {
+                KeyHistory = History(),
+                ExecutorKeys = Data.Value.GetProperty("executor_keys").Deserialize<List<ExecutorKeyRecord>>()!,
+            });
+            OfflineVerifier.CheckEventsAgainstAnchors(events, OfflineVerifier.ParseAnchors(c.GetProperty("anchors").GetRawText()), result);
+            return result.Failures.Single(f => f.Reason == "export_not_linked_to_anchors").Detail;
+        }
+        Assert.StartsWith("the export starts right after held anchor 1,", Why("run-from-6"), StringComparison.Ordinal);
+        Assert.EndsWith("(FromAnchor)", Why("run-from-6"), StringComparison.Ordinal);
+        Assert.StartsWith("the export starts at entry 7 and holds neither entry 1", Why("run-from-7"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AnchorsAreReadFromAnArrayOrFromAPageOfTheAnchorsRoute()
     {
         var list = Case("chain-base-history").GetProperty("anchors").GetRawText();
@@ -167,5 +188,22 @@ public class AnchorTests
         first.Entry.PrevEntryDigest = checkpoint.Payload.GetProperty("last_removed_entry_digest").GetString();
         first.Entry.StoreSequence++;
         Assert.Null(OfflineVerifier.StartingCheckpoint([first, checkpoint], first));
+        first.Entry.StoreSequence--;
+        // Only a retention checkpoint entry explains it, not another kind carrying such a payload.
+        checkpoint.Entry.EntryKind = "registry";
+        Assert.Null(OfflineVerifier.StartingCheckpoint([first, checkpoint], first));
+        checkpoint.Entry.EntryKind = "retention_checkpoint";
+
+        // Checked against the anchors held, such a run is tied at its start: the checkpoint accounts for the entries
+        // before it, though an anchor names one of them.
+        var removedThrough = checkpoint.Payload.GetProperty("removed_through_sequence").GetInt64();
+        var anchor = OfflineVerifier.ParseAnchors(Case("chain-base-history").GetProperty("anchors").GetRawText())[0];
+        anchor.StoreSequence = removedThrough - 1;
+        var result = new EvidenceStoreVerification { Verified = true };
+        OfflineVerifier.CheckEventsAgainstAnchors([first, checkpoint], [anchor], result);
+        Assert.Equal((true, true, 1L), (result.Verified, result.Anchors!.LinkedStart, result.Anchors.AnchorsBeforeExport));
+        result = new EvidenceStoreVerification { Verified = true };
+        OfflineVerifier.CheckEventsAgainstAnchors([first], [anchor], result);
+        Assert.Equal(("export_not_linked_to_anchors", false), (Assert.Single(result.Failures).Reason, result.Anchors!.LinkedStart));
     }
 }
