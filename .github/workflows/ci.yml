@@ -118,6 +118,7 @@ jobs:
           --only-test EveryCallReturnsWhatTheNASent --only-test APartnerControllerRunsTheLifecycleOnAStandardKey
           --only-test ChangesOutsideTheGovernedPathAreRecordedAndJudged --only-test ADeniedChangeIsRemediatedAndReviewed
           --only-test ADeniedRotationIsCancelledByRotatingForward --only-test AGrantIsIssuedUsedAndRevoked
+          --only-test AHolderActsWithinAGrantOfflineAndFallsBackPastIt
 
   release-train:
     runs-on: ubuntu-latest
