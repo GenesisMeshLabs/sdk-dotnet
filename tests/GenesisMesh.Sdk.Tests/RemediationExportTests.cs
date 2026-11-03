@@ -59,9 +59,14 @@ public class RemediationExportTests
         Assert.Equal(expected.GetProperty("verified").GetBoolean(), r.Verified);
         var counts = new Dictionary<string, long>
         {
-            ["observations"] = r.Observations, ["break_glass"] = r.BreakGlass, ["judgements"] = r.Judgements,
-            ["quarantined"] = r.Quarantined, ["remediations"] = r.Remediations, ["reviews"] = r.Reviews,
-            ["decisions"] = r.Decisions, ["executions"] = r.Executions,
+            ["observations"] = r.Observations,
+            ["break_glass"] = r.BreakGlass,
+            ["judgements"] = r.Judgements,
+            ["quarantined"] = r.Quarantined,
+            ["remediations"] = r.Remediations,
+            ["reviews"] = r.Reviews,
+            ["decisions"] = r.Decisions,
+            ["executions"] = r.Executions,
         };
         Assert.Equal(expected.GetProperty("counts").EnumerateObject().Select(p => (p.Name, p.Value.GetInt64())).OrderBy(p => p.Name, StringComparer.Ordinal),
             counts.Where(p => p.Value != 0).Select(p => (p.Key, p.Value)).OrderBy(p => p.Key, StringComparer.Ordinal));
