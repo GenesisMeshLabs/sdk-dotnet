@@ -7,7 +7,9 @@ namespace GenesisMesh.Sdk.Tests;
 /// <summary>
 /// Key successions, archive records, executor keys placed by the store and an audit pack's range with its cited entries
 /// (1.9.0), beyond the shared audit suite's 13 <c>verify_export</c> and 2 <c>verify_range</c> vectors: variants of the
-/// suite's store the Python reference verified, with its answers. The TypeScript SDK agrees on every case.
+/// suite's store the Python reference verified, with its answers, and ranges of the grants, remediation and
+/// out_of_band suites' stores with their cited entries (some after a checkpoint, under a key history built by hand).
+/// The TypeScript SDK agrees on every case.
 /// </summary>
 public class AuditExportTests
 {
@@ -18,7 +20,7 @@ public class AuditExportTests
         Data.Value.GetProperty("cases").EnumerateArray().Select(c => new object[] { c.GetProperty("id").GetString()! });
 
     [Fact]
-    public void HoldsTheCases() => Assert.Equal(180, CaseIds().Count());
+    public void HoldsTheCases() => Assert.Equal(192, CaseIds().Count());
 
     [Theory]
     [MemberData(nameof(CaseIds))]
@@ -36,12 +38,17 @@ public class AuditExportTests
             history = OfflineVerifier.VerifyKeyHistory(held.GetProperty("genesis").GetRawText(),
                 held.GetProperty("successions").GetRawText(), held.GetProperty("root_public_key").GetString()!).History!;
         }
+        else if (c.TryGetProperty("hand_history", out var hand))
+        {
+            history = HandBuilt(hand);
+        }
         var r = OfflineVerifier.VerifyEvidenceEvents(Events("lines"), new EvidenceVerifyOptions
         {
             NAPublicKeys = c.TryGetProperty("na_public_keys", out var keys) ? keys.EnumerateArray().Select(k => k.GetString()!).ToList() : [],
             KeyHistory = history,
             ExecutorKeys = data.GetProperty("executor_key_sets")[c.GetProperty("executor_keys").GetInt32()].Deserialize<List<ExecutorKeyRecord>>()!,
             Contiguous = c.GetProperty("contiguous").GetBoolean(),
+            Checkpoint = c.TryGetProperty("checkpoint", out var checkpoint) ? checkpoint.GetRawText() : null,
             Prior = c.TryGetProperty("cited", out _) ? Events("cited") : null,
         });
         var expected = c.GetProperty("expected");
@@ -54,13 +61,32 @@ public class AuditExportTests
             ["decisions"] = r.Decisions,
             ["executions"] = r.Executions,
             ["observations"] = r.Observations,
+            ["break_glass"] = r.BreakGlass,
             ["judgements"] = r.Judgements,
+            ["quarantined"] = r.Quarantined,
+            ["remediations"] = r.Remediations,
+            ["reviews"] = r.Reviews,
             ["key_successions"] = r.KeySuccessions,
             ["archives"] = r.Archives,
+            ["grants"] = r.Grants,
+            ["grant_executions"] = r.GrantExecutions,
+            ["grant_revocations"] = r.GrantRevocations,
         };
         Assert.Equal(expected.GetProperty("counts").EnumerateObject().Select(p => (p.Name, p.Value.GetInt64())).OrderBy(p => p.Name, StringComparer.Ordinal),
             counts.Where(p => p.Value != 0).Select(p => (p.Key, p.Value)).OrderBy(p => p.Key, StringComparer.Ordinal));
         Assert.Equal(r.Failures.Count == 0, r.Verified);
+    }
+
+    /// <summary>A key history built by hand: its sovereign, root key (or none) and keys with their windows.</summary>
+    private static NAKeyHistory HandBuilt(JsonElement hand)
+    {
+        static DateTimeOffset? At(JsonElement key, string name) => key.GetProperty(name).GetString() is { } at
+            ? DateTimeOffset.Parse(at, System.Globalization.CultureInfo.InvariantCulture)
+            : null;
+        return new NAKeyHistory(hand.GetProperty("sovereign_id").GetString()!, hand.GetProperty("root_public_key").GetString(),
+            hand.GetProperty("keys").EnumerateArray().Select(k => new NAKey(k.GetProperty("key_sequence").GetInt32(),
+                k.GetProperty("key_id").GetString(), k.GetProperty("public_key").GetString()!, At(k, "valid_from"),
+                At(k, "succeeded_at"), At(k, "valid_to"), k.GetProperty("valid_to_enforced").GetBoolean())).ToList());
     }
 
     // ── Key histories built by hand ─────────────────────────────────────────
