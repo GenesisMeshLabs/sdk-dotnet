@@ -13,8 +13,8 @@ namespace GenesisMesh.Sdk.Tests;
 /// (genesismesh/conformance/generate_vectors.py audit) and copied here unchanged. This SDK runs the vectors of what
 /// it verifies: the signed forms of the new records, the NA key history, the keys valid at a time, the time a record
 /// read alone is placed at, decisions judged with a history, and (1.9.0) exports across a succession, with keys placed
-/// by the store's registry, ranges with an audit pack's cited entries, and store anchors. Audit packs (and their report
-/// cells and changes files), registry keys and the completeness check are verified by the core and genesis-mesh-verify.
+/// by the store's registry, ranges with an audit pack's cited entries, store anchors, changes files and the completeness
+/// check. Audit packs (and their report cells) and registry keys are verified by the core and genesis-mesh-verify.
 /// Then decisions and agreements signed before and after a succession built here.
 /// </summary>
 public class KeyHistoryTests
@@ -24,11 +24,11 @@ public class KeyHistoryTests
     private static readonly HashSet<string> KindsRun = new()
     {
         "canonical_form", "key_history", "key_at", "decision_at_record_time", "record_time", "verify_export", "verify_range",
-        "verify_anchors",
+        "verify_anchors", "changes_file", "completeness",
     };
     private static readonly HashSet<string> KindsNotRun = new()
     {
-        "pack", "completeness", "registry_keys", "report_cell", "changes_file",
+        "pack", "registry_keys", "report_cell",
     };
 
     private static JsonElement.ArrayEnumerator Vectors() =>
@@ -159,6 +159,52 @@ public class KeyHistoryTests
                     got = new Dictionary<string, object>
                     {
                         ["failures"] = r.Failures.Select(f => new Dictionary<string, object?> { ["anchor_sequence"] = f.AnchorSequence, ["reason"] = f.Reason }).ToList(),
+                    };
+                    break;
+                }
+            case "changes_file":
+                {
+                    var input = v.GetProperty("input");
+                    try
+                    {
+                        var changes = OfflineVerifier.ParseChanges(input.GetProperty("text").GetString()!, input.GetProperty("csv").GetBoolean());
+                        got = new Dictionary<string, object> { ["refused"] = false, ["changes"] = changes };
+                    }
+                    catch (FormatException)
+                    {
+                        got = new Dictionary<string, object> { ["refused"] = true };
+                    }
+                    break;
+                }
+            case "completeness":
+                {
+                    var input = v.GetProperty("input");
+                    var n = 0;
+                    var changes = input.GetProperty("changes").EnumerateArray().Select(row => new Change
+                    {
+                        Index = ++n,
+                        ResourceId = row.GetProperty("resource_id").GetString()!,
+                        Action = row.GetProperty("action").GetString()!,
+                        ChangedAt = row.GetProperty("changed_at").GetString()!,
+                        Source = row.TryGetProperty("source", out var s) ? s.GetString() : null,
+                        SourceEventId = row.TryGetProperty("source_event_id", out var e) ? e.GetString() : null,
+                        Actor = row.TryGetProperty("actor", out var a) ? a.GetString() : null,
+                    }).ToList();
+                    var period = input.GetProperty("period");
+                    var report = OfflineVerifier.CheckCompleteness(changes, OfflineVerifier.ParseExportLines(input.GetProperty("lines").GetString()!), [],
+                        new CompletenessOptions
+                        {
+                            From = DateTimeOffset.Parse(period[0].GetString()!, CultureInfo.InvariantCulture),
+                            To = DateTimeOffset.Parse(period[1].GetString()!, CultureInfo.InvariantCulture),
+                            Tolerance = TimeSpan.FromSeconds(input.GetProperty("tolerance_seconds").GetInt32()),
+                        });
+                    got = new Dictionary<string, object>
+                    {
+                        ["pairs"] = report.Pairs.Select(p => new object[] { p.Change, p.RecordId, p.MatchedBy }).ToList(),
+                        ["unmatched_changes"] = report.UnmatchedChanges.Select(c => c.Index).ToList(),
+                        ["outside_period"] = report.OutsidePeriod.Select(c => c.Index).ToList(),
+                        ["duplicate_changes"] = report.DuplicateChanges.Select(c => c.Index).ToList(),
+                        ["unmatched_records"] = report.UnmatchedRecords.Select(r => r.RecordId).ToList(),
                     };
                     break;
                 }
