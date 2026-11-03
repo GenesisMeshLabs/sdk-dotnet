@@ -482,6 +482,13 @@ public class GrantHolderTests
         forged.Sequence = 9;
         forged.RevokedGrantIds = [];
         Assert.Equal("feed_invalid_signature", (await Assert.ThrowsAsync<GrantRefusedException>(() => x.Holder.UpdateRevocationFeed(forged))).Code);
+        // Signed by the NA's key, but another sovereign's feed: not the grant issuer's.
+        var foreign = JsonNode.Parse(JsonSerializer.Serialize(x.Holder.State.RevocationFeed, Auth.SerializerOptions))!.AsObject();
+        foreign["issuer_sovereign_id"] = "sovereign-x";
+        foreign["sequence"] = 10;
+        var signedForeign = SignedFeed(foreign).Deserialize<SovereignRevocationFeed>()!;
+        Assert.True(OfflineVerifier.VerifyRevocationFeedSignature(JsonSerializer.Serialize(signedForeign, Auth.SerializerOptions), [NAKey.Public]));
+        Assert.Equal("feed_invalid_signature", (await Assert.ThrowsAsync<GrantRefusedException>(() => x.Holder.UpdateRevocationFeed(signedForeign))).Code);
     }
 
     [Fact]
@@ -574,6 +581,10 @@ public class GrantHolderTests
         ahead["use_sequence"] = 1;
         ahead["use_head_digest"] = new string('a', 64);
         Assert.Equal("grant_time_token_invalid", Assert.Throws<GrantRefusedException>(() => new GrantHolder(Options(Bearer, token: NASigned(ahead)))).Code);
+        // A token the NA signed, for another grant.
+        var other = JsonNode.Parse(x.TimeToken.GetRawText())!.AsObject();
+        other["grant_id"] = "grant-2";
+        Assert.Equal("grant_time_token_invalid", Assert.Throws<GrantRefusedException>(() => new GrantHolder(Options(Bearer, token: NASigned(other)))).Code);
         var impostor = new GrantHolder(Options(new SeedSigner(NewKey().Seed, "device-key")));
         Assert.Equal("grant_bearer_mismatch", (await Assert.ThrowsAsync<GrantRefusedException>(() => impostor.Act(Setup.Rotate(), Report()))).Code);
         using var plain = Client(x.NA, null);
