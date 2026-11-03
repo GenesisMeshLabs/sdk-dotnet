@@ -512,6 +512,43 @@ public class LiveContractTests
             Assert.Null(await gm.EvidenceStore.LatestCheckpoint());
             Assert.Null((await gm.EvidenceStore.Status()).RetentionCheckpoint);
 
+            // 1.9.0: the store anchored and its anchors kept, an audit pack verified offline from them and the root key,
+            // and the pack's archive record.
+            var anchored = await gm.EvidenceStore.Anchor();
+            Modeled("evidence_anchor", anchored);
+            Assert.Contains(anchored.Status, new[] { "anchored", "unchanged" });
+            var again = await gm.EvidenceStore.Anchor();
+            Assert.Equal(("unchanged", anchored.Anchor!.AnchorSequence), (again.Status, again.Anchor!.AnchorSequence));
+            var anchorPage = await gm.EvidenceStore.Anchors(new AnchorPageParams { Limit = 1 });
+            Modeled("evidence_anchors", anchorPage);
+            Assert.Equal((1L, 1L), (anchorPage.Count, anchorPage.Anchors.Single().AnchorSequence));
+            var heldAnchors = await gm.EvidenceStore.AllAnchors();
+            Assert.Equal(anchored.Anchor.AnchorSequence, heldAnchors[^1].AnchorSequence);
+            var anchorCheck = OfflineVerifier.VerifyStoreAnchors(heldAnchors, new AnchorVerifyOptions { KeyHistory = history, SovereignId = network });
+            Assert.True(anchorCheck.Verified, string.Join("; ", anchorCheck.Failures.Select(f => $"{f.AnchorSequence} {f.Reason}")));
+            var pack = await gm.EvidenceStore.AuditPack();
+            Modeled("evidence_audit_pack", pack);
+            // This NA keeps no registry records (its out-of-band records are off): the executor keys come out of band, and
+            // without them no execution is authentic, as the reference judges the pack too.
+            var packFiles = OfflineVerifier.AuditPackFiles(pack);
+            var packCheck = OfflineVerifier.VerifyAuditPack(packFiles,
+                new VerifyAuditPackOptions { RootPublicKey = naKey, HeldAnchors = heldAnchors, ExecutorKeys = allKeys });
+            Assert.True(packCheck.Verified, string.Join("; ", packCheck.Failures.Select(f => $"{f.File} {f.StoreSequence} {f.Reason} {f.Detail}")));
+            var keyless = OfflineVerifier.VerifyAuditPack(packFiles, new VerifyAuditPackOptions { RootPublicKey = naKey, HeldAnchors = heldAnchors });
+            Assert.Equal(["invalid_signature"], OfflineVerifier.PackReasons(keyless));
+            Assert.Equal(whole.Count(e => e.Entry.EntryKind == "execution"), keyless.Failures.Count);
+            Assert.Equal(heldAnchors[^1].StoreSequence, packCheck.Range!.ThroughSequence);
+            var archives = await gm.EvidenceStore.Archives();
+            Modeled("evidence_archives", archives);
+            Assert.Equal(0L, archives.ArchivedThroughSequence);
+            var location = "archive://contract/" + pack.Manifest.GetProperty("pack_id").GetString();
+            var archive = await gm.EvidenceStore.RecordArchive(pack.Manifest, location);
+            Modeled("evidence_record_archive", archive);
+            Assert.Equal(("recorded", location, packCheck.Range.ThroughSequence), (archive.Status, archive.Archive.Location, archive.ArchivedThroughSequence));
+            Assert.True(OfflineVerifier.VerifyArchiveRecord(recorder.Json!["archive"]!.ToJsonString(), history));
+            Assert.Equal("duplicate", (await gm.EvidenceStore.RecordArchive(pack.Manifest, location)).Status);
+            Assert.Equal(archive.Archive.ArchiveId, Assert.Single((await gm.EvidenceStore.Archives()).Archives).ArchiveId);
+
             // 1.9.0: an attestation as stored and listed, the recognition policy, verification, and the revocation feed.
             var member = await gm.Attestation.Issue(D(("subject_id", "vendor-feed"), ("roles", new[] { "role:client" })));
             var memberRecord = await gm.Attestation.Get(member.AttestationId);

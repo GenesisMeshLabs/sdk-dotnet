@@ -2782,6 +2782,68 @@ public sealed class StoreAnchor
     public JsonElement Signature { get; set; }
 }
 
+/// <summary>A page of the anchors route (<see cref="EvidenceStoreClient.Anchors"/>).</summary>
+public sealed class AnchorPageParams
+{
+    /// <summary>Anchors after this <c>anchor_sequence</c>, 0 or more: the previous page's <see cref="AnchorPage.NextAfterAnchor"/>.</summary>
+    public long? AfterAnchor { get; init; }
+
+    /// <summary>1 to 1000 anchors a page; the NA's default is 100.</summary>
+    public int? Limit { get; init; }
+}
+
+/// <summary>One page of the NA's store anchors, in order (<c>GET /admin/evidence/anchors</c>, v1.2.0).</summary>
+public sealed class AnchorPage
+{
+    /// <summary>How many anchors this page holds.</summary>
+    [JsonPropertyName("count")]
+    public long Count { get; set; }
+
+    /// <summary>The next page's <see cref="AnchorPageParams.AfterAnchor"/>; null on the last page.</summary>
+    [JsonPropertyName("next_after_anchor")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public long? NextAfterAnchor { get; set; }
+
+    /// <summary>The anchors, in <c>anchor_sequence</c> order.</summary>
+    [JsonPropertyName("anchors")]
+    public List<StoreAnchor> Anchors { get; set; } = [];
+}
+
+/// <summary>
+/// <c>POST /admin/evidence/anchors</c> (v1.2.0): the store's head signed now (<c>anchored</c>), or the latest anchor while
+/// the head has not moved (<c>unchanged</c>).
+/// </summary>
+public sealed class AnchorResult
+{
+    /// <summary>The anchor; null for an empty store.</summary>
+    [JsonPropertyName("anchor")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public StoreAnchor? Anchor { get; set; }
+
+    /// <summary><c>anchored</c> or <c>unchanged</c>.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+}
+
+/// <summary>
+/// The range of an audit pack (<see cref="EvidenceStoreClient.AuditPack"/>, v1.5.0), every bound optional: the
+/// range widens to the anchors around it, and ends at the last anchor that fits.
+/// </summary>
+public sealed class AuditPackParams
+{
+    /// <summary>The first store position, 1 or more.</summary>
+    public long? FromSequence { get; init; }
+
+    /// <summary>The range starts at the first entry recorded at or after this time (the pack's <c>period_from</c>).</summary>
+    public DateTimeOffset? Since { get; init; }
+
+    /// <summary>The last store position the range may end at, 1 or more.</summary>
+    public long? UntilSequence { get; init; }
+
+    /// <summary>The range ends at the last anchor signed at or before this time (the pack's <c>period_until</c>).</summary>
+    public DateTimeOffset? Until { get; init; }
+}
+
 /// <summary>A run of store anchors verified as a chain: signatures, links and heads that never go back (v1.2.0).</summary>
 public sealed class AnchorVerification
 {

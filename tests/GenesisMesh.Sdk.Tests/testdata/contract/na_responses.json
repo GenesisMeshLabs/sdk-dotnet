@@ -1,5 +1,5 @@
 {
-  "_comment": "Responses of a live Network Authority (1.0.2; the health, key history, policy and evaluation responses 1.8.1; the evidence store responses 1.8.1 with this SDK's execution evidence) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests). evidence_execution_record is the first stored record of evidence_search. evidence_executor_key_record is the first key of GET /admin/evidence/executor-keys and evidence_export_event the first line of GET /admin/evidence/export (1.8.1). attestation_count is GET /attestations unsigned (1.8.1). The out-of-band responses (1.8.1) come from an NA with its out-of-band records on: observation_batch and observation_batch_refused are two results of one batch, operator_holders the first holder of GET /admin/evidence/operator-holders, and judgement_record the judgement of observation_judgement.",
+  "_comment": "Responses of a live Network Authority (1.0.2; the health, key history, policy and evaluation responses 1.8.1; the evidence store responses 1.8.1 with this SDK's execution evidence) to each SDK call, captured by the SDK contract check. The SDK response types must model exactly these fields (see the contract type tests). evidence_execution_record is the first stored record of evidence_search. evidence_executor_key_record is the first key of GET /admin/evidence/executor-keys and evidence_export_event the first line of GET /admin/evidence/export (1.8.1). attestation_count is GET /attestations unsigned (1.8.1). The out-of-band responses (1.8.1) come from an NA with its out-of-band records on: observation_batch and observation_batch_refused are two results of one batch, operator_holders the first holder of GET /admin/evidence/operator-holders, and judgement_record the judgement of observation_judgement. The anchor, audit pack and archive responses (1.8.1) are the contract check's: evidence_anchors a page of one anchor, evidence_audit_pack with two of its files (report.md and states.json), evidence_archives before the first archive and evidence_record_archive its record.",
   "agreement_accept": {
     "agreed_terms": {
       "capabilities": [
@@ -5208,5 +5208,155 @@
         "sig": "qACr/q103yn2eydHMuklTADFCaS4/kEw3oYBJ7VztxFxx8EcaIdMRmtcy/hUF/1WF7vxGiKNqRFSMq4Ds7qtCQ=="
       }
     ]
+  },
+  "evidence_anchor": {
+    "anchor": {
+      "anchor_sequence": 2,
+      "anchored_at": "2026-11-03T20:11:21.475440Z",
+      "entry_digest": "945e1bde17050adb3c0298365238fa1f44e2d8de3a22136c35a2844273e9b285",
+      "issued_by": "na-contract",
+      "previous_anchor_digest": "b1fc95deaf3bebf88c3e531ddd2498a3314a712dc02f292e94f35d4d881eb465",
+      "signature": {
+        "key_id": "na-contract",
+        "sig": "XjUJhR6ocBavQfoVsssnqs7D/YDv/6ZHYqmo3uVzqQIYOZS8/CwgMtzbjNdHE1mhHW/NkqwJpG9iyDl5shunBA=="
+      },
+      "sovereign_id": "contract-na",
+      "store_sequence": 30
+    },
+    "status": "anchored"
+  },
+  "evidence_anchors": {
+    "anchors": [
+      {
+        "anchor_sequence": 1,
+        "anchored_at": "2026-11-03T20:11:18.256510Z",
+        "entry_digest": "103e753794a6e5cabf1b3ab75f1bec518ca3a89bb5ebe5bdfc9644493def0adc",
+        "issued_by": "na-contract",
+        "signature": {
+          "key_id": "na-contract",
+          "sig": "edck7G31H9HStCIv7JckzdDbbYRbiQMTnjAIna/9kHbTeu38k4cmPZza5ybn9no0dixySRIu1MLlu0jpbjaaAQ=="
+        },
+        "sovereign_id": "contract-na",
+        "store_sequence": 1
+      }
+    ],
+    "count": 1,
+    "next_after_anchor": 1
+  },
+  "evidence_archives": {
+    "archived_through_sequence": 0,
+    "archives": [],
+    "require_archive": true
+  },
+  "evidence_audit_pack": {
+    "files": {
+      "report.md": "# Audit pack 8be549d0-3c5b-4769-b25f-9020eb00771c\n\n- Sovereign: contract-na\n- Range: store entries 1 to 30, ending at anchor 2\n- Created: 2026-11-03T20:11:21.522600Z for ops\n\nVerify it with `genesis-mesh audit verify <dir> --anchor <root public key> --known-anchors <anchors>`, from the root key and the anchors you hold. The remediation states and notices below are the Network Authority's operational records at pack time (states.json), not signed records.\n\n## Checks\n\nVerified by the Network Authority when it wrote the pack, against its own anchors: **yes**.\n\nNone.\n\n## Totals\n\n| Records | Count |\n|---|---|\n| checked_entries | 30 |\n| decisions | 12 |\n| executions | 7 |\n\n## Changes\n\n| Entry | Kind | Resource | Action | Changed at | Governed by | State | Actor |\n|---|---|---|---|---|---|---|---|\n| 6 | execution | contract:app-1/secret | create | 2026-11-03T20:11:18.659124Z | prior_decision | recorded | contract-executor |\n| 9 | execution | contract:app-1/secret | rotate | 2026-11-03T20:11:18.708935Z | prior_decision | recorded | contract-executor |\n| 14 | execution | contract:app-4/secret | create | 2026-11-03T20:11:18.842074Z | prior_decision | recorded | contract-executor |\n| 19 | execution | contract:app-4/secret | rotate | 2026-11-03T20:11:18.905698Z | prior_decision | recorded | contract-executor |\n| 22 | execution | contract:app-4/secret | update | 2026-11-03T20:11:18.940377Z | prior_decision | recorded | contract-executor |\n| 25 | execution | contract:app-5/secret | create | 2026-11-03T20:11:18.964068Z | prior_decision | recorded | contract-executor |\n| 28 | execution | contract:app-7/secret | create | 2026-11-03T20:11:21.319043Z | prior_decision | recorded | contract-executor |\n\n## Denials\n\n| Entry | Record | ID | Reason |\n|---|---|---|---|\n| 4 | decision | af0ba373-2f9f-4655-a930-8560dafcfa3e | policy gate 'contract-policy/max-days' failed |\n| 15 | decision | efcfd055-3031-4951-838c-851b20b13a6c | policy gate 'contract-policy/max-days' failed |\n\n## Remediations\n\nNone.\n\n## Reviews and deciders\n\nNone.\n\n## Notices\n\nNone.\n\n## Break-glass uses\n\nNone.\n\n## Quarantined records\n\nNone.\n\n## Key successions and archives\n\nNone.\n",
+      "states.json": "{\"notices\":{},\"states\":{}}\n"
+    },
+    "manifest": {
+      "created_at": "2026-11-03T20:11:21.522600Z",
+      "end_anchor_sequence": 2,
+      "files": [
+        {
+          "bytes": 805,
+          "path": "anchors.jsonl",
+          "sha256": "53a76856a8940edeb69d42c4edf2bb2e0046c7f0466f663a8b3fa3f0807970c8"
+        },
+        {
+          "bytes": 750,
+          "path": "checks.json",
+          "sha256": "678afaf87a21d1a7a6ae44531299c545c432abc0fb865800347385eb3213bf26"
+        },
+        {
+          "bytes": 0,
+          "path": "cited.jsonl",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "bytes": 83972,
+          "path": "entries.jsonl",
+          "sha256": "28c482a5357050322078c18a7bc23d5f267c9256c25c3eb99033a6ecc24f931b"
+        },
+        {
+          "bytes": 579,
+          "path": "genesis.json",
+          "sha256": "356584f816a6650a0ea88155dd73a9d6b87c52b6a44decfb1838ea85a9cfae26"
+        },
+        {
+          "bytes": 553,
+          "path": "keys/executor-keys.json",
+          "sha256": "1c3ffd394c0593ce3d145a343435837e97149c95505fe9b32ff11ac45c702862"
+        },
+        {
+          "bytes": 19,
+          "path": "keys/na-key-history.json",
+          "sha256": "f92525f1e2ff2f0497fb8d43e47555a1f9bfa607a6c0b24a0f5a4272e2d2dd33"
+        },
+        {
+          "bytes": 715,
+          "path": "policies.jsonl",
+          "sha256": "cbf1d6f67a98eeadeb8add26a91a5ff3b687d6d6753f772fb92dc15006a786c6"
+        },
+        {
+          "bytes": 2157,
+          "path": "report.md",
+          "sha256": "317dabc98d85b7dfd2af48942affc276717554644e5d76b0da3571dce281a11f"
+        },
+        {
+          "bytes": 27,
+          "path": "states.json",
+          "sha256": "cae0e57ff68c7556ef2ab5c32a5029180823867673f281321ee848b796b07a46"
+        },
+        {
+          "bytes": 528,
+          "path": "trust/attestations.jsonl",
+          "sha256": "987f8e6825eed134ec5909dc3274b09d47553d93e92a8bf8c1b198b16971e216"
+        },
+        {
+          "bytes": 0,
+          "path": "trust/feeds.jsonl",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "bytes": 0,
+          "path": "trust/treaties.jsonl",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "format": "gm.audit.pack",
+      "format_version": 1,
+      "from_sequence": 1,
+      "issued_by": "na-contract",
+      "pack_id": "8be549d0-3c5b-4769-b25f-9020eb00771c",
+      "requested_by": "ops",
+      "signature": {
+        "key_id": "na-contract",
+        "sig": "3RGMVExjnbmoFVOo1fBfIp9VCCkM/6NzcPg8wyDHwXy9/Jpx+Mcbt6W1VoT7ih69mR4IntGXUuc9uxtb99hcDQ=="
+      },
+      "sovereign_id": "contract-na",
+      "through_sequence": 30
+    }
+  },
+  "evidence_record_archive": {
+    "archive": {
+      "archive_id": "4ffcacff-716a-417d-92cd-a6ac5f6fb271",
+      "archived_at": "2026-11-03T20:11:21.675572Z",
+      "end_anchor_sequence": 2,
+      "from_sequence": 1,
+      "issued_by": "na-contract",
+      "issuer_sovereign_id": "contract-na",
+      "location": "archive://contract/8be549d0-3c5b-4769-b25f-9020eb00771c",
+      "manifest_sha256": "023bb2e6fecce3093fd5373e79049c2823b8896f570ac23424d28f674f0b0b26",
+      "pack_id": "8be549d0-3c5b-4769-b25f-9020eb00771c",
+      "recorded_by": "ops",
+      "signature": {
+        "key_id": "na-contract",
+        "sig": "H2+V2sZ+c5ZkcPpSnA7mYTlaOBlO+O1tpC20bY1IC7nE7svzu+Ba7kchsUxybiGrCQRxath4wTFw0/HpaypLDQ=="
+      },
+      "through_entry_digest": "945e1bde17050adb3c0298365238fa1f44e2d8de3a22136c35a2844273e9b285",
+      "through_sequence": 30
+    },
+    "archived_through_sequence": 30,
+    "status": "recorded"
   }
 }

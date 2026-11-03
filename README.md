@@ -418,6 +418,37 @@ var checkpoint = await client.EvidenceStore.LatestCheckpoint();  // null before 
   records cover while the NA requires archives (its default). `HeldBack` says
   what stopped it short.
 
+#### Anchors, audit packs and archives
+
+An auditor keeps the NA's anchors, asks for audit packs and verifies them
+offline (1.9.0; see [Store anchors](#store-anchors) and
+[Audit packs](#audit-packs)):
+
+```csharp
+var anchored = await auditor.EvidenceStore.Anchor();       // the head signed now ("anchored"), or "unchanged"
+var held = await auditor.EvidenceStore.AllAnchors();       // every anchor, page by page: keep your copies
+var pack = await auditor.EvidenceStore.AuditPack(new AuditPackParams { Since = from, Until = until });
+var result = OfflineVerifier.VerifyAuditPack(OfflineVerifier.AuditPackFiles(pack),
+    new VerifyAuditPackOptions { RootPublicKey = rootPublicKey, HeldAnchors = held });
+// Once the pack is written to immutable storage and read back intact:
+var archive = await admin.EvidenceStore.RecordArchive(pack.Manifest, "s3://audit-archive/packs/" + packId);
+var archives = await auditor.EvidenceStore.Archives();     // ArchivedThroughSequence: how far they cover the store
+```
+
+- `Anchor`, `Anchors`, `AllAnchors`, `AuditPack` and `Archives` need the read
+  tier: an auditor's key is enough. `RecordArchive` is privileged.
+- `Anchor` and `RecordArchive` are retried and failed over (a replay answers
+  `unchanged` or `duplicate`). `AuditPack` is never replayed: the NA allows a
+  few packs an hour (`RateLimitException`), and a pack of a large range takes
+  time and tens of megabytes (raise `ClientOptions.Timeout`).
+- `AuditPack` refuses a range no anchor ends (`audit_pack_not_anchored`:
+  anchor the store first). `RecordArchive` takes the manifest as the NA signed
+  it and refuses a pack the NA did not build, that did not verify, or that
+  leaves a gap after the archives before it (`ConflictException`).
+- An NA that keeps no registry records (its out-of-band records off) places
+  no executor key in a pack: pass the keys you hold as
+  `VerifyAuditPackOptions.ExecutorKeys`.
+
 #### Changes outside the governed path
 
 From 1.9 the store also keeps changes made outside the governed path, when the
@@ -1448,6 +1479,78 @@ OfflineVerifier.CheckEventsAgainstAnchors(events, anchors, run);
 - `StartingCheckpoint` finds the retention checkpoint that explains where a run
   starts, to pass as `EvidenceVerifyOptions.Checkpoint`.
 - It runs the shared `audit` suite's `verify_anchors` vectors.
+
+### Completeness against an outside log
+
+An audit pack's records can be checked against a log kept outside Genesis Mesh
+(a cloud audit log, a ticketing export): every change made in the period should
+have its record (1.9.0, as the reference's `check_completeness`).
+
+```csharp
+var changes = OfflineVerifier.ParseChanges(File.ReadAllText("changes.csv"), csv: true);
+var report = OfflineVerifier.CheckCompleteness(changes, rangeEntries, citedEntries, new CompletenessOptions
+{
+    From = periodStart,
+    To = periodEnd,                      // Tolerance: 300 seconds by default
+});
+// report.UnmatchedChanges: changes in the period the store does not record.
+```
+
+- `ParseChanges` reads CSV (a header row naming `ChangeColumns`: `source`,
+  `source_event_id`, `resource_id`, `action`, `changed_at`, `actor`) or JSON
+  (a list, or `{"changes": [...]}`). `changed_at` is RFC 3339 with an offset
+  (`ParseRfc3339`); `source` and `source_event_id` go together.
+- `CheckCompleteness` sets aside changes repeating a source event, matches a
+  change naming a source event to the record of that event, and matches the
+  rest per resource and action, for the most pairs and then the least total
+  distance within the tolerance. An observation and the record it matched are
+  one change.
+- It runs the shared `audit` suite's `changes_file` and `completeness` vectors.
+
+### Audit packs
+
+An audit pack is one range of the evidence store between two anchors, with
+everything its records cite, the NA's key history and a manifest the NA signs
+(protocol 1.5.0). An auditor verifies it offline, with no network and no
+private key, from what they hold themselves: the root public key and their
+copies of the anchors (1.9.0, as the reference's `verify_audit_pack`):
+
+```csharp
+var files = OfflineVerifier.ReadAuditPackDirectory("pack/");   // or AuditPackFiles(the NA's answer)
+var result = OfflineVerifier.VerifyAuditPack(files, new VerifyAuditPackOptions
+{
+    RootPublicKey = rootPublicKey,   // root.pub, held out of band
+    HeldAnchors = heldAnchors,       // your copies; null checks the pack's integrity only (no_held_anchors)
+    Changes = changes,               // optional: the completeness check against an outside log
+    Period = (from, until),          // optional: a period the pack must cover
+    PriorEntries = earlierDigests,   // optional: PackEntryDigests of packs verified before
+});
+// result.Verified; result.Failures and result.Warnings, each with its file, entry and reason;
+// result.Period, the period the pack covers; result.Completeness.
+```
+
+- The manifest first: every file of the format listed with its digest and
+  nothing else (`manifest_unknown_file`, `manifest_file_missing`,
+  `manifest_digest_mismatch`, `manifest_unlisted_file`), in the NA's canonical
+  form (`manifest_invalid`), signed as received by the NA key valid at its
+  `created_at` (`manifest_invalid_signature`). A pack whose manifest fails is
+  not checked further.
+- NA keys come only from the key history, verified from the root key. Executor
+  and observer keys come from the registry records the NA signed
+  (`RegistryKeys`, placed where the store registered and retired them), or
+  from `ExecutorKeys` you supply.
+- The anchors tie the range to the anchors you hold (`pack_end_anchor_not_held`,
+  `anchor_mismatch`, `pack_start_not_tied`); each cited entry is checked against
+  a pack verified before or an anchor you hold (`cited_entry_mismatch`, or the
+  warning `cited_entry_unanchored`). The entries are verified as an export,
+  with the entries they cite. Policies, attestations, treaties, feeds and a
+  grant's agreement are each checked as received.
+- `report.md` must be the report the pack's own files render to
+  (`RenderReport`, `report_mismatch`); `ReportDifferences` lists the lines.
+- `VerifyArchiveRecord` checks an archive record (the NA's statement that a
+  pack was written to immutable storage and read back intact).
+- It runs the shared `audit` suite's `pack`, `registry_keys` and `report_cell`
+  vectors: every vector of the suite.
 
 ### NA key history
 

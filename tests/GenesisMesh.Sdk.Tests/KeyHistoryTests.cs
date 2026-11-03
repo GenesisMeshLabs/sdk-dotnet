@@ -13,8 +13,8 @@ namespace GenesisMesh.Sdk.Tests;
 /// (genesismesh/conformance/generate_vectors.py audit) and copied here unchanged. This SDK runs the vectors of what
 /// it verifies: the signed forms of the new records, the NA key history, the keys valid at a time, the time a record
 /// read alone is placed at, decisions judged with a history, and (1.9.0) exports across a succession, with keys placed
-/// by the store's registry, ranges with an audit pack's cited entries, and store anchors. Audit packs (and their report
-/// cells and changes files), registry keys and the completeness check are verified by the core and genesis-mesh-verify.
+/// by the store's registry, ranges with an audit pack's cited entries, store anchors, changes files, the completeness
+/// check, keys placed by registry records, report cells and audit packs (valid and refused): every vector runs.
 /// Then decisions and agreements signed before and after a succession built here.
 /// </summary>
 public class KeyHistoryTests
@@ -24,12 +24,9 @@ public class KeyHistoryTests
     private static readonly HashSet<string> KindsRun = new()
     {
         "canonical_form", "key_history", "key_at", "decision_at_record_time", "record_time", "verify_export", "verify_range",
-        "verify_anchors",
+        "verify_anchors", "changes_file", "completeness", "pack", "registry_keys", "report_cell",
     };
-    private static readonly HashSet<string> KindsNotRun = new()
-    {
-        "pack", "completeness", "registry_keys", "report_cell", "changes_file",
-    };
+    private static readonly HashSet<string> KindsNotRun = new();
 
     private static JsonElement.ArrayEnumerator Vectors() =>
         JsonDocument.Parse(File.ReadAllText(SuitePath)).RootElement.GetProperty("vectors").EnumerateArray();
@@ -47,6 +44,25 @@ public class KeyHistoryTests
         Assert.True(r.Verified, r.Reason);
         return r.History!;
     }
+
+    /// <summary>A changes file's rows as the reference numbers them, from 1.</summary>
+    private static List<Change> ChangesOf(JsonElement rows)
+    {
+        var n = 0;
+        return rows.EnumerateArray().Select(row => new Change
+        {
+            Index = ++n,
+            ResourceId = row.GetProperty("resource_id").GetString()!,
+            Action = row.GetProperty("action").GetString()!,
+            ChangedAt = row.GetProperty("changed_at").GetString()!,
+            Source = row.TryGetProperty("source", out var s) ? s.GetString() : null,
+            SourceEventId = row.TryGetProperty("source_event_id", out var e) ? e.GetString() : null,
+            Actor = row.TryGetProperty("actor", out var a) ? a.GetString() : null,
+        }).ToList();
+    }
+
+    private static bool Given(JsonElement input, string name, JsonValueKind kind, out JsonElement value) =>
+        input.TryGetProperty(name, out value) && value.ValueKind == kind;
 
     private static string Utc(DateTimeOffset t) => t.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
 
@@ -160,6 +176,95 @@ public class KeyHistoryTests
                     {
                         ["failures"] = r.Failures.Select(f => new Dictionary<string, object?> { ["anchor_sequence"] = f.AnchorSequence, ["reason"] = f.Reason }).ToList(),
                     };
+                    break;
+                }
+            case "changes_file":
+                {
+                    var input = v.GetProperty("input");
+                    try
+                    {
+                        var changes = OfflineVerifier.ParseChanges(input.GetProperty("text").GetString()!, input.GetProperty("csv").GetBoolean());
+                        got = new Dictionary<string, object> { ["refused"] = false, ["changes"] = changes };
+                    }
+                    catch (FormatException)
+                    {
+                        got = new Dictionary<string, object> { ["refused"] = true };
+                    }
+                    break;
+                }
+            case "completeness":
+                {
+                    var input = v.GetProperty("input");
+                    var period = input.GetProperty("period");
+                    var report = OfflineVerifier.CheckCompleteness(ChangesOf(input.GetProperty("changes")),
+                        OfflineVerifier.ParseExportLines(input.GetProperty("lines").GetString()!), [],
+                        new CompletenessOptions
+                        {
+                            From = DateTimeOffset.Parse(period[0].GetString()!, CultureInfo.InvariantCulture),
+                            To = DateTimeOffset.Parse(period[1].GetString()!, CultureInfo.InvariantCulture),
+                            Tolerance = TimeSpan.FromSeconds(input.GetProperty("tolerance_seconds").GetInt32()),
+                        });
+                    got = new Dictionary<string, object>
+                    {
+                        ["pairs"] = report.Pairs.Select(p => new object[] { p.Change, p.RecordId, p.MatchedBy }).ToList(),
+                        ["unmatched_changes"] = report.UnmatchedChanges.Select(c => c.Index).ToList(),
+                        ["outside_period"] = report.OutsidePeriod.Select(c => c.Index).ToList(),
+                        ["duplicate_changes"] = report.DuplicateChanges.Select(c => c.Index).ToList(),
+                        ["unmatched_records"] = report.UnmatchedRecords.Select(r => r.RecordId).ToList(),
+                    };
+                    break;
+                }
+            case "registry_keys":
+                {
+                    var input = v.GetProperty("input");
+                    static string? At(string? value) => value is { Length: > 0 } ? Canonical.Timestamp(OfflineVerifier.ParseTimestamp(value)) : null;
+                    var placed = OfflineVerifier.RegistryKeys(OfflineVerifier.ParseExportLines(input.GetProperty("lines").GetString()!), HistoryOf(input));
+                    got = new Dictionary<string, object>
+                    {
+                        ["keys"] = placed.Values.OrderBy(k => k.KeyId, StringComparer.Ordinal).Select(k => new Dictionary<string, object?>
+                        {
+                            ["key_id"] = k.KeyId,
+                            ["public_key"] = k.PublicKey,
+                            ["role"] = k.Role,
+                            ["registered_sequence"] = k.RegisteredSequence,
+                            ["registered_at"] = At(k.RegisteredAtTime),
+                            ["retired_sequence"] = k.RetiredSequence,
+                            ["retired_at"] = At(k.RetiredAtTime),
+                        }).ToList(),
+                    };
+                    break;
+                }
+            case "report_cell":
+                got = new Dictionary<string, object>
+                {
+                    ["cells"] = v.GetProperty("input").GetProperty("values").EnumerateArray().Select(x => OfflineVerifier.ReportCell(x)).ToList(),
+                };
+                break;
+            case "pack":
+                {
+                    var input = v.GetProperty("input");
+                    var files = input.GetProperty("files").EnumerateObject().ToDictionary(f => f.Name, f => Encoding.UTF8.GetBytes(f.Value.GetString()!));
+                    var r = OfflineVerifier.VerifyAuditPack(files, new VerifyAuditPackOptions
+                    {
+                        RootPublicKey = input.GetProperty("root_public_key").GetString()!,
+                        HeldAnchors = Given(input, "held_anchors", JsonValueKind.Array, out var held) ? OfflineVerifier.ParseAnchors(held.GetRawText()) : null,
+                        Changes = Given(input, "changes", JsonValueKind.Array, out var rows) ? ChangesOf(rows) : null,
+                        Period = Given(input, "period", JsonValueKind.Array, out var asked)
+                            ? (DateTimeOffset.Parse(asked[0].GetString()!, CultureInfo.InvariantCulture), DateTimeOffset.Parse(asked[1].GetString()!, CultureInfo.InvariantCulture))
+                            : null,
+                        PriorEntries = Given(input, "prior_entries", JsonValueKind.Object, out var prior)
+                            ? prior.EnumerateObject().ToDictionary(e => long.Parse(e.Name, CultureInfo.InvariantCulture), e => e.Value.GetString()!)
+                            : null,
+                    });
+                    var output = new Dictionary<string, object>
+                    {
+                        ["verified"] = r.Verified,
+                        ["reasons"] = OfflineVerifier.PackReasons(r),
+                        ["warnings"] = r.Warnings.Select(w => w.Reason).Distinct().Order(StringComparer.Ordinal).ToList(),
+                    };
+                    if (r.Completeness is { } report) output["unmatched_changes"] = report.UnmatchedChanges.Select(c => c.Index).ToList();
+                    if (r.Period is { } covered) output["period"] = new Dictionary<string, string> { ["from"] = covered.From, ["until"] = covered.Until };
+                    got = output;
                     break;
                 }
             case "record_time":

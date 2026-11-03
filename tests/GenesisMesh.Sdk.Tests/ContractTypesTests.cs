@@ -161,6 +161,11 @@ public class ContractTypesTests
         { "operator_holders", typeof(OperatorKeyHolder) },
         { "holder_proposal", typeof(HolderChange) },
         { "judgement_record", typeof(JudgementRecord) },
+        { "evidence_anchor", typeof(AnchorResult) },
+        { "evidence_anchors", typeof(AnchorPage) },
+        { "evidence_audit_pack", typeof(AuditPackResponse) },
+        { "evidence_archives", typeof(ArchiveList) },
+        { "evidence_record_archive", typeof(ArchiveResult) },
     };
 
     // 1.9.0: the objects inside each response too, such as the verification and its anchors in a history.
@@ -225,6 +230,8 @@ public class ContractTypesTests
     [InlineData("revocation_feed", typeof(SovereignRevocationFeed))]
     // 1.9.0: a judgement read from the store and verified offline.
     [InlineData("judgement_record", typeof(JudgementRecord))]
+    // 1.9.0: an archive record read back and verified offline (VerifyArchiveRecord).
+    [InlineData("evidence_record_archive", typeof(ArchiveResult))]
     public void PassedBackRecordsKeepTheirSignedForm(string name, Type model)
     {
         var raw = Response(name);

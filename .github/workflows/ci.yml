@@ -64,6 +64,7 @@ jobs:
           --file Execution.cs=98 --file Clients/EvidenceStoreClient.cs=100
           --file Governance.cs=99 --file Outbox.cs=97
           --file OutOfBand.cs=100 --file OutOfBandVerification.cs=100 --file Clients/EvidenceStoreRecordOutbox.cs=100 --file Remediation.cs=100
+          --file Anchors.cs=100 --file AuditPack.cs=99 --file AuditPackVerification.cs=99
 
       # Package validation: the public API against the baseline release in
       # the csproj; a removed or changed member fails (see the "API
