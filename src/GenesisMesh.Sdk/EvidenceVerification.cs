@@ -980,26 +980,20 @@ public static partial class OfflineVerifier
                     : run._history is null ? run._naKeys : [];
                 var tokenPlace = PayloadInteger(token, "use_sequence");
                 var named = tokenPlace is > 0 && run._useHeads.TryGetValue(UseKey(grantId, (int)tokenPlace), out var n) ? n : null;
-                try
+                // Every time given here was read before (the records' by their shapes, recorded_at by the export's
+                // parser), so the rules never throw for one they cannot read.
+                if (GrantRules.UseProblem(use, new UseCheck
                 {
-                    if (GrantRules.UseProblem(use, new UseCheck
-                    {
-                        Grant = isHeld ? held.Grant : null,
-                        Previous = run._lastAdmitted.GetValueOrDefault(grantId),
-                        Admitted = run._admittedUses.TryGetValue(grantId, out var admitted) ? admitted : null,
-                        TokenHead = named,
-                        TokenKeys = tokenKeys,
-                        RawToken = token,
-                        RevokedAt = run._revoked.GetValueOrDefault(grantId),
-                        RecordedAt = Str(entry, "recorded_at"),
-                    }) is { } problem)
-                        Fail(problem.Code, problem.Detail);
-                }
-                catch (ArgumentException e)
-                {
-                    // A time the use's checks cannot read: the entry's own, as the shapes accepted the records'.
-                    Fail("payload_invalid", e.Message);
-                }
+                    Grant = isHeld ? held.Grant : null,
+                    Previous = run._lastAdmitted.GetValueOrDefault(grantId),
+                    Admitted = run._admittedUses.TryGetValue(grantId, out var admitted) ? admitted : null,
+                    TokenHead = named,
+                    TokenKeys = tokenKeys,
+                    RawToken = token,
+                    RevokedAt = run._revoked.GetValueOrDefault(grantId),
+                    RecordedAt = Str(entry, "recorded_at"),
+                }) is { } problem)
+                    Fail(problem.Code, problem.Detail);
                 run._chainHeads[grantId] = new UseChainHead(use.UseSequence, received);
                 run._lastAdmitted[grantId] = GrantRules.NextPreviousUse(use);
                 if (run._admittedUses.TryGetValue(grantId, out var count)) run._admittedUses[grantId] = count + 1;
@@ -1138,10 +1132,6 @@ public static partial class OfflineVerifier
     private static bool OutOfBandSignedBy(JsonElement record, IReadOnlyList<string> keys) =>
         IsObject(record, "signature", out var signature) && Str(signature, "sig") is { } sig
         && VerifyEd25519(OutOfBandCanonical(record), sig, keys);
-
-    /// <summary>A field as an envelope comparison reads it: its text, or null when absent or null (the record shapes allow nothing else).</summary>
-    private static string? TextOrNull(JsonElement obj, string name) =>
-        obj.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     /// <summary>
     /// An envelope field or the record field it names, as JavaScript's strict equality compares them: a string by its
