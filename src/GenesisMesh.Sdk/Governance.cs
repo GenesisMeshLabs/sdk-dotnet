@@ -451,8 +451,9 @@ public sealed class EvidenceNotKeptException : GenesisMeshException
 /// (<see cref="RotationQueued"/> a dead letter), or the record could not be built, for example the rotation issued the
 /// denied version (<c>remediation_malformed</c>). That rotation can never be cited: rotate again.</item>
 /// <item>The disable failed (<see cref="Disabled"/> false): disable the denied version, then record it.</item>
-/// <item>After the disable (<see cref="Disabled"/> true): the record could not be signed, submitted or kept. Submit
-/// <see cref="Record"/> once the cause is fixed (a resubmission is a duplicate); do not rotate again.</item>
+/// <item>After the disable (<see cref="Disabled"/> true): the record could not be signed, submitted or kept. Once the
+/// cause is fixed, submit <see cref="Record"/>, or sign it again when there is none (a resubmission is a duplicate); do
+/// not rotate again.</item>
 /// </list>
 /// </summary>
 public sealed class RemediationNotRecordedException : GenesisMeshException
@@ -1131,9 +1132,11 @@ public static partial class Governance
     /// The state, the plan and the denied version are checked before anything runs, and the record before the denied
     /// version is disabled, so a record the NA would refuse never follows a disable. The NA admits the record once it
     /// holds the rotation's evidence (<c>remediation_rotation_missing</c> is transient): flush the evidence outbox before
-    /// the record outbox. A rotation the NA refused for good at once is never followed by the disable; one it refuses
-    /// at a later flush leaves the record pending for good, and the change is to be rotated again.
-    /// <paramref name="ct"/> cancels the steps up to the disable; once the denied version is disabled, the record is
+    /// the record outbox. A rotation the NA refused for good at once is never followed by the disable. One it refuses
+    /// only at a later flush (its evidence a dead letter then) leaves the record pending for good, the denied version
+    /// disabled: remove the record from the record outbox and cancel again, with a <see cref="RotateForwardOptions{T}.Disable"/>
+    /// that accepts a version already disabled. Read the state right before cancelling: for a decision the NA plans
+    /// from its latest execution. <paramref name="ct"/> cancels the steps up to the disable; once the denied version is disabled, the record is
     /// kept whatever the token says.
     /// </summary>
     /// <typeparam name="T">The rotation's value.</typeparam>

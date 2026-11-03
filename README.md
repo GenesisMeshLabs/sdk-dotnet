@@ -930,7 +930,14 @@ Once the rotation's evidence is in the NA or the evidence outbox,
 - `Disabled` false: rotate again when the rotation cannot be cited (its
   evidence refused for good, or the denied version issued again), or disable
   and record when the disable failed;
-- `Disabled` true: submit its `Record` once the cause is fixed.
+- `Disabled` true: submit its `Record` once the cause is fixed, or sign it
+  again when there is none.
+
+A rotation the NA refuses only at a later flush (its evidence a dead letter
+then) leaves the record pending for good, with the denied version disabled:
+remove the record from the record outbox and cancel again, with a `Disable`
+that accepts a version already disabled. Read the state right before
+cancelling: for a decision the NA plans from its latest execution.
 
 A failure of the rotation's own governed action after it ran throws as
 `GovernedAction` does, before anything is disabled.
