@@ -46,6 +46,7 @@ public partial class ArchitectureTests
         ("Clients/", "clients"),
         ("GenesisMeshClient.cs", "client"),
         ("Governance.cs", "governance"),
+        ("GrantHolder.cs", "governance"),
     ];
 
     /// <summary>The modules each module may use (docs/architecture.md, "Layers").</summary>

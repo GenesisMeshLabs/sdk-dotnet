@@ -54,13 +54,13 @@ history (see [Health](#health) and [NA](#na)).
 From 1.6 it checks a pre-issued grant's NA signature, and from 1.9 it holds
 the grants' records and rules offline (the parameter envelope, a use's place
 in its chain and the rules it keeps, and uses and time token requests signed
-with the bearer key) and calls the NA's grant routes: issuing, reading and
-revoking grants, time tokens and uses (see
-[Pre-issued grants](#pre-issued-grants)). Holding a grant across runs, acting
-within it while the NA is out of reach and falling back to break-glass live in the
+with the bearer key), calls the NA's grant routes (issuing, reading and
+revoking grants, time tokens and uses), and holds a grant: a `GrantHolder` acts
+within it while the NA is out of reach and falls back to break-glass past it
+(see [Pre-issued grants](#pre-issued-grants)). Verifying grants, their uses
+and revocations in an evidence export lives in the
 [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript) and the
-[Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust), as does verifying
-grants, their uses and revocations in an evidence export.
+[Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust).
 
 ## Install
 
@@ -1563,6 +1563,67 @@ var token = await device.Grants.RequestTimeToken(request);  // for the next use
   place can never be placed: the record outbox makes it a dead letter too
   (`evidence_predecessor_dead_lettered`), and sends a grant's uses in their
   chain's order.
+
+#### Holding a grant (1.9.0)
+
+A `GrantHolder` acts within a grant while the NA cannot be reached, as the
+TypeScript SDK's does, and keeps each use in the record outbox until the NA is
+back:
+
+```csharp
+using var device = new GenesisMeshClient(new ClientOptions
+{
+    BaseUrl = "https://na.example",
+    SigningKey = operatorSeed, KeyId = "ops",   // evaluates when the holder falls back
+    RecordOutbox = new FileRecordOutbox("/var/lib/site/records"),
+});
+var holder = new GrantHolder(new GrantHolderOptions
+{
+    Client = device,
+    Signer = bearerSigner,                      // the grant's bearer key
+    NAKeys = naKeyHistory,                      // or NAKeyHistory.ValidAlways([naKey])
+    Grant = issued.Grant, TimeToken = issued.TimeToken,  // or State, to resume
+    Persist = (state, ct) => SaveAsync(state, ct),        // after every change
+});
+
+var result = await holder.Act(new GrantActRequest
+{
+    Capability = "secret.rotate",
+    RequestParameters = new Dictionary<string, object?> { ["lifetime_days"] = 30 },
+    ResourceId = "kv:site-7/api-key", ResourceAction = ResourceActions.Rotate,
+    Fallback = new GrantFallback { Justification = "the site is cut off", Verify = verification },
+}, async (authority, ct) =>
+{
+    // authority.Path: "grant", or "decision" / "break_glass" when the grant could not be used
+    return new ActionReport<string> { ExecutionParameters = new Dictionary<string, object?> { ["version_id"] = "v9" } };
+});
+// result.UnderGrant: the signed use, submitted or queued; result.Fallback: why the grant could not be used, and what ran
+
+var synced = await holder.Sync();  // on reconnect: the revocation feed, a fresh time token, the record outbox
+```
+
+- Before each change the holder checks the grant offline, in the NA's order:
+  secret material, the bearer key's resource prefix (`ResourcePrefix`), the
+  capability, the closed envelope, the budget, the validity, the revocation
+  feed it holds and what the NA last answered, and the uses its time token has
+  left (asking for a fresh one when the NA answers). A request outside the
+  grant throws `GrantRefusedException`, and nothing runs.
+- Every use takes the next place in the grant's chain, and is never dated
+  before its time token or the previous use. One the NA quarantines after it
+  continued the chain keeps its place, and stops counting against the budget,
+  which counts admitted uses; one refused as a conflict, a chain mismatch or
+  over budget still counts.
+- When the grant has ended, its budget or time token is spent, or it is
+  revoked, the holder falls back to a governed action with break-glass: an NA
+  that answers decides, and a DENY is never broken through; one out of reach
+  leaves the change to break-glass, recorded and judged after the fact.
+  Without a fallback it throws `GrantUnusableException`.
+- Its calls run one at a time (do not call it from inside an action), and its
+  state changes whole. `GrantHolderState` is the JSON the TypeScript SDK's
+  holder keeps; on its first change the holder takes up a later use of its
+  grant the record outbox holds, kept before a stop left the state unpersisted.
+- `Sync` reports a time token the NA refuses (`TimeTokenRefusal`, such as a
+  clock more than 300 seconds off the NA's) and still uploads the outbox.
 
 The SDK runs the shared `grants` suite's signed-form, signature, envelope,
 envelope parameter and use vectors
