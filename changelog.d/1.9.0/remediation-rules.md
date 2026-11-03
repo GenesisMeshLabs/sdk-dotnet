@@ -14,6 +14,7 @@
 - `RemediationRules.Check` and `RecordProblem` take the key as `ListExecutorKeys` returns it (`ExecutorKeyRecord`).
 - As the reference, where TypeScript differs:
   - a due time refuses a date that does not exist, and `Rfc3339` returns null for a time outside the years 1 to 9999 in UTC;
-  - `PolicySectionIssues` refuses a `stands_for` with a `*` anywhere, or a blank one;
+  - `DueAfterDenial` refuses a decision whose grace runs past the year 9999, whenever the change was due before (times in UTC, as the NA writes them);
+  - `PolicySectionIssues` refuses a `stands_for` with a `*` anywhere, or blank as Python's `str.strip()` reads it (U+001C to U+001F included, which .NET does not count as white space);
   - a guidance entry's grace may be written as `600.0`.
-- `ReviewApprovalProblem` refuses a review whose recorded time it cannot read; TypeScript skips the 300-second bound then.
+- `ReviewApprovalProblem` reads a review's recorded times (`decided_at`, `requested_at`) first, as the review's model does, and takes each only as a UTC timestamp in the form the NA writes (`Z`, `+00:00` or `-00:00`): `the review's decided_at is not a UTC timestamp` otherwise. TypeScript skips the 300-second bound for a time it cannot read. The reference's model also reads lenient spellings the NA never writes (a space, a lower-case `t` or `z`, `+0000`); this SDK does not.

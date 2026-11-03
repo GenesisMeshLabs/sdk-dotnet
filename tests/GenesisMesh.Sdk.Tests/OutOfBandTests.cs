@@ -78,8 +78,11 @@ public class OutOfBandTests
         }
     }
 
-    /// <summary>A <c>verify_export</c> vector: the failures in order, whether it verified, and the counts of the kinds it holds.</summary>
-    private static void VerifiesTheExport(JsonElement input, JsonElement expected)
+    /// <summary>
+    /// A <c>verify_export</c> vector (the out-of-band and remediation suites): the failures in order, whether it verified,
+    /// and the counts of the kinds it holds.
+    /// </summary>
+    internal static void VerifiesTheExport(JsonElement input, JsonElement expected)
     {
         var r = OfflineVerifier.VerifyEvidenceEvents(OfflineVerifier.ParseExportLines(input.GetProperty("lines").GetString()!),
             new EvidenceVerifyOptions
@@ -87,6 +90,7 @@ public class OutOfBandTests
                 NAPublicKeys = input.GetProperty("na_public_keys").EnumerateArray().Select(k => k.GetString()!).ToList(),
                 ExecutorKeys = input.GetProperty("executor_keys").Deserialize<List<ExecutorKeyRecord>>()!,
                 Contiguous = input.GetProperty("contiguous").GetBoolean(),
+                Checkpoint = input.TryGetProperty("checkpoint", out var checkpoint) ? checkpoint.GetRawText() : null,
             });
         static long? Position(JsonElement f) =>
             f.GetProperty("store_sequence").ValueKind == JsonValueKind.Null ? null : f.GetProperty("store_sequence").GetInt64();
@@ -99,6 +103,8 @@ public class OutOfBandTests
             ["break_glass"] = r.BreakGlass,
             ["judgements"] = r.Judgements,
             ["quarantined"] = r.Quarantined,
+            ["remediations"] = r.Remediations,
+            ["reviews"] = r.Reviews,
         };
         Assert.Equal(expected.GetProperty("counts").EnumerateObject().Select(c => (c.Name, c.Value.GetInt64())).OrderBy(c => c.Name, StringComparer.Ordinal),
             counts.Where(c => c.Value > 0).Select(c => (c.Key, c.Value)).OrderBy(c => c.Key, StringComparer.Ordinal));

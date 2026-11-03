@@ -207,6 +207,7 @@ public class RemediationLiveTests
         await foreach (var s in ops.EvidenceStore.AllRemediations(RemediationStates.Remediated, 1)) remediated.Add(s);
         Assert.Equal(record.RemediationId, Assert.Single(remediated, s => s.SubjectId == due.SubjectId).RemediationId);
         Assert.Equal("remediation_already_recorded", RemediationRules.NextState(RemediationStates.Remediated, RemediationEvents.RecordRemediation).Refusal);
+        await ExportVerifiesOffline(ops, naKey, reviews: 1);
     }
 
     [Fact]
@@ -338,5 +339,27 @@ public class RemediationLiveTests
             }));
         Assert.Equal("remediation_already_recorded", again.Code);
         Assert.Equal(["v2"], disabled);
+        await ExportVerifiesOffline(ops, naKey, reviews: 0);
+    }
+
+    /// <summary>
+    /// The NA's whole export verifies offline, as the NA verifies it: every entry, the remediation and review entries
+    /// with them, and as many of each kind.
+    /// </summary>
+    private static async Task ExportVerifiesOffline(GenesisMeshClient ops, string naKey, int reviews)
+    {
+        var events = new List<EvidenceEvent>();
+        await foreach (var e in ops.EvidenceStore.ExportAll()) events.Add(e);
+        var server = await ops.EvidenceStore.Verify();
+        Assert.True(server.Verified);
+        var offline = OfflineVerifier.VerifyEvidenceEvents(events, new EvidenceVerifyOptions
+        {
+            NAPublicKeys = [naKey],
+            ExecutorKeys = await ops.EvidenceStore.ListExecutorKeys(),
+        });
+        Assert.True(offline.Verified, string.Join("; ", offline.Failures.Select(f => $"{f.StoreSequence} {f.Reason} {f.Detail}")));
+        Assert.Equal((server.CheckedEntries, server.Observations, server.Judgements, server.Remediations, server.Reviews),
+            (offline.CheckedEntries, offline.Observations, offline.Judgements, offline.Remediations, offline.Reviews));
+        Assert.Equal((1L, (long)reviews), (offline.Remediations, offline.Reviews));
     }
 }

@@ -20,11 +20,10 @@ public class RemediationTests
     {
         "policy_canonical", "policy_validation", "remediation_plan", "due_time", "transition", "decision_plan", "rfc3339",
         "emergency_map", "review_request", "canonical_form", "verify_record", "remediation_check", "steps_problem",
-        "admin_approval", "review_approval", "review_holders",
+        "admin_approval", "review_approval", "review_holders", "verify_export",
     };
 
-    /// <summary><c>verify_export</c>: an export's remediation and review entries are verified offline in a later step of 1.9.0.</summary>
-    private static readonly HashSet<string> KindsNotRun = new() { "verify_export" };
+    private static readonly HashSet<string> KindsNotRun = new();
 
     // The zero seed's public key.
     private const string ZeroKey = "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=";
@@ -51,6 +50,7 @@ public class RemediationTests
         Assert.Equal("remediation", suite.GetProperty("suite").GetString());
         Assert.Equal("1.4.0", suite.GetProperty("version").GetString());
         Assert.Equal(340, suite.GetProperty("vectors").GetArrayLength());
+        Assert.Equal(340, VectorIds().Count());
     }
 
     private static string? Str(JsonElement o, string name) =>
@@ -206,6 +206,9 @@ public class RemediationTests
                     Actor = Str(input, "actor"),
                     ActorHolder = Str(input, "actor_holder"),
                 })?.Code);
+                break;
+            case "verify_export":
+                OutOfBandTests.VerifiesTheExport(input, expected);
                 break;
             default:
                 throw new InvalidOperationException($"unknown vector kind {v.GetProperty("kind").GetString()}");
@@ -892,6 +895,12 @@ public class RemediationTests
     [InlineData("secret.*.rotate")]
     [InlineData("secret.rotate*")]
     [InlineData("   ")]
+    [InlineData("")]
+    [InlineData("\t\n\u000b\u000c\r")]
+    // Python's str.strip() removes these too, which .NET does not count as white space.
+    [InlineData("\u001c")]
+    [InlineData("\u001d\u001e\u001f")]
+    [InlineData("\u0085\u00a0\u1680\u2000\u200a\u2028\u2029\u202f\u205f\u3000")]
     public void StandsForIsAnExactCapability(string standsFor)
     {
         var node = JsonNode.Parse(Vector("validation-emergency-valid").GetProperty("record").GetRawText())!.AsObject();
@@ -901,15 +910,117 @@ public class RemediationTests
     }
 
     [Theory]
+    // Not white space to Python: a capability ID the selector rules may still refuse, but not blank.
+    [InlineData("\ufeff")]
+    [InlineData("\u180e")]
+    [InlineData("\u200b")]
+    [InlineData("\u001b")]
+    [InlineData(" secret.read ")]
+    public void StandsForIsNotBlankWhenPythonKeepsACharacter(string standsFor)
+    {
+        var node = JsonNode.Parse(Vector("validation-emergency-valid").GetProperty("record").GetRawText())!.AsObject();
+        node["emergency"]!["stands_for"] = standsFor;
+        Assert.Empty(RemediationRules.PolicySectionIssues(node.Deserialize<BoundaryPolicy>()!));
+    }
+
+    // ── The forward rotation a remediation cites ────────────────────────────
+
+    private static readonly DateTimeOffset Changed = new(2026, 1, 1, 0, 1, 0, TimeSpan.Zero);
+
+    private static RotationFacts Cited(string executor = "sovereign-b", long sequence = 11, DateTimeOffset? at = null,
+        long? changeSequence = 6, DateTimeOffset? changedAt = null, bool cited = false, bool changeKnown = true) =>
+        new(executor, sequence, at ?? Changed.AddMinutes(3), "sovereign-b", changeKnown ? changeSequence : null,
+            changeKnown ? changedAt ?? Changed : null, cited);
+
+    [Fact]
+    public void ARotationCarriesTheRemediationOfItsOwnExecutorAfterTheChangeOnce()
+    {
+        Assert.Null(RemediationRules.RotationProblem(Cited()));
+        Assert.Equal("remediation_rotation_other_executor", RemediationRules.RotationProblem(Cited(executor: "sovereign-d"))?.Code);
+        // After the change in store order and in time: at the same time is after, at the same position or earlier is not.
+        Assert.Null(RemediationRules.RotationProblem(Cited(at: Changed)));
+        Assert.Equal("remediation_rotation_before_change", RemediationRules.RotationProblem(Cited(at: Changed.AddTicks(-10)))?.Code);
+        Assert.Null(RemediationRules.RotationProblem(Cited(sequence: 7)));
+        Assert.Equal("remediation_rotation_before_change", RemediationRules.RotationProblem(Cited(sequence: 6))?.Code);
+        Assert.Equal("remediation_rotation_before_change", RemediationRules.RotationProblem(Cited(sequence: 5))?.Code);
+        Assert.Equal("remediation_rotation_reused", RemediationRules.RotationProblem(Cited(cited: true))?.Code);
+        // A change the run does not hold bounds nothing.
+        Assert.Null(RemediationRules.RotationProblem(Cited(sequence: 1, at: Changed.AddYears(-1), changeKnown: false)));
+        // The first that fails wins, in the reference's order.
+        Assert.Equal("remediation_rotation_other_executor",
+            RemediationRules.RotationProblem(Cited(executor: "sovereign-d", sequence: 1, cited: true))?.Code);
+        Assert.Equal("remediation_rotation_before_change", RemediationRules.RotationProblem(Cited(sequence: 1, cited: true))?.Code);
+    }
+
+    [Theory]
     [InlineData("not a time")]
     [InlineData("2026-01-01 00:09:00Z")]
     [InlineData("")]
-    public async Task ARecordedTimeThatCannotBeReadRefusesTheApproval(string decidedAt)
+    // Not a UTC time in the form the NA writes. The reference's model reads the lower-case spelling as UTC; this SDK
+    // reads only the forms the NA writes.
+    [InlineData("2026-01-01T00:09:00")]
+    [InlineData("2026-01-01T01:09:00+01:00")]
+    [InlineData("2026-01-01T00:10:00+00:01")]
+    [InlineData("2026-01-01t00:09:00z")]
+    [InlineData("2026-02-29T00:09:00Z")]
+    [InlineData("0000-12-31T23:59:59Z")]
+    [InlineData("+002026-01-01T00:09:00Z")]
+    public async Task ARecordedTimeThatIsNoUtcTimestampRefusesTheApproval(string at)
     {
-        var review = Review(await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z"));
-        review.DecidedAt = decidedAt;
-        Assert.Equal("the decider's request was signed more than 300s from when it was recorded",
-            RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        var decided = await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z");
+        var request = await Signed(RequestPath, RequestBody, "2026-01-01T00:08:00Z", keyId: "operator-1");
+        var review = Review(decided, request);
+        Assert.Null(RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        review.DecidedAt = at;
+        Assert.Equal("the review's decided_at is not a UTC timestamp", RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        review = Review(decided, request);
+        review.RequestedAt = at;
+        Assert.Equal("the review's requested_at is not a UTC timestamp", RemediationRules.ReviewApprovalProblem(review, [Audience]));
+    }
+
+    [Fact]
+    public async Task TheRecordedTimesAreReadBeforeAnythingElse()
+    {
+        // As the review's model reads them first: before the signatures, the routes and the audiences.
+        var decided = await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z");
+        var review = Review(decided);
+        review.Approval!.AdminSignature = "AAAA";
+        Assert.Equal("the decider's signature does not verify over its request", RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        review.DecidedAt = "2026-01-01T00:09:00";
+        Assert.Equal("the review's decided_at is not a UTC timestamp", RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        review.DecidedAt = "2026-01-01T00:09:00Z";
+        review.RequestedAt = "2026-01-01T00:08:00";
+        Assert.Equal("the review's requested_at is not a UTC timestamp", RemediationRules.ReviewApprovalProblem(review, ["another NA"]));
+        // A review the NA opened has no request, and its requested_at is read too.
+        review = Review(await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z"));
+        Assert.Null(RemediationRules.ReviewApprovalProblem(review, [Audience]));
+        review.RequestedAt = "not a time";
+        Assert.Equal("the review's requested_at is not a UTC timestamp", RemediationRules.ReviewApprovalProblem(review, [Audience]));
+    }
+
+    [Theory]
+    [InlineData("2026-01-01T00:09:00+00:00")]
+    [InlineData("2026-01-01T00:09:00-00:00")]
+    [InlineData("2026-01-01T00:09:00.0000009Z")]
+    public async Task ARecordedTimeInUtcIsRead(string at)
+    {
+        var decided = await Signed(DecidePath, Deny(), "2026-01-01T00:09:00Z");
+        var request = await Signed(RequestPath, RequestBody, "2026-01-01T00:09:00Z", keyId: "operator-1");
+        var review = Review(decided, request);
+        review.DecidedAt = at;
+        review.RequestedAt = at;
+        Assert.Null(RemediationRules.ReviewApprovalProblem(review, [Audience]));
+    }
+
+    [Fact]
+    public void PastTheYear9999NoGraceIsReckonedEvenWhenTheChangeWasDueEarlier()
+    {
+        Assert.Throws<ArgumentException>(() => RemediationRules.DueAfterDenial("2026-03-01T00:00:30Z", "9999-12-31T23:59:59Z", 60));
+        Assert.Equal("9999-12-31T23:59:59.999999Z", RemediationRules.DueAfterDenial(null, "9999-12-31T23:59:58.999999Z", 1));
+        Assert.Equal("2026-03-01T00:01:00Z", RemediationRules.DueAfterDenial("9999-12-31T23:59:59.999999Z", "2026-03-01T00:00:00Z", 60));
+        // The current due time is only compared: past 9999 in UTC, it stands aside for the decision's.
+        Assert.Equal("2026-01-01T00:01:00Z", RemediationRules.DueAfterDenial("9999-12-31T23:59:59-01:00", "2026-01-01T00:00:00Z", 60));
+        Assert.Throws<ArgumentException>(() => RemediationRules.DueAt("0001-01-01T00:00:59.999999+00:01", 0));
     }
 
     [Fact]

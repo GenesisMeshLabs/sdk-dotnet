@@ -26,12 +26,16 @@ It signs observations and break-glass records, the changes made outside the
 governed path, submits and judges them, keeps them in a record outbox until the
 NA admits them, and reads each resource's changes (see
 [Changes outside the governed path](#changes-outside-the-governed-path)).
-Not yet here: verifying the store's 1.4.0 and later entry kinds in an export,
-store anchors, and none of the 1.4.0 remediation and review APIs (remediation
-records, the due queue, reviews, urgent actions).
-Those live in the [TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript)
-and the [Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust). The embedded
-field registry lists their records.
+From 1.9 it also carries the NA's 1.4.0 remediation and reviews: the rules,
+the due queue, remediation records and reviews, cancelling a denied change by
+rotating forward and urgent changes (see
+[Remediation and reviews](#remediation-and-reviews)), and verifies their
+entries in an export. Not yet here: verifying the store's 1.5.0 and later
+entry kinds in an export (key successions, archives, grants) and store
+anchors. Those live in the
+[TypeScript SDK](https://github.com/GenesisMeshLabs/sdk-typescript) and the
+[Rust SDK](https://github.com/GenesisMeshLabs/sdk-rust). The embedded field
+registry lists their records.
 A boundary policy with the 1.4.0 sections (`remediation`, `review_required`,
 `emergency`) verifies here like any other.
 
@@ -625,7 +629,9 @@ var problem = RemediationRules.ReviewApprovalProblem(review, naPublicKeys);
   - `ReviewApprovalProblem` checks the operators' signed requests the review
     embeds, offline: the decider signed exactly the verdict, waiver end and
     note it records, for this NA, within 300 seconds of the decision, and so
-    did a requester for the subject and justification.
+    did a requester for the subject and justification. It reads the review's
+    recorded times first, each a UTC timestamp in the form the NA writes
+    (`Z`, `+00:00` or `-00:00`).
   - `ReviewHolderProblem` and `ReviewRequestProblem` say whether a second
     holder decided it, and whether the change's actor asked for it.
   - `Rfc3339` is the one grammar of the timestamps a review embeds.
@@ -639,8 +645,10 @@ var problem = RemediationRules.ReviewApprovalProblem(review, naPublicKeys);
   - A due time refuses a date that does not exist, such as February 29 of a
     common year, as the reference does. TypeScript's date reading moves it to
     the next month.
-  - `ReviewApprovalProblem` refuses a review whose recorded time it cannot
-    read; TypeScript skips the 300-second bound then.
+  - `ReviewApprovalProblem` refuses a review whose recorded time is not a
+    UTC timestamp; TypeScript skips the 300-second bound for a time it cannot
+    read. The reference's model also reads spellings the NA never writes (a
+    space, a lower-case `t`, `+0000`); this SDK does not.
   - `PolicySectionIssues` refuses a `stands_for` with a `*` anywhere, or a
     blank one, as the reference does; TypeScript checks only for a final
     `.*`.
@@ -1324,11 +1332,11 @@ bool kept = OfflineVerifier.VerifyRetentionCheckpoint(checkpointJson, [naKey]);
   - each envelope and its digests, and the store chain;
   - every signature:
     - the NA's on decisions, justification proofs, retention checkpoints,
-      judgements, quarantine and registry records, under its keys or the key
-      valid at the time (with a key history);
-    - the executor's on execution evidence and break-glass records, and the
-      observer's on observations, each a registered key of the record's
-      sovereign with the role its kind needs;
+      judgements, quarantine, registry and review records, under its keys or
+      the key valid at the time (with a key history);
+    - the executor's on execution evidence, break-glass and remediation
+      records, and the observer's on observations, each a registered key of
+      the record's sovereign with the role its kind needs;
   - each execution record against its decision (`evidence_decision_denied`,
     `evidence_outside_decision_window`, `evidence_capability_mismatch`), and
     never on a judgement or a change record (`evidence_cites_judgement`);
@@ -1339,23 +1347,40 @@ bool kept = OfflineVerifier.VerifyRetentionCheckpoint(checkpointJson, [naKey]);
     it (`match_reused`, `judgement_match_missing`);
   - a quarantine entry's record against its digest
     (`quarantine_digest_mismatch`), and each envelope against its record
-    (`envelope_mismatch`).
+    (`envelope_mismatch`);
+  - each remediation record once per judgement or decision
+    (`duplicate_remediation`), of the change, resource and version its
+    subject names (`remediation_subject_mismatch`), held after its subject
+    (`remediation_subject_missing`), and its forward rotation: held before it
+    (`remediation_rotation_missing`), of the same resource
+    (`remediation_rotation_mismatch`), by the record's own executor
+    (`remediation_rotation_other_executor`), after the change
+    (`remediation_rotation_before_change`) and cited once
+    (`remediation_rotation_reused`);
+  - each review: proved by the requests it embeds
+    (`review_approval_invalid`), signed with the public key and holder the
+    holder registry recorded for each operator key, when the run holds a
+    holder record for that key (`review_approval_key_mismatch`), decided by a second holder
+    (`review_same_holder`), of its subject as stored
+    (`review_subject_mismatch`, `review_subject_missing`), and no waiver
+    after a remediation (`review_waiver_after_remediation`).
 
   A bad entry is a failure, never an exception.
 - It verifies the kinds a governed store holds (decisions, justification
-  proofs, execution evidence, retention checkpoints) and the records of changes
+  proofs, execution evidence, retention checkpoints), the records of changes
   outside the governed path (observations, break-glass records, judgements,
-  quarantine and registry records). Entries of the 1.4.0 and later kinds
-  (remediation, reviews, key successions, archives, grants) fail as
-  `unknown_entry_kind`; their envelopes still chain. Verify a store holding
-  them with the TypeScript or Rust SDK, or `genesis-mesh audit verify`.
-  Anchors are not checked, nor where the store placed an executor key.
+  quarantine and registry records) and remediation and review records.
+  Entries of the 1.5.0 and later kinds (key successions, archives, grants)
+  fail as `unknown_entry_kind`; their envelopes still chain. Verify a store
+  holding them with the TypeScript or Rust SDK, or `genesis-mesh audit
+  verify`. Anchors are not checked, nor where the store placed an executor
+  key.
 - For an export that starts after a retention, pass `Checkpoint`, the
   NA-signed checkpoint as received: the run continues from its last removed
   entry, and each resource and observation chain from its head.
 - It runs the shared `field_registry` suite's `export` vectors and the
-  `out_of_band` suite's `verify_export` vectors, and gives the reference's own
-  verification of its export.
+  `out_of_band` and `remediation` suites' `verify_export` vectors, and gives
+  the reference's own verification of its export.
 
 ### NA key history
 

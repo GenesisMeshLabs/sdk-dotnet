@@ -50,6 +50,18 @@ public sealed record RemediationTransition(string? State, string? Refusal, strin
 /// <param name="Detail">What is wrong.</param>
 public sealed record RemediationProblem(string Code, string Detail);
 
+/// <summary>A forward rotation a remediation record cites, and the change it replaces (<see cref="RemediationRules.RotationProblem"/>).</summary>
+/// <param name="RotationExecutor">The executor sovereign of the rotation's execution evidence.</param>
+/// <param name="RotationSequence">The rotation's store position.</param>
+/// <param name="RotationExecutedAt">When the rotation was executed.</param>
+/// <param name="RecordExecutor">The executor sovereign of the remediation record.</param>
+/// <param name="ChangeSequence">The change's store position; null when it is not known.</param>
+/// <param name="ChangedAt">When the change was made (a judgement's <c>evaluated_as_of</c>, or the execution's time); null when it is not known.</param>
+/// <param name="AlreadyCited">True when another remediation record already cites the rotation.</param>
+public sealed record RotationFacts(
+    string RotationExecutor, long RotationSequence, DateTimeOffset RotationExecutedAt, string RecordExecutor,
+    long? ChangeSequence, DateTimeOffset? ChangedAt, bool AlreadyCited);
+
 /// <summary>
 /// The rules the NA applies to remediations and reviews (v1.4.0; 1.9.0 in this SDK), as pure functions with the
 /// reference's codes (the <c>remediation</c> conformance suite). Since 1.4.0 a judged DENY leads somewhere: the NA states
@@ -316,7 +328,9 @@ public static partial class RemediationRules
 
     /// <summary>
     /// When a remediation a review denied is due: the grace from the decision, never later than it was already due (a
-    /// review holds a remediation, it does not extend it).
+    /// review holds a remediation, it does not extend it). A decision whose grace runs past the year 9999 is refused,
+    /// whenever the change was due before; the times are reckoned in UTC (the reference reckons a time with an offset in
+    /// that offset, which can differ within hours of the year 10000; the NA writes its times in UTC).
     /// </summary>
     /// <param name="currentDue">When it was due; null when it was not due yet. Read as <see cref="DueAt"/> reads a time.</param>
     /// <param name="decidedAt">When the review was decided.</param>
@@ -324,7 +338,8 @@ public static partial class RemediationRules
     /// <exception cref="ArgumentException">A time is not a timestamp.</exception>
     public static string DueAfterDenial(string? currentDue, string decidedAt, int graceSeconds)
     {
-        var due = Micros(decidedAt, nameof(decidedAt)) + graceSeconds * MicrosPerSecond;
+        // Past the year 9999 the reference cannot reckon the grace, whenever it was due before.
+        var due = InYears(Micros(decidedAt, nameof(decidedAt)) + graceSeconds * MicrosPerSecond);
         return Print(currentDue is null ? due : Math.Min(Micros(currentDue, nameof(currentDue)), due));
     }
 
@@ -347,13 +362,20 @@ public static partial class RemediationRules
     [GeneratedRegex(@"(T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6})[0-9]+", RegexOptions.CultureInvariant)]
     private static partial Regex FinerFraction();
 
+    /// <summary>A recorded time's instant when it is in UTC in the form the NA writes (<c>Z</c>, <c>+00:00</c> or <c>-00:00</c>); null otherwise.</summary>
+    private static long? RecordedUtcMicros(string? value) => value is not null && UtcZone().IsMatch(value) ? RecordedMicros(value) : null;
+
+    [GeneratedRegex(@"(?:Z|[+-]00:00)\z", RegexOptions.CultureInvariant)]
+    private static partial Regex UtcZone();
+
+    /// <summary>The instant, when it falls in the years 1 to 9999, the reference's times.</summary>
+    /// <exception cref="ArgumentException">It falls outside them.</exception>
+    private static long InYears(long micros) => micros >= 0 && micros <= DateTime.MaxValue.Ticks / 10
+        ? micros
+        : throw new ArgumentException("genesismesh: the time is outside the years 1 to 9999");
+
     /// <summary>An instant in microseconds from 0001-01-01 as the reference prints a time: UTC, microseconds when not zero, <c>Z</c>.</summary>
-    private static string Print(long micros)
-    {
-        if (micros < 0 || micros > DateTime.MaxValue.Ticks / 10)
-            throw new ArgumentException("genesismesh: the time is outside the years 1 to 9999");
-        return Canonical.Timestamp(new DateTimeOffset(micros * 10, TimeSpan.Zero));
-    }
+    private static string Print(long micros) => Canonical.Timestamp(new DateTimeOffset(InYears(micros) * 10, TimeSpan.Zero));
 
     /// <summary>
     /// Why a remediation record does not carry out the plan the NA stated, or null (the NA refuses it as
@@ -465,6 +487,36 @@ public static partial class RemediationRules
         return FormProblem(doc.RootElement) is { } form ? new("remediation_malformed", form) : Check(doc.RootElement, key);
     }
 
+    /// <summary>
+    /// Why the forward rotation a remediation record cites cannot carry it, or null: it was executed by the record's own
+    /// executor sovereign (<c>remediation_rotation_other_executor</c>), after the change it replaces, in store order and in
+    /// time (<c>remediation_rotation_before_change</c>), and no other remediation cites it
+    /// (<c>remediation_rotation_reused</c>). The first that fails wins. That the rotation is of the record's resource is
+    /// checked apart (<c>remediation_rotation_mismatch</c>).
+    /// </summary>
+    /// <param name="rotation">The rotation and the change.</param>
+    public static RemediationProblem? RotationProblem(RotationFacts rotation)
+    {
+        ArgumentNullException.ThrowIfNull(rotation);
+        return RotationProblemAt(rotation.RotationExecutor, rotation.RotationSequence, rotation.RotationExecutedAt.UtcTicks / 10,
+            rotation.RecordExecutor, rotation.ChangeSequence, rotation.ChangedAt?.UtcTicks / 10, rotation.AlreadyCited);
+    }
+
+    /// <summary>
+    /// <see cref="RotationProblem(RotationFacts)"/> over instants in microseconds from 0001-01-01, as an export's
+    /// entries are read: an instant beyond the years 1 to 9999 (a time read with its offset) is compared as it is.
+    /// </summary>
+    internal static RemediationProblem? RotationProblemAt(string rotationExecutor, long rotationSequence, long rotationExecutedAt,
+        string recordExecutor, long? changeSequence, long? changedAt, bool alreadyCited)
+    {
+        if (rotationExecutor != recordExecutor)
+            return new("remediation_rotation_other_executor", $"the rotation was executed by {rotationExecutor}, not by {recordExecutor}");
+        if (rotationSequence <= changeSequence || rotationExecutedAt < changedAt)
+            return new("remediation_rotation_before_change", "the rotation was made before the change it replaces");
+        if (alreadyCited) return new("remediation_rotation_reused", "another remediation already cites this rotation");
+        return null;
+    }
+
     // ── Reviews ─────────────────────────────────────────────────────────────
 
     /// <summary>The route a review is requested on.</summary>
@@ -574,16 +626,17 @@ public static partial class RemediationRules
     public static string? Rfc3339(string? value) =>
         Instant(value) is { } at && at >= 0 && at <= DateTime.MaxValue.Ticks / 10 ? Print(at) : null;
 
-    private static string? ApprovalProblem(AdminApproval approval, string who, string keyId, string path, IReadOnlyList<string> audiences, string at)
+    private static string? ApprovalProblem(AdminApproval approval, string who, string keyId, string path, IReadOnlyList<string> audiences,
+        string at, string field)
     {
         if (!AdminApprovalValid(approval)) return $"the {who}'s signature does not verify over its request";
         if (approval.KeyId != keyId) return $"the {who}'s request is signed by {approval.KeyId}, not {keyId}";
         if (approval.Method != "POST" || approval.Path != path || approval.Query?.Count > 0)
             return $"the {who}'s request is {approval.Method} {approval.Path}, not POST {path}";
         if (!audiences.Contains(approval.Audience, StringComparer.Ordinal)) return $"the {who}'s request is for another Network Authority";
-        // A recorded time this SDK cannot read refuses it, where TypeScript skips the bound.
-        if (Instant(approval.Timestamp) is not { } signedAt || RecordedMicros(at) is not { } recordedAt
-            || Math.Abs(signedAt - recordedAt) > ApprovalMaxAgeMicros)
+        // The review's model reads its times as UTC timestamps only: another time proves no age.
+        if (RecordedUtcMicros(at) is not { } recordedAt) return $"the review's {field} is not a UTC timestamp";
+        if (Instant(approval.Timestamp) is not { } signedAt || Math.Abs(signedAt - recordedAt) > ApprovalMaxAgeMicros)
             return $"the {who}'s request was signed more than 300s from when it was recorded";
         return null;
     }
@@ -593,8 +646,12 @@ public static partial class RemediationRules
     /// keys (the audience): the decider signed <c>POST /admin/evidence/reviews/&lt;review_id&gt;/decide</c>, without a
     /// query, as <c>decided_by</c>, with exactly the verdict, waiver end and note the review records, within 300
     /// seconds of <c>decided_at</c>; a requester signed <c>POST /admin/evidence/reviews</c> with exactly the subject and
-    /// justification it records, within 300 seconds of <c>requested_at</c>. A recorded time this SDK cannot read
-    /// refuses the review. Whether each public key is the operator key's is for the holder registry to say.
+    /// justification it records, within 300 seconds of <c>requested_at</c>. Both recorded times are read first, as the
+    /// review's model reads them before anything else: each must be a UTC timestamp in the form the NA writes
+    /// (<c>YYYY-MM-DDTHH:MM:SS</c>, a fraction, and <c>Z</c>, <c>+00:00</c> or <c>-00:00</c>), or the review is refused
+    /// (<c>the review's decided_at is not a UTC timestamp</c>). The reference's model also reads lenient spellings the NA
+    /// never writes (a space, a lower-case <c>t</c> or <c>z</c>, <c>+0000</c>); this SDK does not. Whether each public
+    /// key is the operator key's is for the holder registry to say.
     /// </summary>
     /// <param name="review">The review record.</param>
     /// <param name="naPublicKeys">The NA's public keys: the audiences the requests may name.</param>
@@ -602,8 +659,10 @@ public static partial class RemediationRules
     {
         ArgumentNullException.ThrowIfNull(review);
         ArgumentNullException.ThrowIfNull(naPublicKeys);
+        foreach (var (field, at) in new[] { ("decided_at", review.DecidedAt), ("requested_at", review.RequestedAt) })
+            if (RecordedUtcMicros(at) is null) return $"the review's {field} is not a UTC timestamp";
         var approval = review.Approval ?? new AdminApproval();
-        if (ApprovalProblem(approval, "decider", review.DecidedBy, ReviewDecisionPath(review.ReviewId), naPublicKeys, review.DecidedAt) is { } problem)
+        if (ApprovalProblem(approval, "decider", review.DecidedBy, ReviewDecisionPath(review.ReviewId), naPublicKeys, review.DecidedAt, "decided_at") is { } problem)
             return problem;
         var body = approval.Body.ValueKind == JsonValueKind.Object ? approval.Body : JsonSerializer.SerializeToElement(new JsonObject());
         if (body.EnumerateObject().Any(p => p.Name is not ("verdict" or "waive_until" or "note")))
@@ -636,7 +695,7 @@ public static partial class RemediationRules
         AdminApproval approval, string requestedBy, string subjectKind, string subjectId, string justification, string requestedAt,
         IReadOnlyList<string> naPublicKeys)
     {
-        if (ApprovalProblem(approval, "requester", requestedBy, ReviewRequestPath, naPublicKeys, requestedAt) is { } problem) return problem;
+        if (ApprovalProblem(approval, "requester", requestedBy, ReviewRequestPath, naPublicKeys, requestedAt, "requested_at") is { } problem) return problem;
         var expected = new Dictionary<string, string>
         {
             ["subject_kind"] = subjectKind,
@@ -665,6 +724,12 @@ public static partial class RemediationRules
 
     [GeneratedRegex(@"^[A-Za-z0-9_-]{1,64}\z", RegexOptions.CultureInvariant)]
     private static partial Regex Parameter();
+
+    /// <summary>
+    /// White space as Python's <c>str.strip()</c> removes it, which the reference's <c>stands_for</c> check uses: .NET's
+    /// white space and U+001C to U+001F.
+    /// </summary>
+    private static bool PythonSpace(char c) => char.IsWhiteSpace(c) || c is >= '\u001c' and <= '\u001f';
 
     /// <summary>
     /// The issues the NA finds in a policy's 1.4.0 sections (the codes of <c>validate_boundary_policy</c>): remediation
@@ -709,7 +774,7 @@ public static partial class RemediationRules
             issues.Add(new PolicyIssue { Code = "invalid_emergency", Message = "an emergency policy selects exactly one capability by its exact ID" });
         else if (capabilities[0] == standsFor)
             issues.Add(new PolicyIssue { Code = "invalid_emergency", Message = "the emergency capability must differ from the capability it stands for" });
-        if (standsFor.Contains('*') || string.IsNullOrWhiteSpace(standsFor))
+        if (standsFor.Contains('*') || standsFor.All(PythonSpace))
             issues.Add(new PolicyIssue { Code = "invalid_emergency", Message = "stands_for is an exact capability ID" });
         var parameter = Text(emergency, "justification_parameter") ?? "";
         if (!Parameter().IsMatch(parameter))
