@@ -569,7 +569,7 @@ public static partial class GrantRules
         if (raw.ValueKind != JsonValueKind.Object) return null;
         try
         {
-            return raw.Deserialize<TimeToken>();
+            return OfflineVerifier.ReadPayload<TimeToken>(raw);
         }
         catch (JsonException)
         {

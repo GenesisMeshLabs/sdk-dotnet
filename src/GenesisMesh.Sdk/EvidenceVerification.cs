@@ -404,7 +404,7 @@ public static partial class OfflineVerifier
         private void QuarantinedUse(JsonElement raw)
         {
             if (!Shapes.GrantUse(raw)) return;
-            var use = raw.Deserialize<GrantExecutionEvidence>()!;
+            var use = ReadPayload<GrantExecutionEvidence>(raw)!;
             if (_grantsHeld.TryGetValue(use.GrantId, out var held)
                 && (!IsObject(raw, "signature", out var sig) || Str(sig, "key_id") != held.Grant.BearerKeyId
                     || !OutOfBandSignedBy(raw, [held.Grant.BearerPublicKey])))
@@ -910,7 +910,7 @@ public static partial class OfflineVerifier
                 Result.Grants++;
                 // A grant whose signature fails is not held: its uses and revocation are checked as for a grant the run does not hold.
                 if (Result.Failures.Count == failures)
-                    run._grantsHeld[grantId] = (payload.Deserialize<CapabilityGrant>()!, GrantRecordDigest("CapabilityGrant", payload));
+                    run._grantsHeld[grantId] = (ReadPayload<CapabilityGrant>(payload)!, GrantRecordDigest("CapabilityGrant", payload));
             }
 
             /// <summary>
@@ -952,7 +952,7 @@ public static partial class OfflineVerifier
                 var key = run.FittingKey(kind, payload);
                 Signature(key is not null && OutOfBandSignedBy(payload, [key.PublicKey]), "GrantExecutionEvidence");
                 Result.GrantExecutions++;
-                var use = payload.Deserialize<GrantExecutionEvidence>()!;
+                var use = ReadPayload<GrantExecutionEvidence>(payload)!;
                 var grantId = use.GrantId;
                 var received = GrantRecordDigest("GrantExecutionEvidence", payload);
                 var isHeld = run._grantsHeld.TryGetValue(grantId, out var held);
@@ -970,7 +970,8 @@ public static partial class OfflineVerifier
                 {
                     Fail("grant_bearer_mismatch", useId);
                 }
-                if (signer?.ResourcePrefix is { } prefix && !(use.ResourceId ?? "").StartsWith(prefix, StringComparison.Ordinal))
+                // A use without a resource is outside any prefix, the empty one included (unlike execution evidence).
+                if (signer?.ResourcePrefix is { } prefix && (use.ResourceId is null || !use.ResourceId.StartsWith(prefix, StringComparison.Ordinal)))
                     Fail("grant_use_out_of_scope", $"signing key covers only resources starting with {prefix}");
                 if (isHeld && use.GrantDigest != held.Digest) Fail("grant_mismatch", grantId);
                 if (use.UseSequence == 1) run._admittedUses.TryAdd(grantId, 0);
@@ -1164,6 +1165,32 @@ public static partial class OfflineVerifier
 
     private static long? PayloadInteger(JsonElement obj, string key) =>
         obj.ValueKind == JsonValueKind.Object && obj.TryGetProperty(key, out var v) ? PayloadInteger(v) : null;
+
+    /// <summary>
+    /// A payload read into its model as JavaScript reads it: an integer written with a fraction or an exponent
+    /// (<c>1.0</c>, <c>1e0</c>), which the shapes accept, is read as the integer. Digests and signatures stay over the
+    /// payload as received.
+    /// </summary>
+    internal static T? ReadPayload<T>(JsonElement payload) => Integral(payload).Deserialize<T>();
+
+    private static JsonNode? Integral(JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var obj = new JsonObject();
+                foreach (var member in value.EnumerateObject()) obj[member.Name] = Integral(member.Value);
+                return obj;
+            case JsonValueKind.Array:
+                var array = new JsonArray();
+                foreach (var item in value.EnumerateArray()) array.Add(Integral(item));
+                return array;
+            case JsonValueKind.Number when PayloadInteger(value) is { } integer:
+                return JsonValue.Create(integer);
+            default:
+                return JsonValue.Create(value);
+        }
+    }
 
     /// <summary>
     /// The record shapes the reference reads, as TypeScript checks them (<c>validation.ts</c>): a field is absent,
