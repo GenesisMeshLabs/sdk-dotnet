@@ -19,7 +19,6 @@
 ### Differs from TypeScript
 
 - The record outbox's grant uses: as above; TypeScript keeps the order they were added and retries a use behind such a gap.
-
 - `RequestTimeToken` takes a request already signed (`GrantRecords.SignTimeTokenRequest`); TypeScript also signs one when given the bearer key's signer.
 - A time token is a `JsonElement`, kept as the NA signed it, so its signature verifies and a use carries it unchanged.
 - `AllGrants` and `AllGrantUses` follow the pages; TypeScript reads one page at a time.
