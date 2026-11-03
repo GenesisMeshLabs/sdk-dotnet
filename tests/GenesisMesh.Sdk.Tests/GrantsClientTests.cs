@@ -216,6 +216,19 @@ public class GrantsClientTests
     }
 
     [Fact]
+    public async Task APositionWhoseEntryRetentionRemovedHasNoEntryFields()
+    {
+        using var gm = Client([], _ => Json(200,
+            """{"grant_id":"g-1","uses":[{"use_id":"u-1","use_sequence":1,"state":"admitted","rejection_code":null,"executed_at":"2026-01-01T00:10:00Z","recorded_at":null,"store_sequence":8,"resource_id":null,"resource_sequence":null,"outcome":null}],"next_before":null}"""));
+        var use = Assert.Single((await gm.Grants.GrantUses("g-1")).Uses);
+        Assert.Equal(("u-1", 8L, "2026-01-01T00:10:00Z"), (use.UseId, use.StoreSequence, use.ExecutedAt));
+        Assert.Null(use.RecordedAt);
+        Assert.Null(use.ResourceId);
+        Assert.Null(use.ResourceSequence);
+        Assert.Null(use.Outcome);
+    }
+
+    [Fact]
     public async Task RevokeGrant_SendsTheReasonOnlyWhenGiven()
     {
         var sent = new List<Sent>();

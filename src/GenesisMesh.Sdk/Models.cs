@@ -5426,7 +5426,11 @@ public sealed class GrantList
     public string? NextBefore { get; set; }
 }
 
-/// <summary>One position of a grant's use chain (<see cref="GrantsClient.GrantUses"/>).</summary>
+/// <summary>
+/// One position of a grant's use chain (<see cref="GrantsClient.GrantUses"/>). Once retention has removed its store
+/// entry, the NA no longer sends what the entry held: <see cref="RecordedAt"/>, <see cref="ResourceId"/>,
+/// <see cref="ResourceSequence"/> and <see cref="Outcome"/> are null.
+/// </summary>
 public sealed class GrantUseSummary
 {
     /// <summary>The use's ID.</summary>
@@ -5449,7 +5453,7 @@ public sealed class GrantUseSummary
     [JsonPropertyName("executed_at")]
     public string ExecutedAt { get; set; } = "";
 
-    /// <summary>When the NA stored it.</summary>
+    /// <summary>When the NA stored it; null once retention removed its entry.</summary>
     [JsonPropertyName("recorded_at")]
     public string? RecordedAt { get; set; }
 
@@ -5465,9 +5469,9 @@ public sealed class GrantUseSummary
     [JsonPropertyName("resource_sequence")]
     public long? ResourceSequence { get; set; }
 
-    /// <summary>A value of <see cref="GrantUseOutcomes"/>.</summary>
+    /// <summary>A value of <see cref="GrantUseOutcomes"/>; null once retention removed its entry.</summary>
     [JsonPropertyName("outcome")]
-    public string Outcome { get; set; } = "";
+    public string? Outcome { get; set; }
 }
 
 /// <summary>A page of a grant's use chain to read (<see cref="GrantsClient.GrantUses"/>).</summary>
