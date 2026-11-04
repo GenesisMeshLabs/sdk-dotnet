@@ -1,5 +1,0 @@
-### Added
-
-- **Verifying an evidence export offline.** `OfflineVerifier.VerifyEvidenceEvents` verifies an export, or a history (`Contiguous = false`), as the reference's `verify_evidence_events` does, with its reason codes: each envelope and its digests, the store chain, every signature (the NA's under its keys or its key history, the executor's under the registered keys, retired ones included), each execution record against its decision, and the decision and resource chains. A retention checkpoint continues the chains (`EvidenceVerifyOptions.Checkpoint`). It verifies decisions, justification proofs, execution evidence, retention checkpoints and the records of changes outside the governed path (the other kinds of the store: see below); a kind from a later release fails as `unknown_entry_kind`. `OfflineVerifier.VerifyRetentionCheckpoint` checks a checkpoint's NA signature.
-- **Conformance:** the shared `field_registry` suite's `export` vectors run.
-- **The live tests** verify the NA's export offline against the NA's own verification, under its key and its key history, and the partner lifecycle verifies the resource's and the partner's histories offline.
