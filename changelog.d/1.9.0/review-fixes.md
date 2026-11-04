@@ -1,3 +1,0 @@
-### Fixed
-
-- **A failed read of the NA's key is no longer reused.** Requests that need the NA's key at the same time share one lookup. Before, a failed lookup whose waiting requests had all been cancelled stayed cached, and the next admin request failed with the old error even after the NA had recovered; a request that resumed on another thread as the lookup failed could join it again on its failover attempt; and a lookup cancelled through the caller's own `HttpClient` (`CancelPendingRequests`) stayed joined. A lookup that has failed or been cancelled is now never joined, and a cancellation the caller's token did not ask for is a `NetworkException`, as a timeout is. Each waiting request now gets an exception of its own, its inner exception included.
