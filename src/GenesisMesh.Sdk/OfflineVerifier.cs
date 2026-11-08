@@ -47,6 +47,15 @@ public sealed class DecisionVerifyOptions
     public IReadOnlyList<string>? ExpectedPolicies { get; init; }
     /// <summary>Signed MembershipAttestation JSON; when set, must match the attestation binding.</summary>
     public string? ExpectedAttestation { get; init; }
+    /// <summary>
+    /// 1.9.2: when set, the decision's attestation binding must name this attestation ID, for a relying party
+    /// that knows which attestation it expects but does not hold it (<c>attestation_binding_mismatch</c>;
+    /// <c>attestation_binding_missing</c> without a binding). The field is signed.
+    /// </summary>
+    public string? ExpectedAttestationId { get; init; }
+    /// <summary>1.9.2: when set, the decision's attestation binding must name this subject ID, as
+    /// <see cref="ExpectedAttestationId"/>.</summary>
+    public string? ExpectedSubjectId { get; init; }
 }
 
 /// <summary>
@@ -335,6 +344,13 @@ public static partial class OfflineVerifier
             if (Str(ab, "attestation_id") != Str(e, "attestation_id") || Str(ab, "subject_id") != Str(e, "subject_id")
                 || Str(ab, "issuer_sovereign_id") != Str(e, "issuer_sovereign_id")
                 || Str(ab, "attestation_digest") != AttestationDigest(options.ExpectedAttestation))
+                return Reject("attestation_binding_mismatch");
+        }
+        if (options.ExpectedAttestationId is not null || options.ExpectedSubjectId is not null)
+        {
+            if (!IsObject(d, "attestation_binding", out var ab)) return Reject("attestation_binding_missing");
+            if ((options.ExpectedAttestationId is not null && Str(ab, "attestation_id") != options.ExpectedAttestationId)
+                || (options.ExpectedSubjectId is not null && Str(ab, "subject_id") != options.ExpectedSubjectId))
                 return Reject("attestation_binding_mismatch");
         }
 
