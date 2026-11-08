@@ -258,7 +258,8 @@ public class RemediationLiveTests
         Assert.True((await ops.Policy.Activate(policy.PolicyId, policy.Version)).Active);
         var attestation = await ops.Attestation.Issue(new Dictionary<string, object?>
         {
-            ["subject_id"] = "partner-org-1",
+            // 1.9.2: the controller asks for decisions under it, so it names the controller's key.
+            ["subject_id"] = "controller",
             ["roles"] = new[] { "role:client" },
             ["validity_hours"] = 24,
             ["claims"] = new Dictionary<string, object?> { ["capabilities"] = new[] { "partner-secret.rotate" } },
