@@ -24,7 +24,7 @@
     <!-- dotnet pack compares the public API with this release and fails on a break
          (docs/architecture.md, "A breaking change"; scripts/api_compat.py). -->
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>1.9.1</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>1.9.2</PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <ItemGroup>
