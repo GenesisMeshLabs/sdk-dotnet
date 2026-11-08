@@ -59,6 +59,7 @@ public class ConformanceTests
                         ExpectedPolicies = input.TryGetProperty("expected_policies", out var ps)
                             ? ps.EnumerateArray().Select(p => p.GetRawText()).ToList() : null,
                         ExpectedAttestation = input.TryGetProperty("expected_attestation", out var a) ? a.GetRawText() : null,
+                        ExpectedRequesterKeyId = input.TryGetProperty("expected_requester_key_id", out var rk) ? rk.GetString() : null,
                     };
                     var r = OfflineVerifier.VerifyBoundaryDecision(input.GetProperty("decision").GetRawText(), options);
                     Assert.Equal(expected.GetProperty("accepted").GetBoolean(), r.Accepted);

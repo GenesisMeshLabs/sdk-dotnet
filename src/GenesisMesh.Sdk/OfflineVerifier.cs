@@ -56,6 +56,13 @@ public sealed class DecisionVerifyOptions
     /// <summary>1.9.2: when set, the decision's attestation binding must name this subject ID, as
     /// <see cref="ExpectedAttestationId"/>.</summary>
     public string? ExpectedSubjectId { get; init; }
+    /// <summary>
+    /// 1.10.0: when set, the decision must name this operator key as the one that asked
+    /// (<c>attestation_binding.requester_key_id</c>; <c>attestation_binding_mismatch</c> for another key). A decision
+    /// without the field, such as one of a 1.9.x Network Authority, verifies as before and fails
+    /// (<c>attestation_binding_missing</c>) only when this is set.
+    /// </summary>
+    public string? ExpectedRequesterKeyId { get; init; }
 }
 
 /// <summary>
@@ -352,6 +359,12 @@ public static partial class OfflineVerifier
             if ((options.ExpectedAttestationId is not null && Str(ab, "attestation_id") != options.ExpectedAttestationId)
                 || (options.ExpectedSubjectId is not null && Str(ab, "subject_id") != options.ExpectedSubjectId))
                 return Reject("attestation_binding_mismatch");
+        }
+        if (options.ExpectedRequesterKeyId is not null)
+        {
+            if (!IsObject(d, "attestation_binding", out var ab) || Str(ab, "requester_key_id") is null)
+                return Reject("attestation_binding_missing");
+            if (Str(ab, "requester_key_id") != options.ExpectedRequesterKeyId) return Reject("attestation_binding_mismatch");
         }
 
         if (!authorized)

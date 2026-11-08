@@ -1445,6 +1445,8 @@ public static partial class OfflineVerifier
         [
             ("attestation_id", Text), ("subject_id", Written(Text)), ("issuer_sovereign_id", Written(Text)),
             ("attestation_digest", Written(Text)), ("revocation_seq_checked", NonNegative),
+            // 1.10.0: the operator key that asked; absent on 1.9.x decisions and when no key asked.
+            ("requester_key_id", Optional(Text)),
         ]);
         private static readonly Check FreshnessProof = Shape(
         [

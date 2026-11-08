@@ -1290,6 +1290,14 @@ var forVendor = OfflineVerifier.VerifyBoundaryDecision(decisionJson, new Decisio
 });
 // another attestation or subject: "attestation_binding_mismatch"; no binding: "attestation_binding_missing"
 
+// 1.10.0: accept only a decision that this operator key asked for. A 1.9.x decision has no requester:
+// "attestation_binding_missing" only when this is set.
+var askedByVendor = OfflineVerifier.VerifyBoundaryDecision(decisionJson, new DecisionVerifyOptions
+{
+    OperatorPublicKeys = new[] { naPublicKey },
+    ExpectedRequesterKeyId = "vendor-acme-ops",
+});
+
 bool ok = OfflineVerifier.VerifyDataLicensePolicySignature(licensePolicyJson, new[] { licensorKey });
 var v = OfflineVerifier.VerifyDataAccessIntent(intentJson, licensePolicyJson, new[] { agentKey });
 // v.Valid, v.ViolationReason, v.Violations
