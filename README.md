@@ -1281,6 +1281,15 @@ var d = OfflineVerifier.VerifyBoundaryDecision(decisionJson, new DecisionVerifyO
 });
 // d.Accepted (verified), d.Authorized (ALLOW or DENY), d.Reason
 
+// 1.9.2: without the attestation, check the decision was made for the attestation or subject you expect.
+var forVendor = OfflineVerifier.VerifyBoundaryDecision(decisionJson, new DecisionVerifyOptions
+{
+    OperatorPublicKeys = new[] { naPublicKey },
+    ExpectedAttestationId = attestationId,     // either may be left null
+    ExpectedSubjectId = "vendor-acme",
+});
+// another attestation or subject: "attestation_binding_mismatch"; no binding: "attestation_binding_missing"
+
 bool ok = OfflineVerifier.VerifyDataLicensePolicySignature(licensePolicyJson, new[] { licensorKey });
 var v = OfflineVerifier.VerifyDataAccessIntent(intentJson, licensePolicyJson, new[] { agentKey });
 // v.Valid, v.ViolationReason, v.Violations
