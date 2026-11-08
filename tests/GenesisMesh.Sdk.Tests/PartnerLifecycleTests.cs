@@ -148,14 +148,16 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
             Assert.Equal(("partner:", true), (state.ResourcePrefix, state.Active));
         });
 
+        // 1.9.2: the NA decides under an attestation only for the key it names, and the controller asks under both.
+        var controllerKeyId = (string)na.Inputs["controllerKeyId"]!;
         MembershipAttestation partner = null!, security = null!;
         await Step("the platform team issues the partner's attestation, and the security team's ahead of any incident", async () =>
         {
-            partner = await platform.Attestation.Issue(D(("subject_id", "partner-org-1"), ("roles", new[] { "role:client" }),
+            partner = await platform.Attestation.Issue(D(("subject_id", controllerKeyId), ("roles", new[] { "role:client" }),
                 ("validity_hours", 720), ("claims", D(
                     ("capabilities", new[] { "partner-secret.create", "partner-secret.rotate", "partner-secret.retire", "partner-secret.revoke" }),
                     ("apps", new[] { "app-orders", "app-billing" })))));
-            security = await platform.Attestation.Issue(D(("subject_id", "security-team"), ("roles", new[] { "role:client" }),
+            security = await platform.Attestation.Issue(D(("subject_id", controllerKeyId), ("roles", new[] { "role:client" }),
                 ("validity_hours", 720), ("claims", D(("capabilities", new[] { "partner-secret-emergency.revoke" })))));
         });
 
@@ -410,7 +412,7 @@ public class PartnerLifecycleTests(ITestOutputHelper output)
             Assert.Equal(new long[] { 1, 2, 3, 4, 5 }, executions.Select(e => e.Entry.ResourceSequence!.Value));
             var decisions = history.Entries.Where(e => e.Entry.EntryKind == "decision").Select(e => e.Entry.DecisionId).ToHashSet();
             Assert.All(executions, e => Assert.Contains(e.Entry.DecisionId, decisions));
-            var vendor = await controller.EvidenceStore.VendorHistory("partner-org-1");
+            var vendor = await controller.EvidenceStore.VendorHistory(controllerKeyId);
             Assert.True(vendor.Verification.Verified);
             Assert.Contains(vendor.Entries, e => e.Entry.EntryKind == "decision" && e.Entry.Outcome == "denied");
             // Offline, as histories: the NA's word is not needed.

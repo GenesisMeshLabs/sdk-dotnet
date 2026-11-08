@@ -200,7 +200,8 @@ public class LiveContractTests
             Check("policy_verify", policyCheck);
             Assert.True(policyCheck.Valid, recorder.Json?.ToJsonString());
 
-            var vendor = await gm.Attestation.Issue(D(("subject_id", "vendor-evaluate"), ("roles", new[] { "role:client" }),
+            // 1.9.2: the NA decides under an attestation only for the key it names.
+            var vendor = await gm.Attestation.Issue(D(("subject_id", keyId), ("roles", new[] { "role:client" }),
                 ("claims", D(("capabilities", new[] { "contract.read" }))), ("validity_hours", 24)));
             EvaluateRequest Evaluation(int days) => new()
             {
