@@ -15,7 +15,7 @@ public class ExpectedAttestationTests
     private const string Subject = "sovereign-b";
 
     private static (string Decision, DecisionVerifyOptions Options) Vector(string id,
-        string? attestationId = null, string? subjectId = null)
+        string? attestationId = null, string? subjectId = null, string? requesterKeyId = null)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "interop.json");
         using var doc = JsonDocument.Parse(File.ReadAllText(path));
@@ -27,6 +27,7 @@ public class ExpectedAttestationTests
             Now = OfflineVerifier.ParseTimestamp(input.GetProperty("now").GetString()!),
             ExpectedAttestationId = attestationId,
             ExpectedSubjectId = subjectId,
+            ExpectedRequesterKeyId = requesterKeyId,
         });
     }
 
@@ -57,5 +58,41 @@ public class ExpectedAttestationTests
             Assert.False(r.Accepted);
             Assert.Equal("attestation_binding_missing", r.Reason);
         }
+    }
+
+    // 1.10.0: the binding names the operator key that asked (requester_key_id). bd-008 names "b-ops"; bd-003 is a
+    // 1.9.x decision without the field; bd-001 has no attestation binding.
+    [Theory]
+    [InlineData(null, null, true, "authorized")]
+    [InlineData(null, "b-ops", true, "authorized")]
+    [InlineData(null, "c-ops", false, "attestation_binding_mismatch")]
+    [InlineData(Subject, "c-ops", false, "attestation_binding_mismatch")]
+    public void ChecksTheExpectedRequester(string? subjectId, string? requester, bool accepted, string reason)
+    {
+        var (decision, options) = Vector("bd-008", subjectId: subjectId, requesterKeyId: requester);
+        var r = OfflineVerifier.VerifyBoundaryDecision(decision, options);
+        Assert.Equal(accepted, r.Accepted);
+        Assert.Equal(reason, r.Reason);
+    }
+
+    [Fact]
+    public void TheRequesterIsUnderTheSignature()
+    {
+        var (decision, options) = Vector("bd-008");
+        Assert.Contains("\"requester_key_id\":\"b-ops\"", decision.Replace(" ", ""));
+        var edited = decision.Replace("\"b-ops\"", "\"c-ops\"");
+        Assert.Equal("invalid_signature", OfflineVerifier.VerifyBoundaryDecision(edited, options).Reason);
+    }
+
+    [Theory]
+    [InlineData("bd-003")]
+    [InlineData("bd-001")]
+    public void ADecisionWithoutARequesterFailsOnlyWhenOneIsExpected(string id)
+    {
+        var (decision, options) = Vector(id);
+        Assert.True(OfflineVerifier.VerifyBoundaryDecision(decision, options).Accepted);
+        var r = OfflineVerifier.VerifyBoundaryDecision(decision, Vector(id, requesterKeyId: "b-ops").Options);
+        Assert.False(r.Accepted);
+        Assert.Equal("attestation_binding_missing", r.Reason);
     }
 }
