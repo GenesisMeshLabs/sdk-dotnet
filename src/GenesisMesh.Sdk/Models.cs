@@ -547,9 +547,18 @@ public sealed class MembershipAttestation : IJsonOnDeserialized
 /// </summary>
 public sealed class AttestationRecord
 {
-    /// <summary>The attestation as the NA signed it.</summary>
+    /// <summary>
+    /// The attestation as the NA signed it. Null in an unsigned read from an NA 1.10.0, which gives the status and
+    /// lineage only.
+    /// </summary>
     [JsonPropertyName("attestation")]
-    public MembershipAttestation Attestation { get; set; } = new();
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MembershipAttestation? Attestation { get; set; }
+
+    /// <summary>1.10.0: the attestation's ID in an unsigned read, which has no <see cref="Attestation"/>; null otherwise.</summary>
+    [JsonPropertyName("attestation_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AttestationId { get; set; }
 
     /// <summary><c>active</c>, <c>suspended</c> or <c>revoked</c>, now.</summary>
     [JsonPropertyName("status")]
