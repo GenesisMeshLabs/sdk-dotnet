@@ -570,6 +570,8 @@ public class LiveContractTests
                 Assert.Equal("active", statusOnly.Status);
                 if (statusOnly.AttestationId is not null)
                     Assert.Equal((member.AttestationId, true), (statusOnly.AttestationId, statusOnly.Attestation is null));
+                var typed = await gm.Attestation.GetStatus(member.AttestationId);
+                Assert.Equal("active", typed.Status);
                 Assert.Equal("admin_auth_failed", (await Assert.ThrowsAsync<UnauthorizedException>(() =>
                     anonymous.Attestation.List(new ListAttestationsParams { SubjectId = "vendor-feed" }))).Code);
                 Assert.Equal("recognition_policy_not_configured",

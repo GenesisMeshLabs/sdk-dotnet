@@ -585,6 +585,41 @@ public sealed class AttestationRecord
     public string? SupersededBy { get; set; }
 }
 
+/// <summary>
+/// An attestation's status and lineage, without the attestation (1.10.0): what an NA 1.10.0 answers to an unsigned
+/// GET /attestations/&lt;id&gt; (<see cref="AttestationClient.GetStatus"/>).
+/// </summary>
+public sealed class AttestationStatusRecord
+{
+    /// <summary>The attestation's ID; empty from an NA before 1.10.0, which names it inside the attestation.</summary>
+    [JsonPropertyName("attestation_id")]
+    public string AttestationId { get; set; } = "";
+
+    /// <summary><c>active</c>, <c>suspended</c> or <c>revoked</c>, now.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    /// <summary>When it was revoked; null while it is not.</summary>
+    [JsonPropertyName("revoked_at")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? RevokedAt { get; set; }
+
+    /// <summary>Why it was revoked; null while it is not.</summary>
+    [JsonPropertyName("revocation_reason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? RevocationReason { get; set; }
+
+    /// <summary>The copy this one re-issues under the NA's current key; null for an original.</summary>
+    [JsonPropertyName("reissued_from")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? ReissuedFrom { get; set; }
+
+    /// <summary>The copy that re-issued this one under the NA's current key; null while none has.</summary>
+    [JsonPropertyName("superseded_by")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? SupersededBy { get; set; }
+}
+
 /// <summary>Returned by GET /attestations (<see cref="AttestationClient.List"/>).</summary>
 public sealed class AttestationList
 {

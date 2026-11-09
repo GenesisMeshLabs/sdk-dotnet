@@ -249,6 +249,22 @@ public class AttestationTests
     }
 
     [Fact]
+    public async Task GetStatus_IsUnsigned_EvenWithAKey()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Json(200, """
+            {"attestation_id":"att-1","status":"revoked","revoked_at":"2026-10-31T09:00:00Z","revocation_reason":"ended",
+             "reissued_from":null,"superseded_by":"att-2"}
+            """));
+        var status = await gm.Attestation.GetStatus("att-1");
+        Assert.Equal(("att-1", "revoked", "2026-10-31T09:00:00Z", "att-2"),
+            (status.AttestationId, status.Status, status.RevokedAt, status.SupersededBy));
+        Assert.Equal(("GET", "/attestations/att-1", false), (sent[0].Method, sent[0].Path, sent[0].Admin));
+        await Assert.ThrowsAsync<ArgumentException>(() => gm.Attestation.GetStatus("../admin"));
+        Assert.Single(sent);
+    }
+
+    [Fact]
     public async Task Get_RefusesASigningKeyWithoutAKeyId()
     {
         var sent = new List<Sent>();

@@ -73,6 +73,20 @@ public sealed class AttestationClient
     }
 
     /// <summary>
+    /// An attestation's status and lineage, unsigned (1.10.0). An NA 1.10.0 answers an unsigned read with these only;
+    /// an earlier NA also returns the attestation, which this leaves out.
+    /// GET /attestations/{id}
+    /// </summary>
+    /// <exception cref="NotFoundException">No such attestation is stored (<c>attestation_not_found</c>).</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="attestationId"/> is not one path segment: empty, "." or "..", holding '/', '\', '?', '#', '%' or
+    /// a control character, or starting or ending with white space. Nothing is sent.
+    /// </exception>
+    public async Task<AttestationStatusRecord> GetStatus(string attestationId, CancellationToken ct = default) =>
+        await _t.PublicGetAsync<AttestationStatusRecord>(
+            "/attestations/" + Transport.LastPathSegment(attestationId, nameof(attestationId)), null, ct).ConfigureAwait(false);
+
+    /// <summary>
     /// Stored attestations, by issuer, subject or status (1.9.0). The NA lists them to operators and gives anyone else
     /// the count: a client with a signing key signs the request (a read-tier key or above) and gets
     /// <see cref="AttestationList.Attestations"/>; without one it gets <see cref="AttestationList.Count"/>. Both leave
