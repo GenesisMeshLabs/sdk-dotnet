@@ -554,10 +554,10 @@ public class LiveContractTests
             var member = await gm.Attestation.Issue(D(("subject_id", "vendor-feed"), ("roles", new[] { "role:client" })));
             var memberRecord = await gm.Attestation.Get(member.AttestationId);
             Modeled("attestation_get", memberRecord);
-            Assert.Equal(("active", member.AttestationId), (memberRecord.Status, memberRecord.Attestation.AttestationId));
+            Assert.Equal(("active", member.AttestationId), (memberRecord.Status, memberRecord.Attestation!.AttestationId));
             var members = await gm.Attestation.List(new ListAttestationsParams { SubjectId = "vendor-feed" });
             Modeled("attestation_list", members);
-            Assert.Equal(member.AttestationId, Assert.Single(members.Attestations!).Attestation.AttestationId);
+            Assert.Equal(member.AttestationId, Assert.Single(members.Attestations!).Attestation!.AttestationId);
             var anonymousRecorder = new Recorder { InnerHandler = new HttpClientHandler() };
             using (var anonymous = new GenesisMeshClient(new ClientOptions { BaseUrl = baseUrl, HttpHandler = anonymousRecorder }))
             {
@@ -565,6 +565,13 @@ public class LiveContractTests
                 Modeled("attestation_count", counted, anonymousRecorder.Json);
                 Assert.Null(counted.Attestations);
                 Assert.True(counted.Count >= 3, $"{counted.Count} active attestations");
+                // 1.10.0: an unsigned read gives the status and lineage, not the attestation (a 1.9.x NA gives both).
+                var statusOnly = await anonymous.Attestation.Get(member.AttestationId);
+                Assert.Equal("active", statusOnly.Status);
+                if (statusOnly.AttestationId is not null)
+                    Assert.Equal((member.AttestationId, true), (statusOnly.AttestationId, statusOnly.Attestation is null));
+                var typed = await gm.Attestation.GetStatus(member.AttestationId);
+                Assert.Equal("active", typed.Status);
                 Assert.Equal("admin_auth_failed", (await Assert.ThrowsAsync<UnauthorizedException>(() =>
                     anonymous.Attestation.List(new ListAttestationsParams { SubjectId = "vendor-feed" }))).Code);
                 Assert.Equal("recognition_policy_not_configured",

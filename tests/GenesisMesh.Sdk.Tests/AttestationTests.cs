@@ -218,14 +218,14 @@ public class AttestationTests
         $$"""{"attestation":{{Attestation}},"status":"{{status}}","revoked_at":{{(revokedAt is null ? "null" : $"\"{revokedAt}\"")}},"revocation_reason":null,"reissued_from":null,"superseded_by":null}""";
 
     [Fact]
-    public async Task Get_ReadsTheStoredAttestation_Unsigned()
+    public async Task Get_SignsWithAKey_AndReadsTheStoredAttestation()
     {
         var sent = new List<Sent>();
         using var gm = Client(sent, _ => Json(200, Record("revoked", "2026-10-31T09:00:00Z")));
         var record = await gm.Attestation.Get("att-1");
         Assert.Equal(("revoked", "2026-10-31T09:00:00Z", "att-1", "active"),
-            (record.Status, record.RevokedAt, record.Attestation.AttestationId, record.Attestation.Status));
-        Assert.Equal(("GET", "/attestations/att-1", false), (sent[0].Method, sent[0].Path, sent[0].Admin));
+            (record.Status, record.RevokedAt, record.Attestation!.AttestationId, record.Attestation.Status));
+        Assert.Equal(("GET", "/attestations/att-1", true), (sent[0].Method, sent[0].Path, sent[0].Admin));
 
         await Assert.ThrowsAsync<ArgumentException>(() => gm.Attestation.Get("att-1 "));
         await Assert.ThrowsAsync<ArgumentException>(() => gm.Attestation.Get("../admin"));
@@ -235,12 +235,61 @@ public class AttestationTests
     }
 
     [Fact]
+    public async Task Get_WithoutAKey_IsUnsigned_AndGetsTheStatusOnly()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Json(200, """
+            {"attestation_id":"att-1","status":"revoked","revoked_at":"2026-10-31T09:00:00Z","revocation_reason":"ended",
+             "reissued_from":null,"superseded_by":null}
+            """), sign: false);
+        var record = await gm.Attestation.Get("att-1");
+        Assert.Equal(("att-1", "revoked", "ended"), (record.AttestationId, record.Status, record.RevocationReason));
+        Assert.Null(record.Attestation);
+        Assert.Equal(("GET", "/attestations/att-1", false), (sent[0].Method, sent[0].Path, sent[0].Admin));
+    }
+
+    [Fact]
+    public async Task GetStatus_IsUnsigned_EvenWithAKey()
+    {
+        var sent = new List<Sent>();
+        using var gm = Client(sent, _ => Json(200, """
+            {"attestation_id":"att-1","status":"revoked","revoked_at":"2026-10-31T09:00:00Z","revocation_reason":"ended",
+             "reissued_from":null,"superseded_by":"att-2"}
+            """));
+        var status = await gm.Attestation.GetStatus("att-1");
+        Assert.Equal(("att-1", "revoked", "2026-10-31T09:00:00Z", "att-2"),
+            (status.AttestationId, status.Status, status.RevokedAt, status.SupersededBy));
+        Assert.Equal(("GET", "/attestations/att-1", false), (sent[0].Method, sent[0].Path, sent[0].Admin));
+        await Assert.ThrowsAsync<ArgumentException>(() => gm.Attestation.GetStatus("../admin"));
+        Assert.Single(sent);
+    }
+
+    [Fact]
+    public async Task Get_RefusesASigningKeyWithoutAKeyId()
+    {
+        var sent = new List<Sent>();
+        using var gm = new GenesisMeshClient(new ClientOptions
+        {
+            BaseUrl = "http://localhost",
+            SigningKey = TestHelpers.ZeroSeedB64,
+            Audience = "TEST",
+            HttpHandler = new FuncHandler(req =>
+            {
+                sent.Add(new Sent(req.Method.Method, req.RequestUri!.PathAndQuery, null, false));
+                return Json(200, Record());
+            }),
+        });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => gm.Attestation.Get("att-1"));
+        Assert.Empty(sent);
+    }
+
+    [Fact]
     public async Task List_SignsWithAKey_AndSendsEveryFilter()
     {
         var sent = new List<Sent>();
         using var gm = Client(sent, _ => Json(200, $$"""{"count":1,"attestations":[{{Record()}}]}"""));
         var list = await gm.Attestation.List(new ListAttestationsParams { IssuerSovereignId = "na-a", SubjectId = "vendor-1", Status = "active" });
-        Assert.Equal((1, "att-1"), (list.Count, Assert.Single(list.Attestations!).Attestation.AttestationId));
+        Assert.Equal((1, "att-1"), (list.Count, Assert.Single(list.Attestations!).Attestation!.AttestationId));
         Assert.Equal(("GET", "/attestations?issuer_sovereign_id=na-a&subject_id=vendor-1&status=active", true),
             (sent[0].Method, sent[0].Path, sent[0].Admin));
         await gm.Attestation.List();

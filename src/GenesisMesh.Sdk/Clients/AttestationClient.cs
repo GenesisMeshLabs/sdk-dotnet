@@ -42,7 +42,39 @@ public sealed class AttestationClient
 
     /// <summary>
     /// A stored attestation with its current status (1.9.0). The signed body keeps the status it was issued with: read
-    /// <see cref="AttestationRecord.Status"/> for what holds now.
+    /// <see cref="AttestationRecord.Status"/> for what holds now. As <see cref="List"/> does, a client with a signing key
+    /// signs the request (1.10.0) and gets <see cref="AttestationRecord.Attestation"/>; an NA 1.10.0 answers a
+    /// standard-tier key only for an attestation whose subject it is. Without one, an NA 1.10.0 answers with the status
+    /// and lineage only, and <see cref="AttestationRecord.Attestation"/> is null.
+    /// GET /attestations/{id}
+    /// </summary>
+    /// <exception cref="NotFoundException">
+    /// No such attestation is stored (<c>attestation_not_found</c>), or, for a standard-tier key, its subject is
+    /// another party (1.10.0).
+    /// </exception>
+    /// <exception cref="UnauthorizedException">The NA does not accept the key (<c>admin_auth_failed</c>).</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="attestationId"/> is not one path segment: empty, "." or "..", holding '/', '\', '?', '#', '%' or
+    /// a control character, or starting or ending with white space. Nothing is sent.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The client has a signing key but no key ID (<see cref="ClientOptions.KeyId"/>): the NA would take the request as
+    /// unsigned. Nothing is sent.
+    /// </exception>
+    public async Task<AttestationRecord> Get(string attestationId, CancellationToken ct = default)
+    {
+        var path = "/attestations/" + Transport.LastPathSegment(attestationId, nameof(attestationId));
+        if (!_t.CanSign)
+            return await _t.PublicGetAsync<AttestationRecord>(path, null, ct).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(_t.SignerKeyId))
+            throw new InvalidOperationException(
+                "genesismesh: a signing key needs a key ID (ClientOptions.KeyId) to read an attestation");
+        return await _t.AdminGetAsync<AttestationRecord>(path, null, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// An attestation's status and lineage, unsigned (1.10.0). An NA 1.10.0 answers an unsigned read with these only;
+    /// an earlier NA also returns the attestation, which this leaves out.
     /// GET /attestations/{id}
     /// </summary>
     /// <exception cref="NotFoundException">No such attestation is stored (<c>attestation_not_found</c>).</exception>
@@ -50,8 +82,8 @@ public sealed class AttestationClient
     /// <paramref name="attestationId"/> is not one path segment: empty, "." or "..", holding '/', '\', '?', '#', '%' or
     /// a control character, or starting or ending with white space. Nothing is sent.
     /// </exception>
-    public async Task<AttestationRecord> Get(string attestationId, CancellationToken ct = default) =>
-        await _t.PublicGetAsync<AttestationRecord>(
+    public async Task<AttestationStatusRecord> GetStatus(string attestationId, CancellationToken ct = default) =>
+        await _t.PublicGetAsync<AttestationStatusRecord>(
             "/attestations/" + Transport.LastPathSegment(attestationId, nameof(attestationId)), null, ct).ConfigureAwait(false);
 
     /// <summary>
