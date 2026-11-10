@@ -1661,6 +1661,11 @@ public sealed class ActivePolicyStatus
     [JsonPropertyName("enforcement")]
     public string Enforcement { get; set; } = "";
 
+    /// <summary><c>required</c> when the NA denies a request no active policy covers (<c>BOUNDARY_POLICY_COVERAGE</c>, 1.10.0); null from an older NA.</summary>
+    [JsonPropertyName("coverage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Coverage { get; set; }
+
     /// <summary>False when an active policy fails verification: every policy-aware evaluation then denies.</summary>
     [JsonPropertyName("policy_set_healthy")]
     public bool PolicySetHealthy { get; set; }
@@ -1935,6 +1940,11 @@ public sealed class NAHealth
     /// <summary><c>required</c> or <c>optional</c>: whether every boundary decision needs an active policy.</summary>
     [JsonPropertyName("boundary_policy_enforcement")]
     public string BoundaryPolicyEnforcement { get; set; } = "";
+
+    /// <summary><c>required</c> when the NA denies a request no active policy covers (<c>BOUNDARY_POLICY_COVERAGE</c>, 1.10.0); null from an older NA.</summary>
+    [JsonPropertyName("boundary_policy_coverage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BoundaryPolicyCoverage { get; set; }
 
     /// <summary>The evidence store's mode, such as <c>on</c> or <c>off</c>.</summary>
     [JsonPropertyName("evidence_store")]

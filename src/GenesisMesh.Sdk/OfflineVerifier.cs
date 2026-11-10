@@ -63,6 +63,13 @@ public sealed class DecisionVerifyOptions
     /// (<c>attestation_binding_missing</c>) only when this is set.
     /// </summary>
     public string? ExpectedRequesterKeyId { get; init; }
+    /// <summary>
+    /// 1.10.0: the policies an ALLOW must rest on, by ID, at whatever version the NA signed. Each must be in the
+    /// decision's policy binding with at least one enforce-mode gate of that version evaluated
+    /// (<c>policy_binding_mismatch</c>; <c>policy_binding_missing</c> without a binding), so an ALLOW left when a
+    /// policy was deactivated or its selector stopped matching is refused. A DENY is reported as it is.
+    /// </summary>
+    public IReadOnlyList<string>? ExpectedPolicyIds { get; init; }
 }
 
 /// <summary>
@@ -341,6 +348,26 @@ public static partial class OfflineVerifier
                     bound.Add((Str(a, "policy_id") ?? "", a.GetProperty("version").GetRawText(), Str(a, "policy_digest") ?? ""));
             if (!expected.SequenceEqual(bound) || PolicySetDigest(bound) != Str(binding, "policy_set_digest"))
                 return Reject("policy_binding_mismatch");
+        }
+        if (options.ExpectedPolicyIds is { Count: > 0 } expectedIds && authorized)
+        {
+            if (!hasBinding) return Reject("policy_binding_missing");
+            var bound = new List<(string Id, string Version, string Digest)>();
+            if (binding.TryGetProperty("policies", out var applied) && applied.ValueKind == JsonValueKind.Array)
+                foreach (var a in applied.EnumerateArray())
+                    bound.Add((Str(a, "policy_id") ?? "", a.GetProperty("version").GetRawText(), Str(a, "policy_digest") ?? ""));
+            if (PolicySetDigest(bound) != Str(binding, "policy_set_digest"))
+                return Reject("policy_binding_mismatch");
+            var evaluations = binding.TryGetProperty("gate_evaluations", out var ge) && ge.ValueKind == JsonValueKind.Array
+                ? ge.EnumerateArray().ToList() : new List<JsonElement>();
+            foreach (var policyId in expectedIds)
+            {
+                var match = bound.FindIndex(b => b.Id == policyId);
+                if (match < 0 || !evaluations.Any(e => Str(e, "policy_id") == policyId
+                        && e.TryGetProperty("policy_version", out var v) && v.GetRawText() == bound[match].Version
+                        && Str(e, "mode") == "enforce"))
+                    return Reject("policy_binding_mismatch");
+            }
         }
 
         if (options.ExpectedAttestation is not null)

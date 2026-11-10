@@ -4478,6 +4478,7 @@
   },
   "health_status": {
     "boundary_policies": "healthy",
+    "boundary_policy_coverage": "optional",
     "boundary_policy_enforcement": "optional",
     "evidence_store": "on",
     "network": "contract-na",
@@ -4861,6 +4862,7 @@
         "version": 1
       }
     ],
+    "coverage": "optional",
     "enforcement": "optional",
     "policy_set_healthy": true,
     "problems": [],
