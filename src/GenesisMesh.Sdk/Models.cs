@@ -1661,6 +1661,10 @@ public sealed class ActivePolicyStatus
     [JsonPropertyName("enforcement")]
     public string Enforcement { get; set; } = "";
 
+    /// <summary><c>required</c> when the NA denies a request no active policy covers (<c>BOUNDARY_POLICY_COVERAGE</c>, 1.10.0); null from an older NA.</summary>
+    [JsonPropertyName("coverage")]
+    public string? Coverage { get; set; }
+
     /// <summary>False when an active policy fails verification: every policy-aware evaluation then denies.</summary>
     [JsonPropertyName("policy_set_healthy")]
     public bool PolicySetHealthy { get; set; }

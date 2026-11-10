@@ -4862,6 +4862,7 @@
         "version": 1
       }
     ],
+    "coverage": "optional",
     "enforcement": "optional",
     "policy_set_healthy": true,
     "problems": [],

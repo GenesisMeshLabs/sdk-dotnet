@@ -13,4 +13,5 @@
   `bd-011` to `bd-017` cover it. A 1.10.0 Network Authority can also deny
   such requests itself (`BOUNDARY_POLICY_COVERAGE=required`); the denial
   arrives as `unauthorized_policy_resolution_failed`, and
-  `NAHealth.BoundaryPolicyCoverage` carries the mode (null from an older NA).
+  `NAHealth.BoundaryPolicyCoverage` and `ActivePolicyStatus.Coverage` carry
+  the mode (null from an older NA).
