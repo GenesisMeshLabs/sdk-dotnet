@@ -67,10 +67,17 @@ public sealed class GovernedVerification
     public IReadOnlyList<string>? FreshnessProofIssuerKeys { get; init; }
 
     /// <summary>
-    /// The policies the decision must be bound to, as the NA signed them (<see cref="PolicyClient.Publish"/>). Required:
-    /// pass an empty list for a capability no policy selects.
+    /// The policies the decision must be bound to, as the NA signed them (<see cref="PolicyClient.Publish"/>). Required
+    /// unless <see cref="ExpectedPolicyIds"/> is set: pass an empty list for a capability no policy selects.
     /// </summary>
     public IReadOnlyList<BoundaryPolicy>? ExpectedPolicies { get; init; }
+
+    /// <summary>
+    /// 1.10.0: the policies an ALLOW must rest on, by ID, at whatever version the NA signed, in place of or with
+    /// <see cref="ExpectedPolicies"/> (<see cref="DecisionVerifyOptions.ExpectedPolicyIds"/>). When set, it must name
+    /// at least one policy.
+    /// </summary>
+    public IReadOnlyList<string>? ExpectedPolicyIds { get; init; }
 
     /// <summary>The attestation an authorized decision on <see cref="GovernedActionRequest.AttestationId"/> must be bound to. Required with it.</summary>
     public MembershipAttestation? ExpectedAttestation { get; init; }
@@ -757,8 +764,11 @@ public static partial class Governance
             throw new DecisionVerificationException("verification_keys_required");
         if (verify.OperatorPublicKeys.Count > 0 && verify.KeyHistory is not null)
             throw new ArgumentException("genesismesh: pass OperatorPublicKeys or KeyHistory, not both", nameof(request));
-        if (verify.ExpectedPolicies is null) throw new DecisionVerificationException("policy_expectations_required");
-        var policies = verify.ExpectedPolicies.Select(p => JsonSerializer.Serialize(p, Auth.SerializerOptions)).ToList();
+        if (verify.ExpectedPolicyIds is { } ids && (ids.Count == 0 || ids.Any(string.IsNullOrEmpty)))
+            throw new DecisionVerificationException("policy_expectations_required");
+        if (verify.ExpectedPolicies is null && verify.ExpectedPolicyIds is null)
+            throw new DecisionVerificationException("policy_expectations_required");
+        var policies = verify.ExpectedPolicies?.Select(p => JsonSerializer.Serialize(p, Auth.SerializerOptions)).ToList();
         var attestation = verify.ExpectedAttestation is { } a ? JsonSerializer.Serialize(a, Auth.SerializerOptions) : null;
 
         ct.ThrowIfCancellationRequested();
@@ -799,6 +809,7 @@ public static partial class Governance
                 KeyHistory = verify.KeyHistory,
                 FreshnessProofIssuerKeys = verify.FreshnessProofIssuerKeys,
                 ExpectedPolicies = policies,
+                ExpectedPolicyIds = verify.ExpectedPolicyIds,
                 ExpectedAttestation = attestation,
                 Now = DateTimeOffset.UtcNow,
             });
@@ -1354,6 +1365,7 @@ public static partial class Governance
                     OperatorPublicKeys = verify.OperatorPublicKeys,
                     KeyHistory = verify.KeyHistory,
                     FreshnessProofIssuerKeys = verify.FreshnessProofIssuerKeys,
+                    // 1.10.0: the ordinary capability's ExpectedPolicyIds do not govern the emergency capability.
                     ExpectedPolicies = emergency.ExpectedPolicies,
                     ExpectedAttestation = verify.ExpectedAttestation,
                 }

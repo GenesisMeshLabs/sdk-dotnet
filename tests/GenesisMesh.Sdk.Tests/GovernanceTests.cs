@@ -309,6 +309,88 @@ public class GovernanceTests
         Assert.Empty(x.Na.Submitted);
     }
 
+    // ── Expected policy IDs (1.10.0) ─────────────────────────────────────────
+
+    private static GovernedVerification ByIds(params string[] ids) => new()
+    {
+        OperatorPublicKeys = [NaKey],
+        ExpectedPolicyIds = ids,
+        ExpectedAttestation = Typed<MembershipAttestation>("attestation"),
+    };
+
+    /// <summary>The ALLOW an NA signs once the policy is deactivated: no policy, no gate evaluations.</summary>
+    private static void Uncovered(JsonObject decision)
+    {
+        var binding = decision["policy_binding"]!.AsObject();
+        binding["policies"] = new JsonArray();
+        binding["gate_evaluations"] = new JsonArray();
+        binding["registry_gate_types"] = new JsonArray();
+        binding["policy_set_digest"] = OfflineVerifier.PolicySetDigest([]);
+        var builtIn = decision["gate_results"]!.AsArray()
+            .Where(g => !((string)g!["gate_name"]!).Contains('/')).Select(g => g!.DeepClone()).ToArray();
+        decision["gate_results"] = new JsonArray(builtIn);
+        Sign(decision);
+    }
+
+    [Fact]
+    public async Task ExpectedPolicyIds_ActOnAnAllowUnderTheNamedPolicy_AtAnyVersion()
+    {
+        var x = new Setup();
+        var result = await x.Run(Setup.Request(verify: ByIds("vendor-sp-secret")));
+        Assert.True(result.Authorized);
+        Assert.Equal(1, x.Actions);
+    }
+
+    [Fact]
+    public async Task ExpectedPolicyIds_RefuseAnAllowOnceThePolicyNoLongerApplies()
+    {
+        var x = new Setup();
+        x.Na.Tamper = Uncovered;
+        var error = await Assert.ThrowsAsync<DecisionVerificationException>(() => x.Run(Setup.Request(verify: ByIds("vendor-sp-secret"))));
+        Assert.Equal("policy_binding_mismatch", error.Code);
+        Assert.Equal(0, x.Actions);
+        Assert.Empty(x.Na.Submitted);
+    }
+
+    [Fact]
+    public async Task ExpectedPolicyIds_RefuseAnAllowUnderAnotherPolicy_AndReportADenyAsItIs()
+    {
+        var x = new Setup();
+        var error = await Assert.ThrowsAsync<DecisionVerificationException>(() => x.Run(Setup.Request(verify: ByIds("internal-credentials"))));
+        Assert.Equal("policy_binding_mismatch", error.Code);
+        x.Na.Denied = true;
+        Assert.False((await x.Run(Setup.Request(verify: ByIds("internal-credentials")))).Authorized);
+        Assert.Equal(0, x.Actions);
+    }
+
+    [Fact]
+    public async Task ExpectedPolicyIds_MustNameAPolicy()
+    {
+        var x = new Setup();
+        foreach (var ids in new[] { Array.Empty<string>(), new[] { "" } })
+        {
+            var error = await Assert.ThrowsAsync<DecisionVerificationException>(() => x.Run(Setup.Request(verify: ByIds(ids))));
+            Assert.Equal("policy_expectations_required", error.Code);
+        }
+        Assert.Empty(x.Na.Evaluated);
+    }
+
+    [Fact]
+    public async Task ExpectedPolicyIds_AreCheckedWithTheSignedPolicies()
+    {
+        var x = new Setup();
+        var verify = new GovernedVerification
+        {
+            OperatorPublicKeys = [NaKey],
+            ExpectedPolicies = [Typed<BoundaryPolicy>("policy")],
+            ExpectedPolicyIds = ["internal-credentials"],
+            ExpectedAttestation = Typed<MembershipAttestation>("attestation"),
+        };
+        var error = await Assert.ThrowsAsync<DecisionVerificationException>(() => x.Run(Setup.Request(verify: verify)));
+        Assert.Equal("policy_binding_mismatch", error.Code);
+        Assert.Equal(0, x.Actions);
+    }
+
     [Fact]
     public async Task RequiresTheExpectedAttestation_ForAnAllowOnAnAttestation()
     {
