@@ -1663,6 +1663,7 @@ public sealed class ActivePolicyStatus
 
     /// <summary><c>required</c> when the NA denies a request no active policy covers (<c>BOUNDARY_POLICY_COVERAGE</c>, 1.10.0); null from an older NA.</summary>
     [JsonPropertyName("coverage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Coverage { get; set; }
 
     /// <summary>False when an active policy fails verification: every policy-aware evaluation then denies.</summary>
@@ -1942,6 +1943,7 @@ public sealed class NAHealth
 
     /// <summary><c>required</c> when the NA denies a request no active policy covers (<c>BOUNDARY_POLICY_COVERAGE</c>, 1.10.0); null from an older NA.</summary>
     [JsonPropertyName("boundary_policy_coverage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? BoundaryPolicyCoverage { get; set; }
 
     /// <summary>The evidence store's mode, such as <c>on</c> or <c>off</c>.</summary>
