@@ -1936,6 +1936,10 @@ public sealed class NAHealth
     [JsonPropertyName("boundary_policy_enforcement")]
     public string BoundaryPolicyEnforcement { get; set; } = "";
 
+    /// <summary><c>required</c> when the NA denies a request no active policy covers (<c>BOUNDARY_POLICY_COVERAGE</c>, 1.10.0); null from an older NA.</summary>
+    [JsonPropertyName("boundary_policy_coverage")]
+    public string? BoundaryPolicyCoverage { get; set; }
+
     /// <summary>The evidence store's mode, such as <c>on</c> or <c>off</c>.</summary>
     [JsonPropertyName("evidence_store")]
     public string EvidenceStore { get; set; } = "";
